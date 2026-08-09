@@ -7,7 +7,7 @@
 //! # What an architecture profile is for
 //!
 //! Three sources can supply a profile, in falling priority: an
-//! `ARBI_TUNING_PROFILE` path, a committed `src/int/tuned_thresholds.rs` from
+//! `MP_TUNING_PROFILE` path, a committed `src/int/tuned_thresholds.rs` from
 //! the autotuner, and finally the architecture profiles below. **The
 //! architecture profiles are defaults for hosts that have never been tuned**,
 //! so they are chosen to be safe across a whole architecture rather than

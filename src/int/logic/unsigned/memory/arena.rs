@@ -99,7 +99,7 @@ impl BucketSlot {
     }
 }
 
-#[cfg(all(feature = "std", arbi_eager_thread_local))]
+#[cfg(all(feature = "std", mp_eager_thread_local))]
 thread_local! {
     /// Bucketed thread-local arena. Each bucket holds up to MAX_PER_BUCKET
     /// buffers, avoiding the O(n) linear scan in the hot path.
@@ -110,7 +110,7 @@ thread_local! {
 
 // Rust cannot use eager const TLS when the target exposes only OS TLS keys.
 // The necessarily lazy backend starts from the same empty fixed-size bucket.
-#[cfg(all(feature = "std", not(arbi_eager_thread_local)))]
+#[cfg(all(feature = "std", not(mp_eager_thread_local)))]
 thread_local! {
     /// Bucketed thread-local arena for targets without native TLS storage.
     static THREAD_SCRATCH_ARENA: RefCell<[BucketSlot; BUCKET_COUNT]> =

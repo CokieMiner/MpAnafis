@@ -2,7 +2,7 @@
 
 use proptest::prelude::*;
 
-use super::{ArbiUint, InternalArbiUint, Precision, exact_limb_vec};
+use super::{InternalMpUint, MpUint, Precision, exact_limb_vec};
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(12))]
@@ -16,12 +16,12 @@ proptest! {
             (Just(128_usize), exact_limb_vec(128), exact_limb_vec(128)),
         ],
     ) {
-        let left_value = ArbiUint {
-            value: InternalArbiUint::from_limbs(limbs_a),
+        let left_value = MpUint {
+            value: InternalMpUint::from_limbs(limbs_a),
             precision: Precision::Unlimited,
         };
-        let right_value = ArbiUint {
-            value: InternalArbiUint::from_limbs(limbs_b),
+        let right_value = MpUint {
+            value: InternalMpUint::from_limbs(limbs_b),
             precision: Precision::Unlimited,
         };
         prop_assume!(!left_value.value.is_zero());
@@ -52,12 +52,12 @@ proptest! {
         limbs_a in exact_limb_vec(10_240),
         limbs_b in exact_limb_vec(10_240),
     ) {
-        let left_value = ArbiUint {
-            value: InternalArbiUint::from_limbs(limbs_a),
+        let left_value = MpUint {
+            value: InternalMpUint::from_limbs(limbs_a),
             precision: Precision::Unlimited,
         };
-        let right_value = ArbiUint {
-            value: InternalArbiUint::from_limbs(limbs_b),
+        let right_value = MpUint {
+            value: InternalMpUint::from_limbs(limbs_b),
             precision: Precision::Unlimited,
         };
         prop_assume!(!left_value.value.is_zero());

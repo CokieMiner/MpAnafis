@@ -423,7 +423,7 @@ def collect() -> tuple[
             )
 
     namespace_spreads: list[NamespaceSpreadReview] = []
-    spread_exceptions = {"ArchKernels", "InternalArbiUint", "InternalPrecisionContext", "Tuner"}
+    spread_exceptions = {"ArchKernels", "InternalMpUint", "InternalPrecisionContext", "Tuner"}
     namespace_counts = Counter(name for _path, name, _line in namespaces)
     for path, name, line in namespaces:
         if name in spread_exceptions or namespace_counts[name] != 1:

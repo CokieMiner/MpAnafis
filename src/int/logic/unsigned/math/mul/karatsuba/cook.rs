@@ -25,7 +25,7 @@ impl Karatsuba {
     /// Computes the product of two limb slices using Karatsuba multiplication.
     ///
     /// `dst` must have at least `a.len() + b.len()` elements. `scratch` must have
-    /// at least [`mul_scratch_len`] elements for the operand lengths.
+    /// at least [`Multiplication::karatsuba_mul_scratch_len`] elements for the operand lengths.
     pub fn mul(dst: &mut [Limb], a: &[Limb], b: &[Limb], scratch: &mut [Limb]) {
         if a.is_empty() || b.is_empty() {
             return;

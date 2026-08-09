@@ -1,9 +1,9 @@
-//! Modular arithmetic for [`InternalArbiUint`].
+//! Modular arithmetic for [`InternalMpUint`].
 
 use core::{cmp::Ordering, mem::replace};
 
 use super::{
-    BarrettDomain, BarrettScratch, DivScratch, Division, InternalArbiUint, MontgomeryDomain,
+    BarrettDomain, BarrettScratch, DivScratch, Division, InternalMpUint, MontgomeryDomain,
     MulScratch,
 };
 
@@ -13,31 +13,31 @@ pub struct MontgomeryModDomain {
     domain: MontgomeryDomain,
     div_scratch: DivScratch,
     mul_scratch: MulScratch,
-    temp_prod: InternalArbiUint,
-    reduced_a: InternalArbiUint,
-    reduced_b: InternalArbiUint,
+    temp_prod: InternalMpUint,
+    reduced_a: InternalMpUint,
+    reduced_b: InternalMpUint,
 }
 
 impl MontgomeryModDomain {
     /// Creates a reusable Montgomery domain.
     #[must_use]
-    pub fn new(modulus: &InternalArbiUint) -> Self {
+    pub fn new(modulus: &InternalMpUint) -> Self {
         Self {
             domain: MontgomeryDomain::new(modulus),
             div_scratch: DivScratch::default(),
             mul_scratch: MulScratch::default(),
-            temp_prod: InternalArbiUint::zero(),
-            reduced_a: InternalArbiUint::zero(),
-            reduced_b: InternalArbiUint::zero(),
+            temp_prod: InternalMpUint::zero(),
+            reduced_a: InternalMpUint::zero(),
+            reduced_b: InternalMpUint::zero(),
         }
     }
 
     /// Performs Montgomery multiplication `(a * b * R^-1) mod modulus`.
     ///
     /// Inputs greater than or equal to the modulus are reduced before the
-    /// Montgomery product, matching [`InternalArbiUint::montgomery_mul`].
+    /// Montgomery product, matching [`InternalMpUint::montgomery_mul`].
     #[must_use]
-    pub fn mul(&mut self, a: &InternalArbiUint, b: &InternalArbiUint) -> InternalArbiUint {
+    pub fn mul(&mut self, a: &InternalMpUint, b: &InternalMpUint) -> InternalMpUint {
         let op_a = reduce_operand_for_domain(
             a,
             &self.domain.modulus,
@@ -50,7 +50,7 @@ impl MontgomeryModDomain {
             &mut self.reduced_b,
             &mut self.div_scratch,
         );
-        let mut out = InternalArbiUint::zero();
+        let mut out = InternalMpUint::zero();
         self.domain.mul_into_with_scratch(
             op_a,
             op_b,
@@ -73,7 +73,7 @@ pub struct BarrettModDomain {
 impl BarrettModDomain {
     /// Creates a reusable Barrett domain.
     #[must_use]
-    pub fn new(modulus: &InternalArbiUint) -> Self {
+    pub fn new(modulus: &InternalMpUint) -> Self {
         Self {
             domain: BarrettDomain::new(modulus),
             mul_scratch: MulScratch::default(),
@@ -82,7 +82,7 @@ impl BarrettModDomain {
     }
 
     /// Reduces `value` modulo this domain's modulus.
-    pub fn reduce_into(&mut self, value: &InternalArbiUint, out: &mut InternalArbiUint) {
+    pub fn reduce_into(&mut self, value: &InternalMpUint, out: &mut InternalMpUint) {
         self.domain.reduce_into_with_barrett_scratch(
             value,
             out,
@@ -92,7 +92,7 @@ impl BarrettModDomain {
     }
 }
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Computes `(self + other) % modulus`.
     #[must_use]
     pub fn add_mod(&self, other: &Self, modulus: &Self) -> Self {
@@ -305,15 +305,15 @@ impl InternalArbiUint {
 }
 
 fn reduce_operand_for_domain<'operand>(
-    value: &'operand InternalArbiUint,
-    modulus: &InternalArbiUint,
-    reduced: &'operand mut InternalArbiUint,
+    value: &'operand InternalMpUint,
+    modulus: &InternalMpUint,
+    reduced: &'operand mut InternalMpUint,
     scratch: &mut DivScratch,
-) -> &'operand InternalArbiUint {
+) -> &'operand InternalMpUint {
     if value < modulus {
         return value;
     }
-    let mut rem = replace(reduced, InternalArbiUint::zero());
+    let mut rem = replace(reduced, InternalMpUint::zero());
     Division::rem_into(value, modulus, &mut rem, scratch);
     *reduced = rem;
     reduced

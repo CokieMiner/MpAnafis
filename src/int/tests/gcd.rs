@@ -13,12 +13,12 @@ proptest! {
         } else {
             prop_assert_eq!(
                 a.value.div_rem(&g).1,
-                InternalArbiUint::zero(),
+                InternalMpUint::zero(),
                 "gcd does not divide a"
             );
             prop_assert_eq!(
                 b.value.div_rem(&g).1,
-                InternalArbiUint::zero(),
+                InternalMpUint::zero(),
                 "gcd does not divide b"
             );
         }
@@ -35,8 +35,8 @@ proptest! {
             exact_limb_vec(limb_count),
         )),
     ) {
-        let left = InternalArbiUint::from_limbs(left_limbs);
-        let right = InternalArbiUint::from_limbs(right_limbs);
+        let left = InternalMpUint::from_limbs(left_limbs);
+        let right = InternalMpUint::from_limbs(right_limbs);
         let actual = left.gcd(&right);
 
         let mut expected = left;
@@ -58,11 +58,11 @@ proptest! {
         left_seed in strategies::bounded_uint_wrapped(64),
         right_seed in strategies::bounded_uint_wrapped(64),
     ) {
-        let left = ArbiUint {
+        let left = MpUint {
             value: left_seed.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };
-        let right = ArbiUint {
+        let right = MpUint {
             value: right_seed.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };
@@ -104,11 +104,11 @@ proptest! {
         left_seed in strategies::bounded_int_wrapped(64),
         right_seed in strategies::bounded_int_wrapped(64),
     ) {
-        let left = ArbiInt {
+        let left = MpInt {
             value: left_seed.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };
-        let right = ArbiInt {
+        let right = MpInt {
             value: right_seed.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };
@@ -146,8 +146,8 @@ proptest! {
             prop_assert_eq!(&gcd_exact * &lcm_exact, absolute_product);
         }
 
-        let minimum = ArbiInt::min_for_precision(bits);
-        let zero = ArbiInt::zero_with_precision(nz(bits));
+        let minimum = MpInt::min_for_precision(bits);
+        let zero = MpInt::zero_with_precision(nz(bits));
         let gcd_panicked = catch_unwind(AssertUnwindSafe(|| {
             drop(minimum.gcd(&zero));
         }))
@@ -178,11 +178,11 @@ proptest! {
     #[test]
     fn prop_gcd_zero(a in strategies::uint(12)) {
         let v = &a.value;
-        prop_assert_eq!(v.gcd(&InternalArbiUint::zero()), v.clone(), "gcd(a, 0) != a");
-        prop_assert_eq!(InternalArbiUint::zero().gcd(v), v.clone(), "gcd(0, a) != a");
+        prop_assert_eq!(v.gcd(&InternalMpUint::zero()), v.clone(), "gcd(a, 0) != a");
+        prop_assert_eq!(InternalMpUint::zero().gcd(v), v.clone(), "gcd(0, a) != a");
         prop_assert_eq!(
-            InternalArbiUint::zero().gcd(&InternalArbiUint::zero()),
-            InternalArbiUint::zero()
+            InternalMpUint::zero().gcd(&InternalMpUint::zero()),
+            InternalMpUint::zero()
         );
     }
 }
@@ -194,12 +194,12 @@ proptest! {
             let (g, _, _) = a.value.extended_gcd(&b.value);
             prop_assert_eq!(
                 a.value.div_rem(&g).1,
-                InternalArbiUint::zero(),
+                InternalMpUint::zero(),
                 "gcd must divide a"
             );
             prop_assert_eq!(
                 b.value.div_rem(&g).1,
-                InternalArbiUint::zero(),
+                InternalMpUint::zero(),
                 "gcd must divide b"
             );
         }
@@ -212,7 +212,7 @@ proptest! {
         if !val_a.is_zero() && !val_b.is_zero() {
             if let Some(l) = val_a.lcm(&val_b) {
                 let g = val_a.value.gcd(&val_b.value);
-                let gcd_val = ArbiUint { value: g, precision: val_a.precision };
+                let gcd_val = MpUint { value: g, precision: val_a.precision };
                 let product = &val_a * &val_b;
                 let lcm_gcd_product = &l * &gcd_val;
                 prop_assert_eq!(product, lcm_gcd_product, "lcm * gcd != val_a * val_b");
@@ -235,16 +235,16 @@ proptest! {
     #[test]
     fn prop_gcd_and_abs_diff(u1 in strategies::uint(8), u2 in strategies::uint(8), i1_val in -1000_i64..=1000_i64, i2_val in -1000_i64..=1000_i64) {
         let u1_clone = u1.clone(); let u2_clone = u2.clone();
-        prop_assert_eq!(u1.gcd(&u2), u1.gcd_lcm(&u2).map_or_else(ArbiUint::zero, |(g, _)| g));
+        prop_assert_eq!(u1.gcd(&u2), u1.gcd_lcm(&u2).map_or_else(MpUint::zero, |(g, _)| g));
         let u_diff = if u1_clone >= u2_clone { &u1_clone - &u2_clone } else { &u2_clone - &u1_clone };
         prop_assert_eq!(u1.abs_diff(&u2), u_diff);
 
-        let i1 = ArbiInt::from(i1_val); let i2 = ArbiInt::from(i2_val);
-        prop_assert_eq!(i1.gcd(&i2), i1.gcd_lcm(&i2).map_or_else(ArbiInt::zero, |(g, _)| g));
+        let i1 = MpInt::from(i1_val); let i2 = MpInt::from(i2_val);
+        prop_assert_eq!(i1.gcd(&i2), i1.gcd_lcm(&i2).map_or_else(MpInt::zero, |(g, _)| g));
         let abs1 = i1.abs(); let abs2 = i2.abs();
         let expected_diff = if i1.is_negative() == i2.is_negative() {
             if abs1 >= abs2 { &abs1 - &abs2 } else { &abs2 - &abs1 }
         } else { &abs1 + &abs2 };
-        prop_assert_eq!(ArbiInt::from(i1.abs_diff(&i2)), expected_diff);
+        prop_assert_eq!(MpInt::from(i1.abs_diff(&i2)), expected_diff);
     }
 }

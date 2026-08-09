@@ -160,7 +160,7 @@ impl Recursive {
 
     /// Square one guarded evaluation.
     ///
-    /// The squaring specialization of [`guarded_evaluation_product`]: the two cross
+    /// The squaring specialization of [`Self::guarded_evaluation_product`]: the two cross
     /// terms coincide, so one scalar product at twice the guard replaces both.
     #[allow(
         unsafe_code,

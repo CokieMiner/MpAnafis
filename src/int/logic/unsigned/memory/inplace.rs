@@ -9,8 +9,8 @@ use core::{hint::unreachable_unchecked, mem::swap, ptr::copy_nonoverlapping};
 
 use alloc::vec::Vec;
 
-use super::{INLINE_LIMBS, InternalArbiUint, Limb, UintRepr};
-impl InternalArbiUint {
+use super::{INLINE_LIMBS, InternalMpUint, Limb, UintRepr};
+impl InternalMpUint {
     /// In-place exchange of values without reallocation.
     /// Relies purely on native `core::mem::swap` for a zero-cost pointer swap.
     #[inline]
@@ -246,7 +246,7 @@ impl InternalArbiUint {
     }
 }
 
-impl Clone for InternalArbiUint {
+impl Clone for InternalMpUint {
     #[inline]
     fn clone(&self) -> Self {
         Self {

@@ -15,9 +15,9 @@ fn shl_word_shift_zeroes_low_limbs() {
     // `LIMB_BITS - 1` is always a valid shift amount.
     const SHIFT: usize = 2 * LIMB_BITS + 1;
     let hi = 1_usize << (LIMB_BITS - 1);
-    let a = InternalArbiUint::from_limbs(vec![0, hi]);
+    let a = InternalMpUint::from_limbs(vec![0, hi]);
     let shifted = a.shl(SHIFT);
-    let expected = InternalArbiUint::from_limbs(vec![0, 0, 0, 0, 1]);
+    let expected = InternalMpUint::from_limbs(vec![0, 0, 0, 0, 1]);
     assert_eq!(shifted, expected);
 }
 
@@ -27,7 +27,7 @@ proptest! {
         limbs_a in proptest::collection::vec(any::<Limb>(), 1..=8),
         shift in 1_usize..=LIMB_BITS.saturating_mul(5),
     ) {
-        let a = InternalArbiUint::from_limbs(limbs_a);
+        let a = InternalMpUint::from_limbs(limbs_a);
         let mut reference = a.clone();
         reference.shl_assign(shift);
         prop_assert_eq!(a.shl(shift), reference);
@@ -46,7 +46,7 @@ proptest! {
         limbs_a in proptest::collection::vec(any::<Limb>(), 1..=8),
         shift in 1_usize..=LIMB_BITS.saturating_mul(5),
     ) {
-        let a = InternalArbiUint::from_limbs(limbs_a);
+        let a = InternalMpUint::from_limbs(limbs_a);
         let mut reference = a.clone();
         reference.shr_assign(shift);
         prop_assert_eq!(a.shr(shift), reference);

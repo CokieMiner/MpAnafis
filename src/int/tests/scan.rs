@@ -10,7 +10,7 @@ use core::ops::*;
 use proptest::prelude::*;
 
 use super::strategies;
-use crate::int::api::ArbiUint;
+use crate::int::api::MpUint;
 
 proptest! {
     #[test]
@@ -36,7 +36,7 @@ proptest! {
         a in strategies::uint(32),
         trailing_ones_count in 0_usize..=60,
     ) {
-        let mask = ArbiUint::one().shl(trailing_ones_count) - ArbiUint::one();
+        let mask = MpUint::one().shl(trailing_ones_count) - MpUint::one();
         let masked = BitOr::bitor(a, mask);
 
         if !masked.value.is_zero() && trailing_ones_count > 0 {
@@ -56,7 +56,7 @@ proptest! {
             prop_assert_eq!(a.find_first_set_bit(), None);
             prop_assert_eq!(a.count_ones(), 0);
         }
-        if a == ArbiUint::one() {
+        if a == MpUint::one() {
             prop_assert_eq!(a.trailing_zeros(), 0);
             prop_assert_eq!(a.trailing_ones(), 1);
             prop_assert_eq!(a.find_first_set_bit(), Some(0));

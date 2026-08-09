@@ -20,7 +20,7 @@ use rug::Integer;
 use crate::int::support::{rug_int, rug_int_pairs};
 use crate::int::{
     ladders::NARROW,
-    support::{SAMPLE_SIZE_FAST, arbi_int, arbi_int_pairs},
+    support::{SAMPLE_SIZE_FAST, mp_int, mp_int_pairs},
 };
 
 /// Shift counts spanning sub-limb and cross-limb distances.
@@ -30,8 +30,8 @@ mod bitand {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_int_pairs(bits, true, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_int_pairs(bits, true, true);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(BitAnd::bitand(black_box(left), black_box(right)));
@@ -58,8 +58,8 @@ mod bitor {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_int_pairs(bits, true, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_int_pairs(bits, true, true);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(BitOr::bitor(black_box(left), black_box(right)));
@@ -86,8 +86,8 @@ mod bitxor {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_int_pairs(bits, true, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_int_pairs(bits, true, true);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(BitXor::bitxor(black_box(left), black_box(right)));
@@ -114,8 +114,8 @@ mod shl {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_int(bits, 42, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_int(bits, 42, true);
         bencher.bench_local(|| {
             for shift in SHIFTS {
                 let _output = black_box(Shl::shl(black_box(&value), black_box(shift)));
@@ -143,8 +143,8 @@ mod shr {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_int(bits, 42, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_int(bits, 42, true);
         bencher.bench_local(|| {
             for shift in SHIFTS {
                 let _output = black_box(Shr::shr(black_box(&value), black_box(shift)));
@@ -172,8 +172,8 @@ mod count_ones {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_int(bits, 42, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_int(bits, 42, true);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).count_ones());
         });
@@ -193,8 +193,8 @@ mod trailing_zeros {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_int(bits, 42, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_int(bits, 42, true);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).trailing_zeros());
         });
@@ -214,8 +214,8 @@ mod significant_bits {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_int(bits, 42, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_int(bits, 42, true);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).significant_bits());
         });

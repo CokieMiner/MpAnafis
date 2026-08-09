@@ -48,7 +48,7 @@ impl Lopsided {
 
     /// Multiply a highly unbalanced pair with a benchmark-forced full-block width.
     ///
-    /// Production calls this with [`lopsided_block_len`]. The tuning facade may
+    /// Production calls this with [`Self::block_len`]. The tuning facade may
     /// supply another nonzero width to compare complete algorithms rather than
     /// extrapolating isolated block timings.
     pub fn mul_forced(

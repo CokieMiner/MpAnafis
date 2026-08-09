@@ -4,11 +4,11 @@
 
 use ::num_traits::{FromPrimitive, Num, One, Signed, ToPrimitive, Unsigned, Zero};
 
-use crate::error::{ParseArbiIntError, ParseArbiUintError};
+use crate::error::{ParseMpIntError, ParseMpUintError};
 
-use super::{ArbiInt, ArbiUint};
+use super::{MpInt, MpUint};
 
-impl Zero for ArbiUint {
+impl Zero for MpUint {
     fn zero() -> Self {
         Self::zero()
     }
@@ -17,7 +17,7 @@ impl Zero for ArbiUint {
     }
 }
 
-impl Zero for ArbiInt {
+impl Zero for MpInt {
     fn zero() -> Self {
         Self::zero()
     }
@@ -26,7 +26,7 @@ impl Zero for ArbiInt {
     }
 }
 
-impl One for ArbiUint {
+impl One for MpUint {
     fn one() -> Self {
         Self::one()
     }
@@ -35,7 +35,7 @@ impl One for ArbiUint {
     }
 }
 
-impl One for ArbiInt {
+impl One for MpInt {
     fn one() -> Self {
         Self::one()
     }
@@ -44,23 +44,23 @@ impl One for ArbiInt {
     }
 }
 
-impl Num for ArbiUint {
-    type FromStrRadixErr = ParseArbiUintError;
+impl Num for MpUint {
+    type FromStrRadixErr = ParseMpUintError;
     fn from_str_radix(str: &str, radix: u32) -> Result<Self, Self::FromStrRadixErr> {
         Self::from_str_radix(str, radix)
     }
 }
 
-impl Num for ArbiInt {
-    type FromStrRadixErr = ParseArbiIntError;
+impl Num for MpInt {
+    type FromStrRadixErr = ParseMpIntError;
     fn from_str_radix(str: &str, radix: u32) -> Result<Self, Self::FromStrRadixErr> {
         Self::from_str_radix(str, radix)
     }
 }
 
-impl Unsigned for ArbiUint {}
+impl Unsigned for MpUint {}
 
-impl Signed for ArbiInt {
+impl Signed for MpInt {
     fn abs(&self) -> Self {
         self.abs()
     }
@@ -78,7 +78,7 @@ impl Signed for ArbiInt {
     }
 }
 
-impl ToPrimitive for ArbiUint {
+impl ToPrimitive for MpUint {
     fn to_u64(&self) -> Option<u64> {
         self.to_u64()
     }
@@ -105,7 +105,7 @@ impl ToPrimitive for ArbiUint {
     }
 }
 
-impl ToPrimitive for ArbiInt {
+impl ToPrimitive for MpInt {
     #[inline]
     fn to_i64(&self) -> Option<i64> {
         self.to_i64()
@@ -140,7 +140,7 @@ impl ToPrimitive for ArbiInt {
     }
 }
 
-impl FromPrimitive for ArbiUint {
+impl FromPrimitive for MpUint {
     #[inline]
     fn from_u64(n: u64) -> Option<Self> {
         Some(Self::from(n))
@@ -167,7 +167,7 @@ impl FromPrimitive for ArbiUint {
     }
 }
 
-impl FromPrimitive for ArbiInt {
+impl FromPrimitive for MpInt {
     #[inline]
     fn from_i64(n: i64) -> Option<Self> {
         Some(Self::from(n))

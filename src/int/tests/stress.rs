@@ -15,12 +15,12 @@ proptest! {
             .iter()
             .map(|limb| limb >> 1)
             .collect::<Vec<_>>();
-        let left_value = ArbiUint {
-            value: InternalArbiUint::from_limbs(limbs_a_seed),
+        let left_value = MpUint {
+            value: InternalMpUint::from_limbs(limbs_a_seed),
             precision: Precision::Unlimited,
         };
-        let right_value = ArbiUint {
-            value: InternalArbiUint::from_limbs(limbs_b),
+        let right_value = MpUint {
+            value: InternalMpUint::from_limbs(limbs_b),
             precision: Precision::Unlimited,
         };
         let sum = &left_value + &right_value;
@@ -36,27 +36,27 @@ proptest! {
         ],
         factor in 2_u64..=1_000_000_u64,
     ) {
-        let base_value = ArbiUint {
-            value: InternalArbiUint::from_limbs(limbs_seed),
+        let base_value = MpUint {
+            value: InternalMpUint::from_limbs(limbs_seed),
             precision: Precision::Unlimited,
         };
-        let factor_a = ArbiUint::from(factor);
+        let factor_a = MpUint::from(factor);
         let value_a = &base_value * &factor_a;
-        let factor_b = ArbiUint::from(factor.wrapping_mul(3).wrapping_add(7));
+        let factor_b = MpUint::from(factor.wrapping_mul(3).wrapping_add(7));
         let value_b = &base_value * &factor_b;
         let gcd_value = value_a.value.gcd(&value_b.value);
         prop_assert_eq!(
             value_a
                 .value
                 .rem(&gcd_value),
-            InternalArbiUint::zero(),
+            InternalMpUint::zero(),
             "gcd must divide a"
         );
         prop_assert_eq!(
             value_b
                 .value
                 .rem(&gcd_value),
-            InternalArbiUint::zero(),
+            InternalMpUint::zero(),
             "gcd must divide b"
         );
     }
@@ -73,14 +73,14 @@ proptest! {
         if let Some(last_limb) = limbs.last_mut() {
             *last_limb >>= 1;
         }
-        let value = ArbiUint {
-            value: InternalArbiUint::from_limbs(limbs),
+        let value = MpUint {
+            value: InternalMpUint::from_limbs(limbs),
             precision: Precision::Unlimited,
         };
         let root = value.isqrt().expect("isqrt should succeed");
         let root_sq = &root * &root;
         prop_assert!(root_sq <= value, "isqrt^2 > a at {} limbs", limb_count);
-        let next_root = &root + &ArbiUint::one();
+        let next_root = &root + &MpUint::one();
         let next_sq = &next_root * &next_root;
         prop_assert!(value <= next_sq, "isqrt too small at {} limbs", limb_count);
     }
@@ -90,14 +90,14 @@ proptest! {
     #[test]
     fn stress_allocation_inline_heap_boundary(extra_bits in 0_usize..=64) {
         let target_bits = 260_usize.wrapping_add(extra_bits);
-        let mut value = ArbiUint::one();
+        let mut value = MpUint::one();
         for _ in 0..target_bits {
-            value = &value * &ArbiUint::from(2_u32);
+            value = &value * &MpUint::from(2_u32);
         }
         prop_assert_eq!(value.precision, Precision::Unlimited);
         prop_assert!(value.value.significant_bits() >= target_bits);
         let decimal = value.to_string();
-        let roundtrip: ArbiUint = decimal.parse().expect("roundtrip");
+        let roundtrip: MpUint = decimal.parse().expect("roundtrip");
         prop_assert_eq!(
             roundtrip,
             value,

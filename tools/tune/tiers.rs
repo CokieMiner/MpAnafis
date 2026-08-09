@@ -14,7 +14,7 @@
 
 use core::cmp::max;
 
-use arbi_anafis::tune_api::{formatting, multiplication, squaring};
+use mp_anafis::tune_api::{formatting, multiplication, squaring};
 
 use crate::{crossovers, harness::CandidateHarness, tuning_profile::TuningProfile};
 

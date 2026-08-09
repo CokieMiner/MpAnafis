@@ -1,6 +1,6 @@
 //! Public integer types and their API-facing trait implementations.
 
-use super::{InternalArbiInt, InternalArbiUint, InternalPrecisionContext};
+use super::{InternalMpInt, InternalMpUint, InternalPrecisionContext};
 mod cmp;
 mod convert;
 mod iter;
@@ -17,4 +17,4 @@ mod int;
 mod uint;
 
 pub use precision::{AmbientPrecision, BoundedPrecision, Precision, PrecisionContext};
-pub use types::{ArbiInt, ArbiUint, DebugVerbose};
+pub use types::{DebugVerbose, MpInt, MpUint};

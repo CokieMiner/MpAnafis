@@ -1,8 +1,8 @@
 //! Modular arithmetic and reduction APIs for unsigned integers.
 
-use super::ArbiUint;
+use super::MpUint;
 
-impl ArbiUint {
+impl MpUint {
     /// Returns `(self + other) % modulus`, or `None` if the modulus is zero.
     #[must_use]
     pub fn add_mod(&self, other: &Self, modulus: &Self) -> Option<Self> {

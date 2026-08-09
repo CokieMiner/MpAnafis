@@ -14,7 +14,7 @@ use core::{
 
 use super::{
     ArchKernels, BURNIKEL_ZIEGLER_BLOCK_LIMBS, BURNIKEL_ZIEGLER_THRESHOLD, DivScratch, Division,
-    InternalArbiUint, Limb, Multiplication, NEWTON_RAPHSON_THRESHOLD, ScratchBuffer,
+    InternalMpUint, Limb, Multiplication, NEWTON_RAPHSON_THRESHOLD, ScratchBuffer,
 };
 
 impl Division {
@@ -25,10 +25,10 @@ impl Division {
         reason = "Burnikel-Ziegler recursive division is long; non-performance lint."
     )]
     pub fn burnikel_ziegler(
-        num_a: &InternalArbiUint,
-        den_b: &InternalArbiUint,
-        quotient_out: &mut InternalArbiUint,
-        rem_out: &mut InternalArbiUint,
+        num_a: &InternalMpUint,
+        den_b: &InternalMpUint,
+        quotient_out: &mut InternalMpUint,
+        rem_out: &mut InternalMpUint,
         scratch: &mut DivScratch,
     ) {
         let v_limbs = Self::significant_limbs(den_b.limbs());
@@ -37,7 +37,7 @@ impl Division {
 
         if u_limbs.len() < v_limbs.len()
             || (u_limbs.len() == v_limbs.len()
-                && InternalArbiUint::cmp_limbs(u_limbs, v_limbs) == Ordering::Less)
+                && InternalMpUint::cmp_limbs(u_limbs, v_limbs) == Ordering::Less)
         {
             quotient_out.clear();
             rem_out.clone_from(num_a);
@@ -79,7 +79,7 @@ impl Division {
                 // `len == 3 * (n / 2)`, so the window is inside `u_norm`.
                 let u_upper = unsafe { scratch.u_norm.get_unchecked(n.wrapping_div(2)..len) };
                 // SAFETY: `v_norm` holds exactly the `n` normalized divisor limbs.
-                InternalArbiUint::cmp_limbs(u_upper, scratch.v_norm.as_slice()) == Ordering::Less
+                InternalMpUint::cmp_limbs(u_upper, scratch.v_norm.as_slice()) == Ordering::Less
             });
         if let Some(normalized_3n2_len) = direct_3n2_len {
             let v_norm = replace(&mut scratch.v_norm, ScratchBuffer::acquire(0));
@@ -155,7 +155,7 @@ impl Division {
             // SAFETY: `direct_len == 2 * n`; the upper half is exactly one
             // normalized divisor wide.
             let upper = unsafe { u_norm.get_unchecked_mut(n..normalized_2n_len) };
-            let q_top: Limb = if InternalArbiUint::cmp_limbs(upper, &v_norm) == Ordering::Less {
+            let q_top: Limb = if InternalMpUint::cmp_limbs(upper, &v_norm) == Ordering::Less {
                 0
             } else {
                 let borrow = Self::sub_limbs_in_place(upper, &v_norm);
@@ -340,7 +340,7 @@ fn bz_div_3n2n(
     // SAFETY: caller guarantees a21 has length 2m and m < 2m
     let a1 = unsafe { a21.get_unchecked(0..m) };
 
-    let r1_c = if InternalArbiUint::cmp_limbs(a2, b1) == Ordering::Equal {
+    let r1_c = if InternalMpUint::cmp_limbs(a2, b1) == Ordering::Equal {
         for x in q_out.iter_mut() {
             *x = Limb::MAX;
         }
@@ -415,10 +415,10 @@ fn bz_div_2n1n(
         return;
     }
     if m_len <= BURNIKEL_ZIEGLER_THRESHOLD || !m_len.is_multiple_of(2) {
-        let mut n_a = replace(&mut scratch.dummy_u, InternalArbiUint::zero());
-        let mut n_b = replace(&mut scratch.dummy_rem, InternalArbiUint::zero());
-        let mut n_q = replace(&mut scratch.dummy_quot, InternalArbiUint::zero());
-        let mut n_r = replace(&mut scratch.mod_rem, InternalArbiUint::zero());
+        let mut n_a = replace(&mut scratch.dummy_u, InternalMpUint::zero());
+        let mut n_b = replace(&mut scratch.dummy_rem, InternalMpUint::zero());
+        let mut n_q = replace(&mut scratch.dummy_quot, InternalMpUint::zero());
+        let mut n_r = replace(&mut scratch.mod_rem, InternalMpUint::zero());
         n_a.clone_from_slice(num);
         n_b.clone_from_slice(den);
         Division::algorithm_d(&n_a, &n_b, &mut n_q, &mut n_r, scratch);

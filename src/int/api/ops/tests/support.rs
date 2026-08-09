@@ -1,15 +1,15 @@
 //! Shared constructors and bounds for operator properties.
 
-use super::{ArbiInt, ArbiUint, BoundedPrecision};
+use super::{BoundedPrecision, MpInt, MpUint};
 
-pub fn bounded_uint(value: u128, bits: usize) -> ArbiUint {
+pub fn bounded_uint(value: u128, bits: usize) -> MpUint {
     let width = BoundedPrecision::new(bits).expect("property widths are valid");
-    ArbiUint::with_precision_checked(value, width).expect("generated unsigned value fits")
+    MpUint::with_precision_checked(value, width).expect("generated unsigned value fits")
 }
 
-pub fn bounded_int(value: i128, bits: usize) -> ArbiInt {
+pub fn bounded_int(value: i128, bits: usize) -> MpInt {
     let width = BoundedPrecision::new(bits).expect("property widths are valid");
-    ArbiInt::with_precision_checked(value, width).expect("generated signed value fits")
+    MpInt::with_precision_checked(value, width).expect("generated signed value fits")
 }
 
 pub fn unsigned_max(bits: usize) -> u128 {

@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use super::{DivScratch, InternalArbiUint, LIMB_BITS, MulScratch, may_be_square};
+use super::{DivScratch, InternalMpUint, LIMB_BITS, MulScratch, may_be_square};
 
 /// Growable scratch pool for square root operations. Temps are recycled
 /// across recursive calls, avoiding repeated allocations.
@@ -13,17 +13,17 @@ pub struct SqrtScratch {
     /// Scratch reused by multiplication steps.
     pub mul_scratch: MulScratch,
     /// Recyclable integer temporaries.
-    pub temps: Vec<InternalArbiUint>,
+    pub temps: Vec<InternalMpUint>,
 }
 
 impl SqrtScratch {
     /// Acquires a recycled temp (or a fresh zero if the pool is empty).
-    pub fn get_temp(&mut self) -> InternalArbiUint {
-        self.temps.pop().unwrap_or_else(InternalArbiUint::zero)
+    pub fn get_temp(&mut self) -> InternalMpUint {
+        self.temps.pop().unwrap_or_else(InternalMpUint::zero)
     }
 
     /// Returns a temp to the pool for reuse.
-    pub fn return_temp(&mut self, mut t: InternalArbiUint) {
+    pub fn return_temp(&mut self, mut t: InternalMpUint) {
         t.clear();
         self.temps.push(t);
     }
@@ -36,21 +36,21 @@ impl SqrtScratch {
 #[derive(Debug, Clone)]
 pub struct NthRootScratch {
     /// Scratch for the `x_pow_n_minus_1` intermediate.
-    pub x_pow_n_minus_1: InternalArbiUint,
+    pub x_pow_n_minus_1: InternalMpUint,
     /// Scratch for the `temp_prod` intermediate.
-    pub temp_prod: InternalArbiUint,
+    pub temp_prod: InternalMpUint,
     /// Scratch for the `quotient` intermediate.
-    pub quotient: InternalArbiUint,
+    pub quotient: InternalMpUint,
     /// Scratch for the `rem` intermediate.
-    pub rem: InternalArbiUint,
+    pub rem: InternalMpUint,
     /// Scratch for the `scaled_estimate` intermediate.
-    pub scaled_estimate: InternalArbiUint,
+    pub scaled_estimate: InternalMpUint,
     /// Scratch for the `sum` intermediate.
-    pub sum: InternalArbiUint,
+    pub sum: InternalMpUint,
     /// Scratch for the `next_estimate` intermediate.
-    pub next_estimate: InternalArbiUint,
+    pub next_estimate: InternalMpUint,
     /// Scratch for the `base_pow` intermediate.
-    pub base_pow: InternalArbiUint,
+    pub base_pow: InternalMpUint,
     /// Scratch for division.
     pub div_scratch: DivScratch,
     /// Scratch for multiplication.
@@ -60,21 +60,21 @@ pub struct NthRootScratch {
 impl Default for NthRootScratch {
     fn default() -> Self {
         Self {
-            x_pow_n_minus_1: InternalArbiUint::zero(),
-            temp_prod: InternalArbiUint::zero(),
-            quotient: InternalArbiUint::zero(),
-            rem: InternalArbiUint::zero(),
-            scaled_estimate: InternalArbiUint::zero(),
-            sum: InternalArbiUint::zero(),
-            next_estimate: InternalArbiUint::zero(),
-            base_pow: InternalArbiUint::zero(),
+            x_pow_n_minus_1: InternalMpUint::zero(),
+            temp_prod: InternalMpUint::zero(),
+            quotient: InternalMpUint::zero(),
+            rem: InternalMpUint::zero(),
+            scaled_estimate: InternalMpUint::zero(),
+            sum: InternalMpUint::zero(),
+            next_estimate: InternalMpUint::zero(),
+            base_pow: InternalMpUint::zero(),
             div_scratch: DivScratch::default(),
             mul_scratch: MulScratch::default(),
         }
     }
 }
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Integer square root (floor), i.e. the largest `x` such that
     /// `x^2 <= self`.
     #[must_use]
@@ -178,7 +178,7 @@ impl InternalArbiUint {
 
     /// Returns `true` when `self` is a perfect square.
     ///
-    /// The residue screen in [`screen`] rejects 99.79% of non-squares outright,
+    /// The residue screen in [`may_be_square`] rejects 99.79% of non-squares outright,
     /// so the square root below only runs for the small fraction that survives.
     #[must_use]
     pub fn is_perfect_square(&self) -> bool {

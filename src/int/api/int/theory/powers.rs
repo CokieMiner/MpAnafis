@@ -1,10 +1,10 @@
 //! Exponentiation APIs for signed integers.
 
-use crate::error::ArbiError;
+use crate::error::MpError;
 
-use super::{ArbiInt, InternalArbiInt, InternalArbiUint};
+use super::{InternalMpInt, InternalMpUint, MpInt};
 
-impl ArbiInt {
+impl MpInt {
     /// Returns `self` raised to the power of `exp`.
     ///
     /// # Panics
@@ -25,12 +25,12 @@ impl ArbiInt {
     /// Tries to raise `self` to the power of `exp`.
     ///
     /// # Errors
-    /// Returns `ArbiError::Overflow` if the result exceeds precision bounds.
-    pub fn try_pow(&self, exp: u32) -> Result<Self, ArbiError> {
+    /// Returns `MpError::Overflow` if the result exceeds precision bounds.
+    pub fn try_pow(&self, exp: u32) -> Result<Self, MpError> {
         if exp == 0 {
             let result = Self {
-                value: InternalArbiInt {
-                    abs: InternalArbiUint::one(),
+                value: InternalMpInt {
+                    abs: InternalMpUint::one(),
                     is_positive: true,
                 },
                 precision: self.precision,
@@ -38,14 +38,14 @@ impl ArbiInt {
             if let Some(bits) = result.precision.significant_bits()
                 && result.value.required_signed_bits_for_bounded_storage() > bits
             {
-                return Err(ArbiError::Overflow);
+                return Err(MpError::Overflow);
             }
             result.debug_assert_valid();
             return Ok(result);
         }
         if self.is_zero() {
             let result = Self {
-                value: InternalArbiInt::zero(),
+                value: InternalMpInt::zero(),
                 precision: self.precision,
             };
             result.debug_assert_valid();
@@ -54,7 +54,7 @@ impl ArbiInt {
         if self.value.abs.is_one() {
             let is_positive = !self.is_negative() || exp.is_multiple_of(2);
             let result = Self {
-                value: InternalArbiInt {
+                value: InternalMpInt {
                     abs: self.value.abs.clone(),
                     is_positive,
                 },
@@ -66,7 +66,7 @@ impl ArbiInt {
         let prod = self.value.abs.pow(exp);
         let is_positive = !self.is_negative() || exp.is_multiple_of(2);
         let result = Self {
-            value: InternalArbiInt {
+            value: InternalMpInt {
                 abs: prod,
                 is_positive,
             },
@@ -75,7 +75,7 @@ impl ArbiInt {
         if let Some(bits) = result.precision.significant_bits()
             && result.value.required_signed_bits_for_bounded_storage() > bits
         {
-            return Err(ArbiError::Overflow);
+            return Err(MpError::Overflow);
         }
         result.debug_assert_valid();
         Ok(result)

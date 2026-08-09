@@ -15,7 +15,7 @@ impl Toom3 {
     /// Computes the product of two limb slices using Toom-Cook 3-way multiplication.
     ///
     /// `dst` must hold the full product and `scratch` must have at least
-    /// [`mul_scratch_len`] limbs.
+    /// [`Multiplication::toom3_mul_scratch_len`] limbs.
     pub fn mul(dst: &mut [Limb], a: &[Limb], b: &[Limb], scratch: &mut [Limb]) {
         if a.len() < TOOM_COOK_THRESHOLD
             || b.len() < TOOM_COOK_THRESHOLD

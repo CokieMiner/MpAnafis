@@ -4,7 +4,7 @@
 //! add/multiply backend (`adx`/`bmi2`) and the SIMD tier (`avx2` vs the
 //! mandatory `sse2` baseline) used by vector kernels such as limb shifts.
 //!
-//! Debug builds accept `ARBI_TEST_BACKEND=adx|bmi2|vanilla|avx2|sse2`. A
+//! Debug builds accept `MP_ANAFIS_TEST_BACKEND=adx|bmi2|vanilla|avx2|sse2`. A
 //! requested instruction set is selected only when the host supports it;
 //! unsupported or unknown values fall back to the baseline level.
 
@@ -62,7 +62,7 @@ fn detect_x86_backend() -> X86Backend {
     // unrecognized requests deliberately fall back to the baseline kernel, so
     // the override can never execute an instruction absent from the host CPU.
     #[cfg(debug_assertions)]
-    if let Ok(requested) = var("ARBI_TEST_BACKEND") {
+    if let Ok(requested) = var("MP_ANAFIS_TEST_BACKEND") {
         return match requested.as_str() {
             "adx" if has_adx && has_bmi2 => X86Backend::AdxBmi2,
             "adx" if has_adx => X86Backend::Adx,
@@ -89,7 +89,7 @@ fn detect_x86_simd_tier() -> X86SimdTier {
     let has_avx2 = is_x86_feature_detected!("avx2");
 
     #[cfg(debug_assertions)]
-    if let Ok(requested) = var("ARBI_TEST_BACKEND") {
+    if let Ok(requested) = var("MP_ANAFIS_TEST_BACKEND") {
         return match requested.as_str() {
             "avx2" if has_avx2 => X86SimdTier::Avx2,
             _ => X86SimdTier::Sse2,

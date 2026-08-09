@@ -1,6 +1,6 @@
-//! Operator trait implementations for `ArbiUint` and `ArbiInt`.
+//! Operator trait implementations for `MpUint` and `MpInt`.
 
-use super::{ArbiInt, ArbiUint, InternalArbiInt};
+use super::{InternalMpInt, MpInt, MpUint};
 mod add;
 mod bitwise;
 mod div;

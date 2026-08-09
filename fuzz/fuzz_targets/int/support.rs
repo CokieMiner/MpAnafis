@@ -1,6 +1,6 @@
-//! Helper utilities for `ArbiInt` operand parsing.
+//! Helper utilities for `MpInt` operand parsing.
 
-use arbi_anafis::ArbiInt;
+use mp_anafis::MpInt;
 use rug::Integer;
 
 pub fn parse_signed_hex_pair(
@@ -25,10 +25,10 @@ pub fn parse_signed_hex_pair(
     (left_hex, right_hex)
 }
 
-pub fn int_operands(left_hex: &str, right_hex: &str) -> (ArbiInt, ArbiInt, Integer, Integer) {
+pub fn int_operands(left_hex: &str, right_hex: &str) -> (MpInt, MpInt, Integer, Integer) {
     (
-        ArbiInt::from_str_radix(left_hex, 16).unwrap(),
-        ArbiInt::from_str_radix(right_hex, 16).unwrap(),
+        MpInt::from_str_radix(left_hex, 16).unwrap(),
+        MpInt::from_str_radix(right_hex, 16).unwrap(),
         Integer::from_str_radix(left_hex, 16).unwrap(),
         Integer::from_str_radix(right_hex, 16).unwrap(),
     )

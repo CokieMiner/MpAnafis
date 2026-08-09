@@ -17,7 +17,7 @@ use divan::black_box;
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 use rug::Integer;
 
-use super::cases::{EDGE_WIDTH, Operation, Scenario, arbi_pairs};
+use super::cases::{EDGE_WIDTH, Operation, Scenario, mp_pairs};
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 use super::cases::{rug_pairs, rug_width, verify_overflowing, verify_value};
 use crate::int::{ladders::NARROW, support::SAMPLE_SIZE_FAST};
@@ -28,9 +28,9 @@ macro_rules! overflowing_benches {
             use super::*;
 
             #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-            fn arbi(bencher: divan::Bencher, bits: usize) {
+            fn mp(bencher: divan::Bencher, bits: usize) {
                 verify($operation, Scenario::Success, bits);
-                let inputs = arbi_pairs(bits, $operation, Scenario::Success);
+                let inputs = mp_pairs(bits, $operation, Scenario::Success);
                 bencher.bench_local(|| {
                     for (left, right) in &inputs {
                         let _output = black_box(black_box(left).$method(black_box(right)));
@@ -56,9 +56,9 @@ macro_rules! overflowing_benches {
             use super::*;
 
             #[divan::bench(args = EDGE_WIDTH, sample_size = SAMPLE_SIZE_FAST)]
-            fn arbi(bencher: divan::Bencher, bits: usize) {
+            fn mp(bencher: divan::Bencher, bits: usize) {
                 verify($operation, Scenario::Edge, bits);
-                let inputs = arbi_pairs(bits, $operation, Scenario::Edge);
+                let inputs = mp_pairs(bits, $operation, Scenario::Edge);
                 bencher.bench_local(|| {
                     for (left, right) in &inputs {
                         let _output = black_box(black_box(left).$method(black_box(right)));
@@ -121,33 +121,33 @@ overflowing_benches!(
 fn verify(operation: Operation, scenario: Scenario, bits: usize) {
     #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
     {
-        let arbi = arbi_pairs(bits, operation, scenario);
+        let mp = mp_pairs(bits, operation, scenario);
         let rug = rug_pairs(bits, operation, scenario);
         let width = rug_width(bits);
         let expected_flag = matches!(scenario, Scenario::Edge);
 
-        for ((arbi_left, arbi_right), (rug_left, rug_right)) in arbi.iter().zip(&rug) {
-            verify_value(arbi_left, rug_left);
-            verify_value(arbi_right, rug_right);
+        for ((mp_left, mp_right), (rug_left, rug_right)) in mp.iter().zip(&rug) {
+            verify_value(mp_left, rug_left);
+            verify_value(mp_right, rug_right);
             let (actual, expected) = match operation {
                 Operation::Add => (
-                    arbi_left.overflowing_add(arbi_right),
+                    mp_left.overflowing_add(mp_right),
                     rug_overflowing_add(rug_left, rug_right, width),
                 ),
                 Operation::Sub => (
-                    arbi_left.overflowing_sub(arbi_right),
+                    mp_left.overflowing_sub(mp_right),
                     rug_overflowing_sub(rug_left, rug_right, width),
                 ),
                 Operation::Mul => (
-                    arbi_left.overflowing_mul(arbi_right),
+                    mp_left.overflowing_mul(mp_right),
                     rug_overflowing_mul(rug_left, rug_right, width),
                 ),
                 Operation::Div => (
-                    arbi_left.overflowing_div(arbi_right),
+                    mp_left.overflowing_div(mp_right),
                     rug_overflowing_div(rug_left, rug_right, width),
                 ),
                 Operation::Rem => (
-                    arbi_left.overflowing_rem(arbi_right),
+                    mp_left.overflowing_rem(mp_right),
                     rug_overflowing_rem(rug_left, rug_right, width),
                 ),
             };

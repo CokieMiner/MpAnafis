@@ -1,8 +1,8 @@
 //! Unsigned integer property and comparison helper APIs.
 
-use super::ArbiUint;
+use super::MpUint;
 
-impl ArbiUint {
+impl MpUint {
     /// Returns `true` if this integer is zero.
     #[inline]
     #[must_use]

@@ -1,4 +1,4 @@
-//! E2E property-based and fuzzing tests for arbi-anafis arbitrary-precision integers.
+//! E2E property-based and fuzzing tests for mp-anafis arbitrary-precision integers.
 //!
 //! Uses differential comparison against `rug::Integer` for correctness verification.
 
@@ -15,8 +15,8 @@
 )]
 
 #[cfg(feature = "std")]
-use arbi_anafis::PrecisionContext;
-use arbi_anafis::{ArbiInt, ArbiUint, BoundedPrecision};
+use mp_anafis::PrecisionContext;
+use mp_anafis::{BoundedPrecision, MpInt, MpUint};
 use proptest::prelude::*;
 
 // --- Helper Functions for Differential Testing ---
@@ -26,7 +26,7 @@ const fn bounded_width(bits: usize) -> BoundedPrecision {
 }
 
 // Opaque-box precision verification helper
-fn get_precision_str(val: &ArbiUint) -> String {
+fn get_precision_str(val: &MpUint) -> String {
     let debug_str = format!("{:?}", val.as_debug_verbose());
     if debug_str.contains("precision: Unlimited") {
         "Unlimited".to_owned()
@@ -47,31 +47,31 @@ fn get_precision_str(val: &ArbiUint) -> String {
 proptest! {
     #[test]
     fn test_tier1_constructors_conversions(val_u in any::<u128>(), val_i in any::<i128>()) {
-        let arbi_u = ArbiUint::from(val_u);
+        let mp_u = MpUint::from(val_u);
         prop_assert_eq!(
-            arbi_u.to_u128().expect("should fit in u128"),
+            mp_u.to_u128().expect("should fit in u128"),
             val_u,
             "u128 roundtrip"
         );
 
-        let arbi_i = ArbiInt::from(val_i);
+        let mp_i = MpInt::from(val_i);
         prop_assert_eq!(
-            arbi_i.to_i128().expect("should fit in i128"),
+            mp_i.to_i128().expect("should fit in i128"),
             val_i,
             "i128 roundtrip"
         );
 
         if val_u > 0 {
             let bits = bounded_width(128);
-            let arbi_checked_u = ArbiUint::with_precision_checked(val_u, bits)
+            let mp_checked_u = MpUint::with_precision_checked(val_u, bits)
                 .expect("should fit in 128-bit precision");
             prop_assert_eq!(
-                arbi_checked_u.to_u128().expect("should fit in u128"),
+                mp_checked_u.to_u128().expect("should fit in u128"),
                 val_u,
                 "bounded u128 roundtrip"
             );
             prop_assert_eq!(
-                get_precision_str(&arbi_checked_u),
+                get_precision_str(&mp_checked_u),
                 "Bounded(128)",
                 "precision string"
             );
@@ -82,11 +82,11 @@ proptest! {
 proptest! {
     #[test]
     fn test_tier1_radix_conversions(u1 in any::<u128>()) {
-        let au1 = ArbiUint::from(u1);
+        let au1 = MpUint::from(u1);
 
         for radix in &[2, 8, 10, 16] {
             let s = au1.to_string_radix(*radix);
-            let au2 = ArbiUint::from_str_radix(&s, *radix).expect("roundtrip should succeed");
+            let au2 = MpUint::from_str_radix(&s, *radix).expect("roundtrip should succeed");
             prop_assert_eq!(&au1, &au2, "radix {} roundtrip", *radix);
         }
     }
@@ -98,7 +98,7 @@ proptest! {
         #[cfg(feature = "std")]
         {
             let bounded_precision = PrecisionContext::with_bounded(width, || {
-                let a = ArbiUint::from(0_u8);
+                let a = MpUint::from(0_u8);
                 get_precision_str(&a)
             });
             prop_assert_eq!(
@@ -108,7 +108,7 @@ proptest! {
             );
 
             let unlimited_precision = PrecisionContext::with_unlimited(|| {
-                let a = ArbiUint::from(0_u8);
+                let a = MpUint::from(0_u8);
                 get_precision_str(&a)
             });
             prop_assert_eq!(
@@ -129,9 +129,9 @@ proptest! {
     fn test_tier2_boundaries(bits in 4_usize..=32) {
         let n = bounded_width(bits);
 
-        let max_val = ArbiUint::max_for_precision(bits);
-        let min_val = ArbiUint::min_for_precision(bits);
-        prop_assert_eq!(&min_val, &ArbiUint::zero(), "min_for_precision");
+        let max_val = MpUint::max_for_precision(bits);
+        let min_val = MpUint::min_for_precision(bits);
+        prop_assert_eq!(&min_val, &MpUint::zero(), "min_for_precision");
         prop_assert_eq!(
             get_precision_str(&min_val),
             format!("Bounded({bits})"),
@@ -139,12 +139,12 @@ proptest! {
         );
 
         prop_assert!(
-            ArbiUint::with_precision_checked(max_val.clone(), n).is_ok(),
+            MpUint::with_precision_checked(max_val.clone(), n).is_ok(),
             "max_val should fit"
         );
-        let overflow_val = max_val.wrapping_add(&ArbiUint::one());
+        let overflow_val = max_val.wrapping_add(&MpUint::one());
         prop_assert!(
-            ArbiUint::with_precision_checked(overflow_val, n).is_err(),
+            MpUint::with_precision_checked(overflow_val, n).is_err(),
             "overflow should fail"
         );
     }
@@ -153,25 +153,25 @@ proptest! {
 proptest! {
     #[test]
     fn test_tier2_div_by_zero(u1 in any::<u128>()) {
-        let au1 = ArbiUint::from(u1);
+        let au1 = MpUint::from(u1);
 
         prop_assert!(
-            au1.checked_div(&ArbiUint::zero()).is_none(),
+            au1.checked_div(&MpUint::zero()).is_none(),
             "div by zero is none"
         );
         prop_assert!(
-            au1.checked_rem(&ArbiUint::zero()).is_none(),
+            au1.checked_rem(&MpUint::zero()).is_none(),
             "rem by zero is none"
         );
 
         prop_assert_eq!(
-            au1.wrapping_div(&ArbiUint::zero()),
-            ArbiUint::zero(),
+            au1.wrapping_div(&MpUint::zero()),
+            MpUint::zero(),
             "wrapping div by zero"
         );
         prop_assert_eq!(
-            au1.wrapping_rem(&ArbiUint::zero()),
-            ArbiUint::zero(),
+            au1.wrapping_rem(&MpUint::zero()),
+            MpUint::zero(),
             "wrapping rem by zero"
         );
     }
@@ -182,8 +182,8 @@ proptest! {
 proptest! {
     #[test]
     fn test_tier3_identities(u1 in 0_u64..1_000_000_u64, u2 in 1_u64..1_000_000_u64) {
-        let au1 = ArbiUint::from(u1);
-        let au2 = ArbiUint::from(u2);
+        let au1 = MpUint::from(u1);
+        let au2 = MpUint::from(u2);
 
         let div = au1.wrapping_div(&au2);
         let rem = au1.wrapping_rem(&au2);
@@ -197,8 +197,8 @@ proptest! {
 proptest! {
     #[test]
     fn test_tier4_fibonacci(n in 5_usize..=80) {
-        let mut f0 = ArbiUint::zero();
-        let mut f1 = ArbiUint::one();
+        let mut f0 = MpUint::zero();
+        let mut f1 = MpUint::one();
 
         let mut terms = vec![f0.clone(), f1.clone()];
         for _ in 2..=n {
@@ -227,20 +227,20 @@ proptest! {
     ) {
         prop_assume!(p_idx != q_idx);
         let primes = [17_u64, 19, 23, 29, 31, 37, 41, 43, 47, 53];
-        let p = ArbiUint::from(primes[p_idx]);
-        let q = ArbiUint::from(primes[q_idx]);
+        let p = MpUint::from(primes[p_idx]);
+        let q = MpUint::from(primes[q_idx]);
         let modulus = p.wrapping_mul(&q);
 
-        let p_minus_1 = p.wrapping_sub(&ArbiUint::one());
-        let q_minus_1 = q.wrapping_sub(&ArbiUint::one());
+        let p_minus_1 = p.wrapping_sub(&MpUint::one());
+        let q_minus_1 = q.wrapping_sub(&MpUint::one());
         let phi = p_minus_1.wrapping_mul(&q_minus_1);
 
         let modulus_u64 = primes[p_idx].checked_mul(primes[q_idx]).expect("small prime product");
         prop_assume!(a_candidate < modulus_u64);
-        let a = ArbiUint::from(a_candidate);
-        prop_assume!(a.gcd_lcm(&modulus).map_or_else(ArbiUint::zero, |(g, _)| g) == ArbiUint::one());
+        let a = MpUint::from(a_candidate);
+        prop_assume!(a.gcd_lcm(&modulus).map_or_else(MpUint::zero, |(g, _)| g) == MpUint::one());
 
         let res = a.pow_mod(&phi, &modulus).expect("pow_mod should succeed");
-        prop_assert_eq!(res, ArbiUint::one(), "Euler's totient theorem");
+        prop_assert_eq!(res, MpUint::one(), "Euler's totient theorem");
     }
 }

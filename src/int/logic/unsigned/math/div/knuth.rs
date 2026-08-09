@@ -11,8 +11,7 @@ use core::{
 };
 
 use super::{
-    ArchKernels, BURNIKEL_ZIEGLER_THRESHOLD, DivScratch, Division, InternalArbiUint, LIMB_BITS,
-    Limb,
+    ArchKernels, BURNIKEL_ZIEGLER_THRESHOLD, DivScratch, Division, InternalMpUint, LIMB_BITS, Limb,
 };
 
 /// Number of limbs the Algorithm D fast path normalizes on the stack before
@@ -26,10 +25,10 @@ impl Division {
     /// Computes the quotient and remainder of `num_a / den_b` with Algorithm D.
     ///
     pub fn algorithm_d(
-        num_a: &InternalArbiUint,
-        den_b: &InternalArbiUint,
-        quotient_out: &mut InternalArbiUint,
-        rem_out: &mut InternalArbiUint,
+        num_a: &InternalMpUint,
+        den_b: &InternalMpUint,
+        quotient_out: &mut InternalMpUint,
+        rem_out: &mut InternalMpUint,
         scratch: &mut DivScratch,
     ) {
         let completed = Self::algorithm_d_impl::<true, true, true>(
@@ -44,12 +43,12 @@ impl Division {
 
     /// Computes an Algorithm D remainder without retaining quotient limbs.
     pub fn algorithm_d_rem(
-        num_a: &InternalArbiUint,
-        den_b: &InternalArbiUint,
-        rem_out: &mut InternalArbiUint,
+        num_a: &InternalMpUint,
+        den_b: &InternalMpUint,
+        rem_out: &mut InternalMpUint,
         scratch: &mut DivScratch,
     ) {
-        let mut dummy_quot = replace(&mut scratch.dummy_quot, InternalArbiUint::zero());
+        let mut dummy_quot = replace(&mut scratch.dummy_quot, InternalMpUint::zero());
         let completed = Self::algorithm_d_impl::<false, true, true>(
             num_a,
             den_b,
@@ -71,10 +70,10 @@ impl Division {
         const WRITE_REMAINDER: bool,
         const CHECK_TRIVIAL: bool,
     >(
-        num_a: &InternalArbiUint,
-        den_b: &InternalArbiUint,
-        quotient_out: &mut InternalArbiUint,
-        rem_out: &mut InternalArbiUint,
+        num_a: &InternalMpUint,
+        den_b: &InternalMpUint,
+        quotient_out: &mut InternalMpUint,
+        rem_out: &mut InternalMpUint,
     ) -> bool {
         debug_assert!(
             !den_b.is_zero(),
@@ -112,10 +111,10 @@ impl Division {
         const WRITE_REMAINDER: bool,
         const CHECK_TRIVIAL: bool,
     >(
-        num_a: &InternalArbiUint,
-        den_b: &InternalArbiUint,
-        quotient_out: &mut InternalArbiUint,
-        rem_out: &mut InternalArbiUint,
+        num_a: &InternalMpUint,
+        den_b: &InternalMpUint,
+        quotient_out: &mut InternalMpUint,
+        rem_out: &mut InternalMpUint,
         scratch_opt: Option<&mut DivScratch>,
     ) -> bool {
         debug_assert!(
@@ -138,7 +137,7 @@ impl Division {
                 if rem == 0 {
                     rem_out.clear();
                 } else {
-                    *rem_out = InternalArbiUint::from_limb(rem);
+                    *rem_out = InternalMpUint::from_limb(rem);
                 }
             }
             return true;
@@ -313,8 +312,8 @@ fn knuth_d_divide<const WRITE_QUOTIENT: bool, const WRITE_REMAINDER: bool>(
     n_len: usize,
     m_len: usize,
     shift: u32,
-    quotient_out: &mut InternalArbiUint,
-    rem_out: &mut InternalArbiUint,
+    quotient_out: &mut InternalMpUint,
+    rem_out: &mut InternalMpUint,
 ) {
     if WRITE_QUOTIENT {
         // SAFETY: quotient_out has capacity for m_len + 1 limbs, which we immediately initialize.

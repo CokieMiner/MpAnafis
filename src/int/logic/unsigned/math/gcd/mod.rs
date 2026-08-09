@@ -1,6 +1,6 @@
-//! GCD and LCM operations for [`InternalArbiUint`].
+//! GCD and LCM operations for [`InternalMpUint`].
 
-use super::{ArchKernels, DivScratch, Division, DoubleLimb, InternalArbiUint, LIMB_BITS, Limb};
+use super::{ArchKernels, DivScratch, Division, DoubleLimb, InternalMpUint, LIMB_BITS, Limb};
 
 mod binary;
 mod lehmer;

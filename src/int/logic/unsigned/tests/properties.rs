@@ -12,7 +12,7 @@ proptest! {
         limbs in proptest::collection::vec(any::<Limb>(), 1..=4),
         width in 1_usize..=53,
     ) {
-        let val = InternalArbiUint::from_limbs(limbs);
+        let val = InternalMpUint::from_limbs(limbs);
         let sig = val.significant_bits();
         if sig == 0 {
             prop_assert_eq!(leading_bits_as_u64(val.limbs(), sig, width), 0);
@@ -42,7 +42,7 @@ proptest! {
     fn float_conversion_prop(
         limbs in proptest::collection::vec(any::<Limb>(), 0..=4),
     ) {
-        let val = InternalArbiUint::from_limbs(limbs);
+        let val = InternalMpUint::from_limbs(limbs);
         if let Some(f64_val) = val.to_f64() {
             prop_assert!(f64_val.is_finite());
             prop_assert!(!f64_val.is_nan());

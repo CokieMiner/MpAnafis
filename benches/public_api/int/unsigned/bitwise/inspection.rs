@@ -11,7 +11,7 @@ use divan::black_box;
 use crate::int::support::rug_uint;
 use crate::int::{
     ladders::NARROW,
-    support::{SAMPLE_SIZE_FAST, arbi_uint},
+    support::{SAMPLE_SIZE_FAST, mp_uint},
 };
 
 /// Where the scan benchmarks start looking, far enough in to skip the first
@@ -22,8 +22,8 @@ mod count_ones {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).count_ones());
         });
@@ -48,8 +48,8 @@ mod count_zeros {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).count_zeros());
         });
@@ -72,8 +72,8 @@ mod significant_bits {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).significant_bits());
         });
@@ -97,8 +97,8 @@ mod leading_zeros {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).leading_zeros());
         });
@@ -120,8 +120,8 @@ mod leading_ones {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).leading_ones());
         });
@@ -144,8 +144,8 @@ mod trailing_zeros {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).trailing_zeros());
         });
@@ -166,8 +166,8 @@ mod trailing_ones {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).trailing_ones());
         });
@@ -187,8 +187,8 @@ mod find_first_set_bit {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).find_first_set_bit());
         });
@@ -208,8 +208,8 @@ mod find_next_set_bit {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).find_next_set_bit(SCAN_ORIGIN));
         });
@@ -230,8 +230,8 @@ mod find_first_zero_bit {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).find_first_zero_bit());
         });
@@ -251,8 +251,8 @@ mod find_next_zero_bit {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).find_next_zero_bit(SCAN_ORIGIN));
         });

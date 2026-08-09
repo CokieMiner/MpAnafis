@@ -4,7 +4,7 @@
 //! buffers rather than allocating per call. Callers that divide repeatedly with
 //! the same operand shapes therefore pay the allocation once.
 
-use super::{InternalArbiUint, MulScratch, ScratchBuffer};
+use super::{InternalMpUint, MulScratch, ScratchBuffer};
 
 /// Pre-allocated scratch space for division.
 #[derive(Debug, Clone)]
@@ -30,10 +30,10 @@ pub struct DivScratch {
     pub newton_r_cur: ScratchBuffer,
     pub newton_r_next: ScratchBuffer,
     pub mul_scratch: MulScratch,
-    pub dummy_rem: InternalArbiUint,
-    pub dummy_quot: InternalArbiUint,
-    pub dummy_u: InternalArbiUint,
-    pub mod_rem: InternalArbiUint,
+    pub dummy_rem: InternalMpUint,
+    pub dummy_quot: InternalMpUint,
+    pub dummy_u: InternalMpUint,
+    pub mod_rem: InternalMpUint,
 }
 
 impl Default for DivScratch {
@@ -60,10 +60,10 @@ impl Default for DivScratch {
             newton_r_cur: ScratchBuffer::acquire(0),
             newton_r_next: ScratchBuffer::acquire(0),
             mul_scratch: MulScratch::default(),
-            dummy_rem: InternalArbiUint::zero(),
-            dummy_quot: InternalArbiUint::zero(),
-            dummy_u: InternalArbiUint::zero(),
-            mod_rem: InternalArbiUint::zero(),
+            dummy_rem: InternalMpUint::zero(),
+            dummy_quot: InternalMpUint::zero(),
+            dummy_u: InternalMpUint::zero(),
+            mod_rem: InternalMpUint::zero(),
         }
     }
 }

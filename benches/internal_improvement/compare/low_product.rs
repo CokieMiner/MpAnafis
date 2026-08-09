@@ -7,11 +7,11 @@
 
 use core::{hint::black_box, mem::size_of};
 
-use arbi_anafis::tune_api::tier::{
+use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
+use mp_anafis::tune_api::tier::{
     Limb,
     state::{MulBenchScratch, MulloBenchScratch},
 };
-use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
 
 use crate::shared::operands;
 
@@ -30,7 +30,7 @@ unsafe extern "C" {
 }
 
 #[divan::bench(args = LOW_PRODUCT_SIZES)]
-fn arbi_mullo(bencher: divan::Bencher, len: usize) {
+fn mp_mullo(bencher: divan::Bencher, len: usize) {
     let (left, right, mut full_product) = operands(len);
     let mut full_scratch = MulBenchScratch::default();
     full_scratch.run(&mut full_product, &left, &right);
@@ -40,11 +40,11 @@ fn arbi_mullo(bencher: divan::Bencher, len: usize) {
     low_scratch.run(&mut destination, &left, &right);
     let expected_low = full_product
         .get(..len)
-        .expect("full Arbi product contains its low half");
+        .expect("full Mp product contains its low half");
     assert_eq!(
         destination.as_slice(),
         expected_low,
-        "Arbi truncated product disagrees with its production full product"
+        "Mp truncated product disagrees with its production full product"
     );
 
     bencher.bench_local(|| {
@@ -58,7 +58,7 @@ fn arbi_mullo(bencher: divan::Bencher, len: usize) {
 }
 
 #[divan::bench(args = LOW_BASECASE_SIZES)]
-fn arbi_basecase(bencher: divan::Bencher, len: usize) {
+fn mp_basecase(bencher: divan::Bencher, len: usize) {
     let (left, right, _) = operands(len);
     let mut destination = vec![Limb::MIN; len];
 
@@ -73,14 +73,14 @@ fn arbi_basecase(bencher: divan::Bencher, len: usize) {
 }
 
 #[divan::bench(args = ROOT_SPLITS_4096)]
-fn arbi_forced_root_4096(bencher: divan::Bencher, small_len: usize) {
+fn mp_forced_root_4096(bencher: divan::Bencher, small_len: usize) {
     let len = 4_096;
     let (left, right, mut full_product) = operands(len);
     let mut full_scratch = MulBenchScratch::default();
     full_scratch.run(&mut full_product, &left, &right);
     let expected_low = full_product
         .get(..len)
-        .expect("full Arbi product contains its low half");
+        .expect("full Mp product contains its low half");
 
     let mut destination = vec![Limb::MIN; len];
     let mut low_scratch = MulloBenchScratch::default();
@@ -103,7 +103,7 @@ fn arbi_forced_root_4096(bencher: divan::Bencher, small_len: usize) {
 }
 
 #[divan::bench(args = LOW_PRODUCT_SIZES)]
-fn arbi_full_product(bencher: divan::Bencher, len: usize) {
+fn mp_full_product(bencher: divan::Bencher, len: usize) {
     let (left, right, mut destination) = operands(len);
     let mut scratch = MulBenchScratch::default();
 
@@ -122,16 +122,16 @@ fn gmp_mullo(bencher: divan::Bencher, len: usize) {
     assert_eq!(
         size_of::<Limb>(),
         size_of::<limb_t>(),
-        "raw low-product comparison requires equal Arbi and GMP limb widths"
+        "raw low-product comparison requires equal Mp and GMP limb widths"
     );
-    let (arbi_left, arbi_right, _) = operands(len);
-    let left: Vec<limb_t> = arbi_left
+    let (mp_left, mp_right, _) = operands(len);
+    let left: Vec<limb_t> = mp_left
         .into_iter()
-        .map(|limb| limb_t::try_from(limb).expect("Arbi limb fits GMP limb"))
+        .map(|limb| limb_t::try_from(limb).expect("Mp limb fits GMP limb"))
         .collect();
-    let right: Vec<limb_t> = arbi_right
+    let right: Vec<limb_t> = mp_right
         .into_iter()
-        .map(|limb| limb_t::try_from(limb).expect("Arbi limb fits GMP limb"))
+        .map(|limb| limb_t::try_from(limb).expect("Mp limb fits GMP limb"))
         .collect();
     let mut destination = vec![limb_t::MIN; len];
     let mut full_product = vec![limb_t::MIN; len.saturating_mul(2)];

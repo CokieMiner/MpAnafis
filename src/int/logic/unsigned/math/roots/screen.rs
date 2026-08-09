@@ -3,7 +3,7 @@
 //! A perfect square is a quadratic residue modulo every modulus, so a value
 //! landing on a non-residue class cannot be square. Screening is cheap and one
 //! sided: a rejection is proof, while survival only means the expensive
-//! [`sqrt_rem`](super::super::InternalArbiUint::sqrt_rem) still has to run.
+//! [`sqrt_rem`](super::super::InternalMpUint::sqrt_rem) still has to run.
 //!
 //! Two stages, ordered by cost:
 //!
@@ -22,7 +22,7 @@
     reason = "the second-stage fold runs one division per limb and uses unwrap_unchecked on a literal non-zero modulus to keep a panic landing pad out of that loop"
 )]
 
-use super::{InternalArbiUint, Limb};
+use super::{InternalMpUint, Limb};
 
 /// Quadratic residues modulo 256, one bit per class, low word first.
 const RESIDUES_MOD_256: [u64; 4] = [
@@ -54,7 +54,7 @@ const RESIDUE_MASKS: [(u64, u32); 7] = [
 ];
 
 /// Returns `false` only when `value` is provably not a perfect square.
-pub fn may_be_square(value: &InternalArbiUint) -> bool {
+pub fn may_be_square(value: &InternalMpUint) -> bool {
     let limbs = value.limbs();
     let Some(&first_limb) = limbs.first() else {
         // Zero has no limbs and is a square.

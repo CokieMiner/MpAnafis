@@ -11,15 +11,15 @@
 //!
 //! The opt-in FLINT cells are explicitly named cost references. FLINT's
 //! `fmpz_is_probabprime` uses its own fixed policy and cannot be asked to run
-//! the same 24 Miller-Rabin rounds as Arbi and GMP/Rug.
+//! the same 24 Miller-Rabin rounds as Mp and GMP/Rug.
 
 #![allow(
     clippy::wildcard_imports,
     reason = "benchmark submodules inherit parent scope"
 )]
 
-use arbi_anafis::ArbiUint;
 use divan::black_box;
+use mp_anafis::MpUint;
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 use rug::Integer;
 
@@ -29,13 +29,13 @@ use rug::Integer;
     target_os = "linux",
     target_pointer_width = "64"
 ))]
-use crate::int::support::{FlintInt, pin_flint_to_one_thread, verify_flint_matches_arbi};
+use crate::int::support::{FlintInt, pin_flint_to_one_thread, verify_flint_matches_mp};
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 use crate::int::support::{rug_known_primes, rug_semiprimes_no_small_factors};
 use crate::int::{
     ladders::PRIMALITY,
     support::{
-        SAMPLE_COUNT_HEAVY, SAMPLE_SIZE_HEAVY, arbi_known_primes, arbi_semiprimes_no_small_factors,
+        SAMPLE_COUNT_HEAVY, SAMPLE_SIZE_HEAVY, mp_known_primes, mp_semiprimes_no_small_factors,
         odd_hex,
     },
 };
@@ -48,9 +48,9 @@ mod is_probably_prime_random {
     use super::*;
 
     #[divan::bench(args = PRIMALITY, sample_size = SAMPLE_SIZE_HEAVY, sample_count = SAMPLE_COUNT_HEAVY)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = ArbiUint::from_str_radix(&odd_hex(bits, 42), 16)
-            .expect("generated odd hexadecimal must parse as ArbiUint");
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = MpUint::from_str_radix(&odd_hex(bits, 42), 16)
+            .expect("generated odd hexadecimal must parse as MpUint");
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).is_probably_prime(ROUNDS));
         });
@@ -66,14 +66,14 @@ mod is_probably_prime_random {
     fn flint_fixed_policy_cost_reference(bencher: divan::Bencher, bits: usize) {
         pin_flint_to_one_thread();
         let text = odd_hex(bits, 42);
-        let arbi_value = ArbiUint::from_str_radix(&text, 16)
-            .expect("generated odd hexadecimal must parse as ArbiUint");
+        let mp_value = MpUint::from_str_radix(&text, 16)
+            .expect("generated odd hexadecimal must parse as MpUint");
         let value = FlintInt::from_str_radix(&text, 16);
-        verify_flint_matches_arbi(&arbi_value, &value);
+        verify_flint_matches_mp(&mp_value, &value);
         assert_eq!(
             value.probable_prime_cost_reference(),
-            arbi_value.is_probably_prime(ROUNDS),
-            "FLINT and Arbi must classify the random odd input identically"
+            mp_value.is_probably_prime(ROUNDS),
+            "FLINT and Mp must classify the random odd input identically"
         );
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).probable_prime_cost_reference());
@@ -95,8 +95,8 @@ mod is_probably_prime_known_prime {
     use super::*;
 
     #[divan::bench(args = PRIMALITY, sample_size = SAMPLE_SIZE_HEAVY, sample_count = SAMPLE_COUNT_HEAVY)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let values = arbi_known_primes(bits);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let values = mp_known_primes(bits);
         bencher.bench_local(|| {
             for value in &values {
                 let _output = black_box(black_box(value).is_probably_prime(ROUNDS));
@@ -113,17 +113,17 @@ mod is_probably_prime_known_prime {
     #[divan::bench(args = PRIMALITY, sample_size = SAMPLE_SIZE_HEAVY, sample_count = SAMPLE_COUNT_HEAVY)]
     fn flint_fixed_policy_cost_reference(bencher: divan::Bencher, bits: usize) {
         pin_flint_to_one_thread();
-        let values = arbi_known_primes(bits);
+        let values = mp_known_primes(bits);
         let flint_values: Vec<_> = values
             .iter()
             .map(|value| FlintInt::from_str_radix(&format!("{value:x}"), 16))
             .collect();
         for (value, flint_value) in values.iter().zip(&flint_values) {
-            verify_flint_matches_arbi(value, flint_value);
+            verify_flint_matches_mp(value, flint_value);
             assert_eq!(
                 flint_value.probable_prime_cost_reference(),
                 value.is_probably_prime(ROUNDS),
-                "FLINT and Arbi must classify known primes identically"
+                "FLINT and Mp must classify known primes identically"
             );
         }
         bencher.bench_local(|| {
@@ -149,8 +149,8 @@ mod is_probably_prime_semiprime {
     use super::*;
 
     #[divan::bench(args = PRIMALITY, sample_size = SAMPLE_SIZE_HEAVY, sample_count = SAMPLE_COUNT_HEAVY)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let values = arbi_semiprimes_no_small_factors(bits);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let values = mp_semiprimes_no_small_factors(bits);
         bencher.bench_local(|| {
             for value in &values {
                 let _output = black_box(black_box(value).is_probably_prime(ROUNDS));
@@ -167,17 +167,17 @@ mod is_probably_prime_semiprime {
     #[divan::bench(args = PRIMALITY, sample_size = SAMPLE_SIZE_HEAVY, sample_count = SAMPLE_COUNT_HEAVY)]
     fn flint_fixed_policy_cost_reference(bencher: divan::Bencher, bits: usize) {
         pin_flint_to_one_thread();
-        let values = arbi_semiprimes_no_small_factors(bits);
+        let values = mp_semiprimes_no_small_factors(bits);
         let flint_values: Vec<_> = values
             .iter()
             .map(|value| FlintInt::from_str_radix(&format!("{value:x}"), 16))
             .collect();
         for (value, flint_value) in values.iter().zip(&flint_values) {
-            verify_flint_matches_arbi(value, flint_value);
+            verify_flint_matches_mp(value, flint_value);
             assert_eq!(
                 flint_value.probable_prime_cost_reference(),
                 value.is_probably_prime(ROUNDS),
-                "FLINT and Arbi must classify semiprimes identically"
+                "FLINT and Mp must classify semiprimes identically"
             );
         }
         bencher.bench_local(|| {
@@ -208,8 +208,8 @@ mod is_prime {
     use super::*;
 
     #[divan::bench(args = PRIMALITY, sample_size = SAMPLE_SIZE_HEAVY, sample_count = SAMPLE_COUNT_HEAVY)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let values = arbi_known_primes(bits);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let values = mp_known_primes(bits);
         bencher.bench_local(|| {
             for value in &values {
                 let _output = black_box(black_box(value).is_prime());
@@ -233,9 +233,9 @@ mod next_prime {
     use super::*;
 
     #[divan::bench(args = PRIMALITY, sample_size = SAMPLE_SIZE_HEAVY, sample_count = SAMPLE_COUNT_HEAVY)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = ArbiUint::from_str_radix(&odd_hex(bits, 42), 16)
-            .expect("generated odd hexadecimal must parse as ArbiUint");
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = MpUint::from_str_radix(&odd_hex(bits, 42), 16)
+            .expect("generated odd hexadecimal must parse as MpUint");
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).next_prime());
         });

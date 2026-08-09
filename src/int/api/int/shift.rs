@@ -2,11 +2,11 @@
 
 use core::ops::Shl;
 
-use crate::error::ArbiError;
+use crate::error::MpError;
 
-use super::{ArbiInt, InternalArbiInt};
+use super::{InternalMpInt, MpInt};
 
-impl ArbiInt {
+impl MpInt {
     // ------------------------------------------------------------------
     // Shift families (wrapping, overflowing, saturating, try)
     // ------------------------------------------------------------------
@@ -25,7 +25,7 @@ impl ArbiInt {
             || Shl::shl(&self.value, shift),
             |bits| {
                 if shift >= bits {
-                    InternalArbiInt::zero()
+                    InternalMpInt::zero()
                 } else {
                     Shl::shl(&self.value, shift).apply_wrapping(bits)
                 }
@@ -48,7 +48,7 @@ impl ArbiInt {
             |bits| {
                 let overflow = self.value.bounded_shl_overflows(bits, shift);
                 let value = if shift >= bits {
-                    InternalArbiInt::zero()
+                    InternalMpInt::zero()
                 } else {
                     Shl::shl(&self.value, shift).apply_wrapping(bits)
                 };
@@ -86,13 +86,13 @@ impl ArbiInt {
     /// Tries to left shift.
     ///
     /// # Errors
-    /// Returns `ArbiError::Overflow` if the result exceeds bounded
+    /// Returns `MpError::Overflow` if the result exceeds bounded
     /// precision.
-    pub fn try_shl(&self, shift: usize) -> Result<Self, ArbiError> {
+    pub fn try_shl(&self, shift: usize) -> Result<Self, MpError> {
         if let Some(bits) = self.precision.significant_bits()
             && self.value.bounded_shl_overflows(bits, shift)
         {
-            return Err(ArbiError::Overflow);
+            return Err(MpError::Overflow);
         }
         let result = Self {
             value: Shl::shl(&self.value, shift),

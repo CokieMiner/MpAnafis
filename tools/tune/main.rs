@@ -1,6 +1,6 @@
-//! Host-side automated hardware tuner for `arbi-anafis`.
+//! Host-side automated hardware tuner for `mp-anafis`.
 //!
-//! Run `cargo run --bin arbi-tune --release --features _internal-tune` to
+//! Run `cargo run --bin mp-tune --release --features _internal-tune` to
 //! generate a complete machine-specific profile.
 //!
 //! # Phase order
@@ -30,7 +30,7 @@
 
 use std::env::{self, consts};
 
-use arbi_anafis::tune_api::Limb;
+use mp_anafis::tune_api::Limb;
 
 #[path = "../../build_support/tuning.rs"]
 mod tuning_profile;
@@ -141,7 +141,7 @@ fn main() -> Result<(), String> {
 }
 
 fn run_tuner(mode: &Mode) {
-    println!("arbi-anafis hardware autotuner");
+    println!("mp-anafis hardware autotuner");
     println!("Target limb width: {} bits", Limb::BITS);
 
     let affinity = match platform::single_cpu_affinity() {
@@ -304,11 +304,13 @@ fn selected_mode() -> Result<Mode, String> {
                     Mode::ProfileFor(target)
                 }
                 "--help" | "-h" => Mode::Help,
-                _ => return Err(format!("unknown arbi-tune option: {argument}; use --help")),
+                _ => {
+                    return Err(format!("unknown mp-tune option: {argument}; use --help"));
+                }
             }
         };
         if selected != Mode::All && selected != candidate {
-            return Err("arbi-tune modes are mutually exclusive".to_owned());
+            return Err("mp-tune modes are mutually exclusive".to_owned());
         }
         selected = candidate;
     }
@@ -317,7 +319,7 @@ fn selected_mode() -> Result<Mode, String> {
 
 fn print_help() {
     println!(
-        "Usage: arbi-tune [--tiers-only | --compiled-only | --division-only | --toom-only | --profile-for <arch>]\n\
+        "Usage: mp-tune [--tiers-only | --compiled-only | --division-only | --toom-only | --profile-for <arch>]\n\
          \n\
          With no mode, tunes the complete profile in 6 phases:\n\
          1. Toom-8.5 kernels\n\

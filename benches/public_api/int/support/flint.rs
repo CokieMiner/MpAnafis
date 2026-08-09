@@ -171,7 +171,7 @@ impl FlintInt {
 
     /// Runs FLINT's built-in fixed-policy probable-prime test.
     ///
-    /// This is only a cost reference. Unlike `ArbiUint::is_probably_prime`, the
+    /// This is only a cost reference. Unlike `MpUint::is_probably_prime`, the
     /// FLINT entry point does not accept a requested Miller-Rabin round count,
     /// so it is not a direct equivalent of the benchmark's 24-round cells.
     #[must_use]

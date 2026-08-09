@@ -2,7 +2,7 @@
 
 use core::{cmp::min, ptr::copy_nonoverlapping};
 
-use super::{ArchKernels, InternalArbiUint, Limb};
+use super::{ArchKernels, InternalMpUint, Limb};
 
 /// Namespace for shared addition and subtraction limb primitives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -241,7 +241,7 @@ impl Addition {
     )]
     #[allow(unsafe_code, reason = "Manages vector length directly for performance")]
     #[inline(always)]
-    pub unsafe fn append_carry(dst: &mut InternalArbiUint, carry: Limb) {
+    pub unsafe fn append_carry(dst: &mut InternalMpUint, carry: Limb) {
         if carry != 0 {
             dst.push_limb(carry);
         }

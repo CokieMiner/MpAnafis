@@ -4,10 +4,10 @@ use core::cmp::min;
 
 use alloc::vec;
 
-use super::{InternalArbiUint, LIMB_BITS, Limb};
-impl InternalArbiUint {
+use super::{InternalMpUint, LIMB_BITS, Limb};
+impl InternalMpUint {
     /// Returns true if the integer is exactly zero.
-    /// Because `InternalArbiUint` strictly normalizes zero to an empty vector,
+    /// Because `InternalMpUint` strictly normalizes zero to an empty vector,
     /// this check is an extremely fast `O(1)` length comparison.
     #[inline]
     #[must_use]

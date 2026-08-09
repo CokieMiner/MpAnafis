@@ -1,8 +1,8 @@
 //! Combined unsigned arithmetic APIs.
 
-use super::ArbiUint;
+use super::MpUint;
 
-impl ArbiUint {
+impl MpUint {
     /// Fused multiply-add: computes `(self * a) + b` without intermediate precision truncation.
     ///
     /// # Panics

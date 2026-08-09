@@ -12,7 +12,7 @@ use core::{
 
 use alloc::vec::Vec;
 
-use super::{INLINE_LIMBS, InternalArbiInt, InternalArbiUint, Limb, UintRepr};
+use super::{INLINE_LIMBS, InternalMpInt, InternalMpUint, Limb, UintRepr};
 
 #[derive(Clone, Copy)]
 enum SignedBitwiseOp {
@@ -25,7 +25,7 @@ enum SignedBitwiseOp {
 
 macro_rules! impl_bitwise {
     ($trait:ident, $method:ident, $op:ident) => {
-        impl $trait<Self> for InternalArbiInt {
+        impl $trait<Self> for InternalMpInt {
             type Output = Self;
             #[inline]
             #[track_caller]
@@ -34,7 +34,7 @@ macro_rules! impl_bitwise {
             }
         }
 
-        impl $trait<&Self> for InternalArbiInt {
+        impl $trait<&Self> for InternalMpInt {
             type Output = Self;
             #[inline]
             #[track_caller]
@@ -43,20 +43,20 @@ macro_rules! impl_bitwise {
             }
         }
 
-        impl $trait<InternalArbiInt> for &InternalArbiInt {
-            type Output = InternalArbiInt;
+        impl $trait<InternalMpInt> for &InternalMpInt {
+            type Output = InternalMpInt;
             #[inline]
             #[track_caller]
-            fn $method(self, rhs: InternalArbiInt) -> Self::Output {
+            fn $method(self, rhs: InternalMpInt) -> Self::Output {
                 $trait::$method(self, &rhs)
             }
         }
 
-        impl $trait<&InternalArbiInt> for &InternalArbiInt {
-            type Output = InternalArbiInt;
+        impl $trait<&InternalMpInt> for &InternalMpInt {
+            type Output = InternalMpInt;
             #[inline]
             #[track_caller]
-            fn $method(self, rhs: &InternalArbiInt) -> InternalArbiInt {
+            fn $method(self, rhs: &InternalMpInt) -> InternalMpInt {
                 signed_bitwise_op(self, rhs, SignedBitwiseOp::$op)
             }
         }
@@ -69,7 +69,7 @@ impl_bitwise!(BitXor, bitxor, Xor);
 
 // ---- Not trait ----
 
-impl Not for InternalArbiInt {
+impl Not for InternalMpInt {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -78,22 +78,22 @@ impl Not for InternalArbiInt {
     }
 }
 
-impl Not for &InternalArbiInt {
-    type Output = InternalArbiInt;
+impl Not for &InternalMpInt {
+    type Output = InternalMpInt;
     #[inline]
     #[track_caller]
-    fn not(self) -> InternalArbiInt {
+    fn not(self) -> InternalMpInt {
         let mut abs = self.abs.clone();
         if self.is_positive {
             abs.increment();
-            InternalArbiInt {
+            InternalMpInt {
                 abs,
                 is_positive: false,
             }
             .normalized()
         } else {
             abs.decrement();
-            InternalArbiInt {
+            InternalMpInt {
                 abs,
                 is_positive: true,
             }
@@ -104,7 +104,7 @@ impl Not for &InternalArbiInt {
 
 // ---- Shl trait ----
 
-impl Shl<usize> for InternalArbiInt {
+impl Shl<usize> for InternalMpInt {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -113,12 +113,12 @@ impl Shl<usize> for InternalArbiInt {
     }
 }
 
-impl Shl<usize> for &InternalArbiInt {
-    type Output = InternalArbiInt;
+impl Shl<usize> for &InternalMpInt {
+    type Output = InternalMpInt;
     #[inline]
     #[track_caller]
-    fn shl(self, rhs: usize) -> InternalArbiInt {
-        InternalArbiInt {
+    fn shl(self, rhs: usize) -> InternalMpInt {
+        InternalMpInt {
             abs: self.abs.shl(rhs),
             is_positive: self.is_positive,
         }
@@ -128,7 +128,7 @@ impl Shl<usize> for &InternalArbiInt {
 
 // ---- Shr trait ----
 
-impl Shr<usize> for InternalArbiInt {
+impl Shr<usize> for InternalMpInt {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -137,13 +137,13 @@ impl Shr<usize> for InternalArbiInt {
     }
 }
 
-impl Shr<usize> for &InternalArbiInt {
-    type Output = InternalArbiInt;
+impl Shr<usize> for &InternalMpInt {
+    type Output = InternalMpInt;
     #[inline]
     #[track_caller]
-    fn shr(self, rhs: usize) -> InternalArbiInt {
+    fn shr(self, rhs: usize) -> InternalMpInt {
         if self.is_positive {
-            InternalArbiInt {
+            InternalMpInt {
                 abs: self.abs.shr(rhs),
                 is_positive: true,
             }
@@ -153,7 +153,7 @@ impl Shr<usize> for &InternalArbiInt {
             if self.abs.has_any_bits_set_below(rhs) {
                 adjusted.increment();
             }
-            InternalArbiInt {
+            InternalMpInt {
                 abs: adjusted,
                 is_positive: false,
             }
@@ -162,7 +162,7 @@ impl Shr<usize> for &InternalArbiInt {
     }
 }
 
-impl InternalArbiInt {
+impl InternalMpInt {
     /// Left-shifts the signed integer in place by `rhs` bits.
     #[inline]
     pub fn shl_assign(&mut self, rhs: usize) {
@@ -195,7 +195,7 @@ impl InternalArbiInt {
 /// Returns `abs - 1` for a strictly negative sign-magnitude value.
 #[inline]
 #[must_use]
-fn negative_predecessor(abs: &InternalArbiUint) -> InternalArbiUint {
+fn negative_predecessor(abs: &InternalMpUint) -> InternalMpUint {
     let mut pred = abs.clone();
     pred.decrement();
     pred
@@ -204,9 +204,9 @@ fn negative_predecessor(abs: &InternalArbiUint) -> InternalArbiUint {
 /// Builds the negative integer `!(pred)`, equivalent to `-(pred + 1)`.
 #[inline]
 #[must_use]
-fn negative_from_predecessor(mut pred: InternalArbiUint) -> InternalArbiInt {
+fn negative_from_predecessor(mut pred: InternalMpUint) -> InternalMpInt {
     pred.increment();
-    InternalArbiInt {
+    InternalMpInt {
         abs: pred,
         is_positive: false,
     }
@@ -216,7 +216,7 @@ fn negative_from_predecessor(mut pred: InternalArbiUint) -> InternalArbiInt {
 /// Computes `lhs & !rhs` over the finite width of `lhs`.
 #[inline]
 #[must_use]
-fn bitand_not(lhs: &InternalArbiUint, rhs: &InternalArbiUint) -> InternalArbiUint {
+fn bitand_not(lhs: &InternalMpUint, rhs: &InternalMpUint) -> InternalMpUint {
     if let (
         UintRepr::Inline {
             len: lhs_len,
@@ -241,7 +241,7 @@ fn bitand_not(lhs: &InternalArbiUint, rhs: &InternalArbiUint) -> InternalArbiUin
             // SAFETY: i < active_len <= INLINE_LIMBS, so the lhs limb exists.
             *limb = unsafe { *lhs_limbs.get_unchecked(i) } & !rhs_limb;
         }
-        let mut result = InternalArbiUint {
+        let mut result = InternalMpUint {
             repr: UintRepr::Inline {
                 len: *lhs_len,
                 limbs,
@@ -280,7 +280,7 @@ fn bitand_not(lhs: &InternalArbiUint, rhs: &InternalArbiUint) -> InternalArbiUin
     unsafe {
         limbs.set_len(lhs_len);
     }
-    InternalArbiUint::from_limbs(limbs)
+    InternalMpUint::from_limbs(limbs)
 }
 
 /// Perform a signed bitwise operation (AND/OR/XOR) via two's complement.
@@ -288,12 +288,12 @@ fn bitand_not(lhs: &InternalArbiUint, rhs: &InternalArbiUint) -> InternalArbiUin
 #[inline]
 #[must_use]
 fn signed_bitwise_op(
-    self_val: &InternalArbiInt,
-    rhs: &InternalArbiInt,
+    self_val: &InternalMpInt,
+    rhs: &InternalMpInt,
     op: SignedBitwiseOp,
-) -> InternalArbiInt {
+) -> InternalMpInt {
     match (self_val.is_positive, rhs.is_positive) {
-        (true, true) => InternalArbiInt {
+        (true, true) => InternalMpInt {
             abs: unsigned_bitwise_op(&self_val.abs, &rhs.abs, op),
             is_positive: true,
         }
@@ -307,10 +307,10 @@ fn signed_bitwise_op(
 #[inline]
 #[must_use]
 fn unsigned_bitwise_op(
-    lhs: &InternalArbiUint,
-    rhs: &InternalArbiUint,
+    lhs: &InternalMpUint,
+    rhs: &InternalMpUint,
     op: SignedBitwiseOp,
-) -> InternalArbiUint {
+) -> InternalMpUint {
     match op {
         SignedBitwiseOp::And => lhs.bitand(rhs),
         SignedBitwiseOp::Or => lhs.bitor(rhs),
@@ -321,13 +321,13 @@ fn unsigned_bitwise_op(
 #[inline]
 #[must_use]
 fn positive_negative_bitwise(
-    positive_abs: &InternalArbiUint,
-    negative_abs: &InternalArbiUint,
+    positive_abs: &InternalMpUint,
+    negative_abs: &InternalMpUint,
     op: SignedBitwiseOp,
-) -> InternalArbiInt {
+) -> InternalMpInt {
     let neg_pred = negative_predecessor(negative_abs);
     match op {
-        SignedBitwiseOp::And => InternalArbiInt {
+        SignedBitwiseOp::And => InternalMpInt {
             abs: bitand_not(positive_abs, &neg_pred),
             is_positive: true,
         }
@@ -340,16 +340,16 @@ fn positive_negative_bitwise(
 #[inline]
 #[must_use]
 fn negative_negative_bitwise(
-    lhs_abs: &InternalArbiUint,
-    rhs_abs: &InternalArbiUint,
+    lhs_abs: &InternalMpUint,
+    rhs_abs: &InternalMpUint,
     op: SignedBitwiseOp,
-) -> InternalArbiInt {
+) -> InternalMpInt {
     let lhs_pred = negative_predecessor(lhs_abs);
     let rhs_pred = negative_predecessor(rhs_abs);
     match op {
         SignedBitwiseOp::And => negative_from_predecessor(lhs_pred.bitor(&rhs_pred)),
         SignedBitwiseOp::Or => negative_from_predecessor(lhs_pred.bitand(&rhs_pred)),
-        SignedBitwiseOp::Xor => InternalArbiInt {
+        SignedBitwiseOp::Xor => InternalMpInt {
             abs: lhs_pred.bitxor(&rhs_pred),
             is_positive: true,
         }

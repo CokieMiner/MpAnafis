@@ -6,7 +6,7 @@ use core::ops::{
 
 use proptest::prelude::*;
 
-use super::{ArbiInt, ArbiUint, bounded_int, bounded_uint};
+use super::{MpInt, MpUint, bounded_int, bounded_uint};
 use crate::Precision;
 
 proptest! {
@@ -20,7 +20,7 @@ proptest! {
     ) {
         let precision = Precision::new_bounded(bits).expect("property width is valid");
         let lhs = bounded_uint(u128::from(lhs_value), bits);
-        let rhs = ArbiUint::from(rhs_value);
+        let rhs = MpUint::from(rhs_value);
 
         let mut sum_ref = lhs.clone();
         AddAssign::add_assign(&mut sum_ref, &rhs);
@@ -36,11 +36,11 @@ proptest! {
             (rhs_value, lhs_value)
         };
         let mut difference = bounded_uint(u128::from(larger), bits);
-        SubAssign::sub_assign(&mut difference, ArbiUint::from(smaller));
+        SubAssign::sub_assign(&mut difference, MpUint::from(smaller));
         prop_assert_eq!(difference.precision, precision);
 
         let mut product = bounded_uint(u128::from(small_lhs), bits);
-        MulAssign::mul_assign(&mut product, ArbiUint::from(small_rhs));
+        MulAssign::mul_assign(&mut product, MpUint::from(small_rhs));
         prop_assert_eq!(product.precision, precision);
 
         let mut quotient = lhs.clone();
@@ -74,7 +74,7 @@ proptest! {
     ) {
         let precision = Precision::new_bounded(bits).expect("property width is valid");
         let lhs = bounded_int(i128::from(lhs_value), bits);
-        let rhs = ArbiInt::from(rhs_value);
+        let rhs = MpInt::from(rhs_value);
 
         let mut sum_ref = lhs.clone();
         AddAssign::add_assign(&mut sum_ref, &rhs);
@@ -89,7 +89,7 @@ proptest! {
         prop_assert_eq!(difference.precision, precision);
 
         let mut product = bounded_int(i128::from(small_lhs), bits);
-        MulAssign::mul_assign(&mut product, ArbiInt::from(small_rhs));
+        MulAssign::mul_assign(&mut product, MpInt::from(small_rhs));
         prop_assert_eq!(product.precision, precision);
 
         let mut quotient = lhs.clone();

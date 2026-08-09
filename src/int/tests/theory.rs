@@ -10,14 +10,14 @@ use core::cmp::Ordering;
 use proptest::prelude::*;
 
 use super::{nz, strategies};
-use crate::int::api::{ArbiInt, ArbiUint};
+use crate::int::api::{MpInt, MpUint};
 
 proptest! {
     #[test]
     fn prop_theory_phi_prime(val in 2_u64..=1000) {
-        let n = ArbiUint::from(val);
+        let n = MpUint::from(val);
         if n.is_prime() {
-            prop_assert_eq!(n.euler_phi(), Some(ArbiUint::from(val - 1)));
+            prop_assert_eq!(n.euler_phi(), Some(MpUint::from(val - 1)));
         }
     }
 }
@@ -29,7 +29,7 @@ proptest! {
         unsigned_seed in any::<u16>(),
         signed_seed in any::<i16>(),
     ) {
-        let unsigned = ArbiUint::with_precision_wrapping(unsigned_seed, nz(bits));
+        let unsigned = MpUint::with_precision_wrapping(unsigned_seed, nz(bits));
         if let Some(next) = unsigned.next_prime() {
             prop_assert_eq!(next.precision, unsigned.precision);
             prop_assert!(next.significant_bits() <= bits);
@@ -37,7 +37,7 @@ proptest! {
             prop_assert!(next.is_prime());
         }
 
-        let signed = ArbiInt::with_precision_wrapping(signed_seed, nz(bits));
+        let signed = MpInt::with_precision_wrapping(signed_seed, nz(bits));
         if let Some(next) = signed.next_prime() {
             prop_assert_eq!(next.precision, signed.precision);
             prop_assert!(next.value.required_signed_bits_for_bounded_storage() <= bits);
@@ -50,11 +50,11 @@ proptest! {
 proptest! {
     #[test]
     fn prop_theory_phi_composite(p in 2_u64..=50, q in 2_u64..=50) {
-        let np = ArbiUint::from(p);
-        let nq = ArbiUint::from(q);
+        let np = MpUint::from(p);
+        let nq = MpUint::from(q);
         if np.is_prime() && nq.is_prime() && p != q {
-            let n = ArbiUint::from(p * q);
-            let expected = ArbiUint::from((p - 1) * (q - 1));
+            let n = MpUint::from(p * q);
+            let expected = MpUint::from((p - 1) * (q - 1));
             prop_assert_eq!(n.euler_phi(), Some(expected));
         }
     }
@@ -67,10 +67,10 @@ proptest! {
         mod_val in 2_i64..=1000_i64,
         exp_val in 1_i64..=50_i64,
     ) {
-        let base = ArbiInt::from(base_val);
-        let modulus = ArbiInt::from(mod_val);
-        let pos_exp = ArbiInt::from(exp_val);
-        let neg_exp = ArbiInt::from(-exp_val);
+        let base = MpInt::from(base_val);
+        let modulus = MpInt::from(mod_val);
+        let pos_exp = MpInt::from(exp_val);
+        let neg_exp = MpInt::from(-exp_val);
 
         let inv = base.invert(&modulus);
         if let Some(inv_base) = inv {
@@ -91,7 +91,7 @@ proptest! {
             return Ok(());
         }
 
-        let one = ArbiUint::one();
+        let one = MpUint::one();
         let predecessor = &m - &one;
         prop_assert_eq!(one.invert(&m), Some(one));
         prop_assert_eq!(predecessor.invert(&m), Some(predecessor));
@@ -125,7 +125,7 @@ proptest! {
             "sqrt_rem decomposition"
         );
 
-        let next = &root + &ArbiUint::one();
+        let next = &root + &MpUint::one();
         let next_sq = &next * &next;
         prop_assert!(
             root_sq.cmp(&u) != Ordering::Greater,
@@ -133,7 +133,7 @@ proptest! {
         );
         prop_assert!(u.cmp(&next_sq) == Ordering::Less, "root is maximal");
 
-        let two_root_plus_one = &(&root << 1_usize) + &ArbiUint::one();
+        let two_root_plus_one = &(&root << 1_usize) + &MpUint::one();
         prop_assert!(rem < two_root_plus_one, "remainder bound");
     }
 }
@@ -147,7 +147,7 @@ proptest! {
         };
 
         let root_sq = &root * &root;
-        let next = &root + &ArbiUint::one();
+        let next = &root + &MpUint::one();
         let next_sq = &next * &next;
 
         prop_assert!(
@@ -168,7 +168,7 @@ proptest! {
     ) {
         let expected = Some(&u % &m);
         prop_assert_eq!(u.barrett_reduce(&m), expected);
-        if m_int.is_zero() { m_int = ArbiInt::one(); }
+        if m_int.is_zero() { m_int = MpInt::one(); }
         let expected_int = Some(&i.abs() % &m_int.abs());
         prop_assert_eq!(i.barrett_reduce(&m_int), expected_int);
     }
@@ -181,15 +181,15 @@ proptest! {
         b in strategies::uint(32),
         m in strategies::uint(32),
     ) {
-        let m_odd = m | ArbiUint::one();
+        let m_odd = m | MpUint::one();
         let ab = a.montgomery_mul(&b, &m_odd);
         let ba = b.montgomery_mul(&a, &m_odd);
         prop_assert_eq!(ab, ba, "montgomery_mul should be commutative");
 
         let am_m = a.montgomery_mul(&m_odd, &m_odd);
-        prop_assert_eq!(am_m, Some(ArbiUint::zero()));
+        prop_assert_eq!(am_m, Some(MpUint::zero()));
 
-        let even_m = m_odd ^ ArbiUint::one();
+        let even_m = m_odd ^ MpUint::one();
         if !even_m.is_zero() {
             prop_assert_eq!(a.montgomery_mul(&b, &even_m), None);
         }
@@ -211,12 +211,12 @@ proptest! {
 proptest! {
     #[test]
     fn prop_signed_euler_phi_requires_positive_input(input in -1_000_i64..=1_000) {
-        let candidate = ArbiInt::from(input);
+        let candidate = MpInt::from(input);
         if input <= 0 {
             prop_assert_eq!(candidate.euler_phi(), None);
         } else {
-            let magnitude = ArbiUint::from(input.unsigned_abs());
-            let expected = magnitude.euler_phi().map(ArbiInt::from);
+            let magnitude = MpUint::from(input.unsigned_abs());
+            let expected = magnitude.euler_phi().map(MpInt::from);
             prop_assert_eq!(candidate.euler_phi(), expected);
         }
     }
@@ -229,10 +229,10 @@ proptest! {
         modulus_seed in any::<u16>(),
     ) {
         let odd_modulus = u64::from(modulus_seed) | 1;
-        let argument = ArbiInt::from(numerator);
-        let denominator = ArbiInt::from(odd_modulus);
-        let magnitude = ArbiUint::from(numerator.unsigned_abs());
-        let unsigned_modulus = ArbiUint::from(odd_modulus);
+        let argument = MpInt::from(numerator);
+        let denominator = MpInt::from(odd_modulus);
+        let magnitude = MpUint::from(numerator.unsigned_abs());
+        let unsigned_modulus = MpUint::from(odd_modulus);
         let expected = magnitude.jacobi_symbol(&unsigned_modulus).map(|symbol| {
             if numerator < 0 && odd_modulus & 3 == 3 {
                 symbol.wrapping_neg()
@@ -243,7 +243,7 @@ proptest! {
 
         prop_assert_eq!(argument.jacobi_symbol(&denominator), expected);
         prop_assert_eq!(
-            argument.jacobi_symbol(&ArbiInt::from(
+            argument.jacobi_symbol(&MpInt::from(
                 i64::try_from(odd_modulus)
                     .expect("a u16-derived odd modulus fits i64")
                     .wrapping_neg()
@@ -252,7 +252,7 @@ proptest! {
         );
         let even_modulus = u64::from(modulus_seed).wrapping_add(1).wrapping_mul(2);
         prop_assert_eq!(
-            argument.jacobi_symbol(&ArbiInt::from(even_modulus)),
+            argument.jacobi_symbol(&MpInt::from(even_modulus)),
             None,
         );
     }
@@ -264,7 +264,7 @@ proptest! {
         a in strategies::uint(64),
         b in strategies::uint(64),
     ) {
-        let n = &b | &ArbiUint::one();
+        let n = &b | &MpUint::one();
         if n.is_one() {
             return Ok(());
         }
@@ -278,15 +278,15 @@ proptest! {
             prop_assert_eq!(j_ab, Some(j_a * j_b), "multiplicativity");
         }
 
-        let m = &b | &ArbiUint::one();
+        let m = &b | &MpUint::one();
         if m.is_one() { return Ok(()); }
         if !m.is_one()
             && a.is_coprime(&m)
-            && !(&a & &ArbiUint::one()).is_zero()
+            && !(&a & &MpUint::one()).is_zero()
             && let (Some(j_am), Some(j_ma)) = (a.jacobi_symbol(&m), m.jacobi_symbol(&a))
         {
-            let a_mod4 = u32::try_from(&a & &ArbiUint::from(3_u32)).unwrap_or(0);
-            let m_mod4 = u32::try_from(&m & &ArbiUint::from(3_u32)).unwrap_or(0);
+            let a_mod4 = u32::try_from(&a & &MpUint::from(3_u32)).unwrap_or(0);
+            let m_mod4 = u32::try_from(&m & &MpUint::from(3_u32)).unwrap_or(0);
             let expected_prod = if a_mod4 == 3 && m_mod4 == 3 { -1 } else { 1 };
             prop_assert_eq!(j_am * j_ma, expected_prod, "quadratic reciprocity");
         }

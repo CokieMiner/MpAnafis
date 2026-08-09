@@ -2,9 +2,9 @@
 
 use core::ops::{BitAnd, BitXor, Shr};
 
-use super::ArbiInt;
+use super::MpInt;
 
-impl ArbiInt {
+impl MpInt {
     /// Fused multiply-add: computes `(self * a) + b` without intermediate precision truncation.
     ///
     /// # Panics

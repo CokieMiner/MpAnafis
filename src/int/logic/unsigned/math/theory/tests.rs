@@ -23,8 +23,8 @@ proptest! {
             a_limbs in proptest::collection::vec(any::<Limb>(), 0..=4),
             b_limbs in proptest::collection::vec(any::<Limb>(), 0..=4),
         ) {
-            let a = InternalArbiUint::from_limbs(a_limbs);
-            let b = InternalArbiUint::from_limbs(b_limbs);
+            let a = InternalMpUint::from_limbs(a_limbs);
+            let b = InternalMpUint::from_limbs(b_limbs);
 
             // jacobi_symbol returns None for even/zero n, Some for odd n
             if !b.is_zero() && b.is_odd() {
@@ -32,14 +32,14 @@ proptest! {
             }
 
             // abs_diff symmetry: |a - b| == |b - a|
-            let mut out_ab = InternalArbiUint::zero();
-            let mut out_ba = InternalArbiUint::zero();
+            let mut out_ab = InternalMpUint::zero();
+            let mut out_ba = InternalMpUint::zero();
             compute_abs_diff(&a, &b, &mut out_ab);
             compute_abs_diff(&b, &a, &mut out_ba);
             prop_assert_eq!(out_ab, out_ba);
 
             // abs_diff with self equals zero
-            let mut out_self = InternalArbiUint::zero();
+            let mut out_self = InternalMpUint::zero();
             compute_abs_diff(&a, &a, &mut out_self);
             prop_assert!(out_self.is_zero());
         }
@@ -62,7 +62,7 @@ proptest! {
     )]
     #[test]
     fn euler_phi_prop(value in 0_u16..=2_000) {
-        let n = InternalArbiUint::from_limb(Limb::from(value));
+        let n = InternalMpUint::from_limb(Limb::from(value));
         let Some(phi) = n.euler_phi() else {
             prop_assert!(n.is_zero(), "euler_phi is only undefined at zero");
             return Ok(());
@@ -80,10 +80,10 @@ proptest! {
 
         let mut coprime_count: Limb = 0;
         for candidate in 1..value {
-            if InternalArbiUint::from_limb(Limb::from(candidate)).gcd(&n).is_one() {
+            if InternalMpUint::from_limb(Limb::from(candidate)).gcd(&n).is_one() {
                 coprime_count = coprime_count.wrapping_add(1);
             }
         }
-        prop_assert_eq!(phi, InternalArbiUint::from_limb(coprime_count));
+        prop_assert_eq!(phi, InternalMpUint::from_limb(coprime_count));
     }
 }

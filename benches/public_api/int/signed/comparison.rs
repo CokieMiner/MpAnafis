@@ -17,7 +17,7 @@ use divan::black_box;
 use crate::int::support::{rug_int, rug_int_pairs};
 use crate::int::{
     ladders::NARROW,
-    support::{SAMPLE_SIZE_FAST, arbi_int, arbi_int_pairs},
+    support::{SAMPLE_SIZE_FAST, mp_int, mp_int_pairs},
 };
 
 /// Ordering of two negative values, where the magnitude order is reversed.
@@ -25,8 +25,8 @@ mod cmp {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_int_pairs(bits, true, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_int_pairs(bits, true, true);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(left).cmp(black_box(right)));
@@ -50,8 +50,8 @@ mod eq {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_int_pairs(bits, true, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_int_pairs(bits, true, true);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(left) == black_box(right));
@@ -75,8 +75,8 @@ mod hash {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_int(bits, 42, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_int(bits, 42, true);
         bencher.bench_local(|| {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             black_box(&value).hash(&mut hasher);
@@ -100,8 +100,8 @@ mod min {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_int_pairs(bits, true, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_int_pairs(bits, true, true);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(left).min(black_box(right)));
@@ -125,8 +125,8 @@ mod max {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_int_pairs(bits, true, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_int_pairs(bits, true, true);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(left).max(black_box(right)));

@@ -2,7 +2,7 @@
 
 use core::hint::black_box;
 
-use super::{FormatCache, InternalArbiUint, Limb};
+use super::{FormatCache, InternalMpUint, Limb};
 
 /// Root formatting tier measured by [`Tuner`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -25,7 +25,7 @@ const FORMAT_HASH: usize = 0x9E37;
 #[derive(Debug)]
 pub struct Tuner {
     algorithm: Algorithm,
-    value: InternalArbiUint,
+    value: InternalMpUint,
     radix: u32,
     format_cache: FormatCache,
 }
@@ -54,7 +54,7 @@ impl Tuner {
         let limbs: Vec<Limb> = (0..len)
             .map(|index| index.wrapping_mul(FORMAT_HASH) | 1)
             .collect();
-        let value = InternalArbiUint::from_limbs(limbs);
+        let value = InternalMpUint::from_limbs(limbs);
         let mut format_cache = FormatCache::new();
         if algorithm == Algorithm::Recursive {
             drop(black_box(value.to_string_radix_recursive_with_cache(

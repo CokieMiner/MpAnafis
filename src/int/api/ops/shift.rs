@@ -2,11 +2,11 @@
 
 use core::ops::{Shl, ShlAssign, Shr, ShrAssign};
 
-use super::{ArbiInt, ArbiUint};
+use super::{MpInt, MpUint};
 
-macro_rules! impl_arbiuint_shl {
+macro_rules! impl_mpuint_shl {
     ($shift_ty:ty, $convert:expr) => {
-        impl Shl<$shift_ty> for ArbiUint {
+        impl Shl<$shift_ty> for MpUint {
             type Output = Self;
             #[allow(
                 clippy::as_conversions,
@@ -27,8 +27,8 @@ macro_rules! impl_arbiuint_shl {
             }
         }
 
-        impl Shl<$shift_ty> for &ArbiUint {
-            type Output = ArbiUint;
+        impl Shl<$shift_ty> for &MpUint {
+            type Output = MpUint;
             #[allow(
                 clippy::as_conversions,
                 clippy::cast_possible_truncation,
@@ -38,7 +38,7 @@ macro_rules! impl_arbiuint_shl {
             #[track_caller]
             fn shl(self, shift: $shift_ty) -> Self::Output {
                 let shift = $convert(shift);
-                let result = ArbiUint {
+                let result = MpUint {
                     value: self.value.shl(shift),
                     precision: self.precision,
                 };
@@ -50,9 +50,9 @@ macro_rules! impl_arbiuint_shl {
     };
 }
 
-macro_rules! impl_arbiuint_shr {
+macro_rules! impl_mpuint_shr {
     ($shift_ty:ty, $convert:expr) => {
-        impl Shr<$shift_ty> for ArbiUint {
+        impl Shr<$shift_ty> for MpUint {
             type Output = Self;
             #[allow(
                 clippy::as_conversions,
@@ -74,8 +74,8 @@ macro_rules! impl_arbiuint_shr {
             }
         }
 
-        impl Shr<$shift_ty> for &ArbiUint {
-            type Output = ArbiUint;
+        impl Shr<$shift_ty> for &MpUint {
+            type Output = MpUint;
             #[allow(
                 clippy::as_conversions,
                 clippy::cast_possible_truncation,
@@ -85,7 +85,7 @@ macro_rules! impl_arbiuint_shr {
             #[track_caller]
             fn shr(self, shift: $shift_ty) -> Self::Output {
                 let shift = $convert(shift);
-                let result = ArbiUint {
+                let result = MpUint {
                     value: self.value.shr(shift),
                     precision: self.precision,
                 };
@@ -98,9 +98,9 @@ macro_rules! impl_arbiuint_shr {
     };
 }
 
-macro_rules! impl_arbiint_shl {
+macro_rules! impl_mpint_shl {
     ($shift_ty:ty, $convert:expr) => {
-        impl Shl<$shift_ty> for ArbiInt {
+        impl Shl<$shift_ty> for MpInt {
             type Output = Self;
             #[allow(
                 clippy::as_conversions,
@@ -121,8 +121,8 @@ macro_rules! impl_arbiint_shl {
             }
         }
 
-        impl Shl<$shift_ty> for &ArbiInt {
-            type Output = ArbiInt;
+        impl Shl<$shift_ty> for &MpInt {
+            type Output = MpInt;
             #[allow(
                 clippy::as_conversions,
                 clippy::cast_possible_truncation,
@@ -132,7 +132,7 @@ macro_rules! impl_arbiint_shl {
             #[track_caller]
             fn shl(self, shift: $shift_ty) -> Self::Output {
                 let shift = $convert(shift);
-                let result = ArbiInt {
+                let result = MpInt {
                     value: Shl::shl(&self.value, shift),
                     precision: self.precision,
                 };
@@ -144,9 +144,9 @@ macro_rules! impl_arbiint_shl {
     };
 }
 
-macro_rules! impl_arbiint_shr {
+macro_rules! impl_mpint_shr {
     ($shift_ty:ty, $convert:expr) => {
-        impl Shr<$shift_ty> for ArbiInt {
+        impl Shr<$shift_ty> for MpInt {
             type Output = Self;
             #[allow(
                 clippy::as_conversions,
@@ -168,8 +168,8 @@ macro_rules! impl_arbiint_shr {
             }
         }
 
-        impl Shr<$shift_ty> for &ArbiInt {
-            type Output = ArbiInt;
+        impl Shr<$shift_ty> for &MpInt {
+            type Output = MpInt;
             #[allow(
                 clippy::as_conversions,
                 clippy::cast_possible_truncation,
@@ -179,7 +179,7 @@ macro_rules! impl_arbiint_shr {
             #[track_caller]
             fn shr(self, shift: $shift_ty) -> Self::Output {
                 let shift = $convert(shift);
-                let result = ArbiInt {
+                let result = MpInt {
                     value: Shr::shr(&self.value, shift),
                     precision: self.precision,
                 };
@@ -192,9 +192,9 @@ macro_rules! impl_arbiint_shr {
     };
 }
 
-macro_rules! impl_arbiuint_shl_assign {
+macro_rules! impl_mpuint_shl_assign {
     ($shift_ty:ty, $convert:expr) => {
-        impl ShlAssign<$shift_ty> for ArbiUint {
+        impl ShlAssign<$shift_ty> for MpUint {
             #[allow(
                 clippy::as_conversions,
                 clippy::cast_possible_truncation,
@@ -224,9 +224,9 @@ macro_rules! impl_arbiuint_shl_assign {
     };
 }
 
-macro_rules! impl_arbiuint_shr_assign {
+macro_rules! impl_mpuint_shr_assign {
     ($shift_ty:ty, $convert:expr) => {
-        impl ShrAssign<$shift_ty> for ArbiUint {
+        impl ShrAssign<$shift_ty> for MpUint {
             #[allow(
                 clippy::as_conversions,
                 clippy::cast_possible_truncation,
@@ -245,9 +245,9 @@ macro_rules! impl_arbiuint_shr_assign {
     };
 }
 
-macro_rules! impl_arbiint_shl_assign {
+macro_rules! impl_mpint_shl_assign {
     ($shift_ty:ty, $convert:expr) => {
-        impl ShlAssign<$shift_ty> for ArbiInt {
+        impl ShlAssign<$shift_ty> for MpInt {
             #[allow(
                 clippy::as_conversions,
                 clippy::cast_possible_truncation,
@@ -277,9 +277,9 @@ macro_rules! impl_arbiint_shl_assign {
     };
 }
 
-macro_rules! impl_arbiint_shr_assign {
+macro_rules! impl_mpint_shr_assign {
     ($shift_ty:ty, $convert:expr) => {
-        impl ShrAssign<$shift_ty> for ArbiInt {
+        impl ShrAssign<$shift_ty> for MpInt {
             #[allow(
                 clippy::as_conversions,
                 clippy::cast_possible_truncation,
@@ -324,11 +324,11 @@ macro_rules! impl_shift_all {
     };
 }
 
-impl_shift_all!(impl_arbiuint_shl);
-impl_shift_all!(impl_arbiuint_shr);
-impl_shift_all!(impl_arbiuint_shl_assign);
-impl_shift_all!(impl_arbiuint_shr_assign);
-impl_shift_all!(impl_arbiint_shl);
-impl_shift_all!(impl_arbiint_shr);
-impl_shift_all!(impl_arbiint_shl_assign);
-impl_shift_all!(impl_arbiint_shr_assign);
+impl_shift_all!(impl_mpuint_shl);
+impl_shift_all!(impl_mpuint_shr);
+impl_shift_all!(impl_mpuint_shl_assign);
+impl_shift_all!(impl_mpuint_shr_assign);
+impl_shift_all!(impl_mpint_shl);
+impl_shift_all!(impl_mpint_shr);
+impl_shift_all!(impl_mpint_shl_assign);
+impl_shift_all!(impl_mpint_shr_assign);

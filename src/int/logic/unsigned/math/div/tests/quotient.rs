@@ -11,17 +11,17 @@ use proptest::prelude::*;
 
 use crate::int::types::INLINE_LIMBS;
 
-use super::{DivScratch, Division, InternalArbiUint, Limb};
+use super::{DivScratch, Division, InternalMpUint, Limb};
 
 /// Builds an operand whose top limb is non-zero, so the limb count is exact.
-fn dense_operand(limbs: &[Limb]) -> InternalArbiUint {
+fn dense_operand(limbs: &[Limb]) -> InternalMpUint {
     let mut owned: Vec<Limb> = limbs.to_vec();
     if let Some(top) = owned.last_mut()
         && *top == 0
     {
         *top = 1;
     }
-    InternalArbiUint::from_limbs(owned)
+    InternalMpUint::from_limbs(owned)
 }
 
 /// Equal-width operand pairs spanning every outcome of the leading-limb
@@ -33,7 +33,7 @@ fn dense_operand(limbs: &[Limb]) -> InternalArbiUint {
 /// must fall through to the truncated machinery.  Random pairs build the
 /// dividend as `k * den + r` for a small scalar `k`, which lands the quotient
 /// in the `0`, `1`, and small-scalar regions.
-fn equal_width_pair() -> impl Strategy<Value = (InternalArbiUint, InternalArbiUint)> {
+fn equal_width_pair() -> impl Strategy<Value = (InternalMpUint, InternalMpUint)> {
     let mut fixed_den: Vec<Limb> = alloc::vec![0x9e37; 24];
     if let Some(last) = fixed_den.last_mut() {
         *last = 3;
@@ -45,7 +45,7 @@ fn equal_width_pair() -> impl Strategy<Value = (InternalArbiUint, InternalArbiUi
     )
         .prop_map(|(den_limbs, multiple, tail_limbs)| {
             let den_b = dense_operand(&den_limbs);
-            let scaled = den_b.mul(&InternalArbiUint::from_limbs(alloc::vec![multiple]));
+            let scaled = den_b.mul(&InternalMpUint::from_limbs(alloc::vec![multiple]));
             let num_a = scaled.add(&dense_operand(&tail_limbs));
             (num_a, den_b)
         });
@@ -60,7 +60,7 @@ fn equal_width_pair() -> impl Strategy<Value = (InternalArbiUint, InternalArbiUi
 
 /// Exact-multiple pairs built around a fixed regression divisor, with a
 /// randomized factor and a small offset that is zero on the exact multiple.
-fn near_multiple_pair() -> impl Strategy<Value = (InternalArbiUint, InternalArbiUint)> {
+fn near_multiple_pair() -> impl Strategy<Value = (InternalMpUint, InternalMpUint)> {
     let random_pair = (
         proptest::collection::vec(any::<Limb>(), 8..=40),
         proptest::collection::vec(any::<Limb>(), 1..=3),
@@ -69,13 +69,13 @@ fn near_multiple_pair() -> impl Strategy<Value = (InternalArbiUint, InternalArbi
         .prop_map(|(den_limbs, factor_limbs, offset)| {
             let den_b = dense_operand(&den_limbs);
             let product = den_b.mul(&dense_operand(&factor_limbs));
-            let num_a = product.add(&InternalArbiUint::from_limbs(alloc::vec![offset]));
+            let num_a = product.add(&InternalMpUint::from_limbs(alloc::vec![offset]));
             (num_a, den_b)
         });
     prop_oneof![
         Just((
             dense_operand(&alloc::vec![0xdead; 30])
-                .mul(&InternalArbiUint::from_limbs(alloc::vec![0x0123])),
+                .mul(&InternalMpUint::from_limbs(alloc::vec![0x0123])),
             dense_operand(&alloc::vec![0xdead; 30]),
         )),
         random_pair,
@@ -85,10 +85,7 @@ fn near_multiple_pair() -> impl Strategy<Value = (InternalArbiUint, InternalArbi
 /// Builds `num = top * B^(limbs - 1)` and
 /// `den = 2 * B^(limbs - 1) - 1`. Thus the leading-limb estimate is `top`,
 /// while `top = 8` has exact quotient 4 and `top = 7` has exact quotient 3.
-fn maximum_correction_pair(
-    limbs: usize,
-    numerator_top: Limb,
-) -> (InternalArbiUint, InternalArbiUint) {
+fn maximum_correction_pair(limbs: usize, numerator_top: Limb) -> (InternalMpUint, InternalMpUint) {
     let mut numerator = alloc::vec![0; limbs];
     *numerator
         .last_mut()
@@ -98,8 +95,8 @@ fn maximum_correction_pair(
         .last_mut()
         .expect("the correction shape has at least one limb") = 1;
     (
-        InternalArbiUint::from_limbs(numerator),
-        InternalArbiUint::from_limbs(denominator),
+        InternalMpUint::from_limbs(numerator),
+        InternalMpUint::from_limbs(denominator),
     )
 }
 
@@ -148,10 +145,10 @@ fn small_quotient_classifies_zero_and_one_from_leading_limbs() {
         (equal_one_num, equal_one_den),
         (unequal_one_num, unequal_one_den),
     ] {
-        let numerator = InternalArbiUint::from_limbs(numerator_limbs);
-        let denominator = InternalArbiUint::from_limbs(denominator_limbs);
-        let mut quotient = InternalArbiUint::zero();
-        let mut remainder = InternalArbiUint::zero();
+        let numerator = InternalMpUint::from_limbs(numerator_limbs);
+        let denominator = InternalMpUint::from_limbs(denominator_limbs);
+        let mut quotient = InternalMpUint::zero();
+        let mut remainder = InternalMpUint::zero();
         assert!(Division::small_quotient_div_rem(
             &numerator,
             &denominator,
@@ -159,8 +156,8 @@ fn small_quotient_classifies_zero_and_one_from_leading_limbs() {
             &mut remainder,
         ));
 
-        let mut algorithm_d_quotient = InternalArbiUint::zero();
-        let mut algorithm_d_remainder = InternalArbiUint::zero();
+        let mut algorithm_d_quotient = InternalMpUint::zero();
+        let mut algorithm_d_remainder = InternalMpUint::zero();
         let mut scratch = DivScratch::default();
         Division::algorithm_d(
             &numerator,
@@ -182,8 +179,8 @@ fn small_quotient_handles_maximum_corrections_across_inline_boundary() {
     for limb_len in [inline_work_len, INLINE_LIMBS] {
         for (estimate, exact_quotient) in [(8_u8, 4_usize), (7_u8, 3_usize)] {
             let (numerator, denominator) = maximum_correction_pair(limb_len, Limb::from(estimate));
-            let mut quotient = InternalArbiUint::zero();
-            let mut remainder = InternalArbiUint::zero();
+            let mut quotient = InternalMpUint::zero();
+            let mut remainder = InternalMpUint::zero();
             assert!(Division::small_quotient_div_rem(
                 &numerator,
                 &denominator,
@@ -191,8 +188,8 @@ fn small_quotient_handles_maximum_corrections_across_inline_boundary() {
                 &mut remainder,
             ));
 
-            let mut algorithm_d_quotient = InternalArbiUint::zero();
-            let mut algorithm_d_remainder = InternalArbiUint::zero();
+            let mut algorithm_d_quotient = InternalMpUint::zero();
+            let mut algorithm_d_remainder = InternalMpUint::zero();
             let mut scratch = DivScratch::default();
             Division::algorithm_d(
                 &numerator,
@@ -203,7 +200,7 @@ fn small_quotient_handles_maximum_corrections_across_inline_boundary() {
             );
             assert_eq!(quotient, algorithm_d_quotient);
             assert_eq!(remainder, algorithm_d_remainder);
-            assert_eq!(quotient, InternalArbiUint::from_limb(exact_quotient));
+            assert_eq!(quotient, InternalMpUint::from_limb(exact_quotient));
         }
     }
 }
@@ -214,16 +211,16 @@ fn small_quotient_matches_algorithm_d_around_exact_multiple() {
     *denominator_limbs
         .last_mut()
         .expect("the inline representation is non-empty") = 1;
-    let denominator = InternalArbiUint::from_limbs(denominator_limbs);
-    let factor = InternalArbiUint::from_limb(5);
+    let denominator = InternalMpUint::from_limbs(denominator_limbs);
+    let factor = InternalMpUint::from_limb(5);
     let exact = denominator.mul(&factor);
-    let one = InternalArbiUint::one();
+    let one = InternalMpUint::one();
     let below = exact.sub(&one);
     let above = exact.add(&one);
 
     for numerator in [below, exact, above] {
-        let mut quotient = InternalArbiUint::zero();
-        let mut remainder = InternalArbiUint::zero();
+        let mut quotient = InternalMpUint::zero();
+        let mut remainder = InternalMpUint::zero();
         assert!(Division::small_quotient_div_rem(
             &numerator,
             &denominator,
@@ -231,8 +228,8 @@ fn small_quotient_matches_algorithm_d_around_exact_multiple() {
             &mut remainder,
         ));
 
-        let mut algorithm_d_quotient = InternalArbiUint::zero();
-        let mut algorithm_d_remainder = InternalArbiUint::zero();
+        let mut algorithm_d_quotient = InternalMpUint::zero();
+        let mut algorithm_d_remainder = InternalMpUint::zero();
         let mut scratch = DivScratch::default();
         Division::algorithm_d(
             &numerator,
@@ -252,11 +249,11 @@ fn small_quotient_rejection_leaves_outputs_untouched() {
     *denominator_limbs
         .last_mut()
         .expect("the inline representation is non-empty") = 1;
-    let denominator = InternalArbiUint::from_limbs(denominator_limbs);
-    let numerator = denominator.mul(&InternalArbiUint::from_limb(9));
+    let denominator = InternalMpUint::from_limbs(denominator_limbs);
+    let numerator = denominator.mul(&InternalMpUint::from_limb(9));
 
-    let mut algorithm_d_quotient = InternalArbiUint::zero();
-    let mut algorithm_d_remainder = InternalArbiUint::zero();
+    let mut algorithm_d_quotient = InternalMpUint::zero();
+    let mut algorithm_d_remainder = InternalMpUint::zero();
     let mut scratch = DivScratch::default();
     Division::algorithm_d(
         &numerator,
@@ -265,11 +262,11 @@ fn small_quotient_rejection_leaves_outputs_untouched() {
         &mut algorithm_d_remainder,
         &mut scratch,
     );
-    assert_eq!(algorithm_d_quotient, InternalArbiUint::from_limb(9));
+    assert_eq!(algorithm_d_quotient, InternalMpUint::from_limb(9));
     assert!(algorithm_d_remainder.is_zero());
 
-    let sentinel_quotient = InternalArbiUint::from_limb(0xdead);
-    let sentinel_remainder = InternalArbiUint::from_limb(0xbeef);
+    let sentinel_quotient = InternalMpUint::from_limb(0xdead);
+    let sentinel_remainder = InternalMpUint::from_limb(0xbeef);
     let mut quotient = sentinel_quotient.clone();
     let mut remainder = sentinel_remainder.clone();
     assert!(!Division::small_quotient_div_rem(
@@ -301,10 +298,10 @@ proptest! {
         num_limbs.extend_from_slice(&extra_limbs);
         let num_a = dense_operand(&num_limbs);
 
-        let mut quot = InternalArbiUint::zero();
+        let mut quot = InternalMpUint::zero();
         if Division::truncated_quotient(&num_a, &den_b, &mut quot) {
-            let mut algorithm_d_quotient = InternalArbiUint::zero();
-            let mut algorithm_d_remainder = InternalArbiUint::zero();
+            let mut algorithm_d_quotient = InternalMpUint::zero();
+            let mut algorithm_d_remainder = InternalMpUint::zero();
             let mut scratch = DivScratch::default();
             Division::algorithm_d(
                 &num_a,
@@ -331,10 +328,10 @@ proptest! {
         pair in near_multiple_pair(),
     ) {
         let (num_a, den_b) = pair;
-        let mut quot = InternalArbiUint::zero();
+        let mut quot = InternalMpUint::zero();
         if Division::truncated_quotient(&num_a, &den_b, &mut quot) {
-            let mut algorithm_d_quotient = InternalArbiUint::zero();
-            let mut algorithm_d_remainder = InternalArbiUint::zero();
+            let mut algorithm_d_quotient = InternalMpUint::zero();
+            let mut algorithm_d_remainder = InternalMpUint::zero();
             let mut scratch = DivScratch::default();
             Division::algorithm_d(
                 &num_a,
@@ -361,10 +358,10 @@ proptest! {
         pair in equal_width_pair(),
     ) {
         let (num_a, den_b) = pair;
-        let mut quot = InternalArbiUint::zero();
+        let mut quot = InternalMpUint::zero();
         if Division::truncated_quotient(&num_a, &den_b, &mut quot) {
-            let mut algorithm_d_quotient = InternalArbiUint::zero();
-            let mut algorithm_d_remainder = InternalArbiUint::zero();
+            let mut algorithm_d_quotient = InternalMpUint::zero();
+            let mut algorithm_d_remainder = InternalMpUint::zero();
             let mut scratch = DivScratch::default();
             Division::algorithm_d(
                 &num_a,

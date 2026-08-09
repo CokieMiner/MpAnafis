@@ -1,8 +1,8 @@
 //! Unsigned primality APIs.
 
-use super::ArbiUint;
+use super::MpUint;
 
-impl ArbiUint {
+impl MpUint {
     /// Returns `true` if the value is prime.
     #[must_use]
     pub fn is_prime(&self) -> bool {

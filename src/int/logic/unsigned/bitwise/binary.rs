@@ -9,9 +9,9 @@ use core::cmp::{max, min};
 
 use alloc::vec::Vec;
 
-use super::{ArchKernels, INLINE_LIMBS, InternalArbiUint, LIMB_BITS, LIMB_BYTES, Limb, UintRepr};
+use super::{ArchKernels, INLINE_LIMBS, InternalMpUint, LIMB_BITS, LIMB_BYTES, Limb, UintRepr};
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Computes the bitwise AND of two unsigned integers.
     #[inline]
     #[must_use]

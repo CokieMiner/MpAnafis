@@ -17,11 +17,11 @@
 
 use core::hint::black_box;
 
-use arbi_anafis::tune_api::tier::{
+use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
+use mp_anafis::tune_api::tier::{
     Limb,
     state::{MulBenchScratch, bench_lopsided_mul_scratch_len, bench_lopsided_mul_with_scratch},
 };
-use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
 
 use crate::shared::operands_pair;
 

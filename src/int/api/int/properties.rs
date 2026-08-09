@@ -1,8 +1,8 @@
 //! Signed integer property and comparison helper APIs.
 
-use super::{ArbiInt, ArbiUint, InternalArbiInt, InternalArbiUint};
+use super::{InternalMpInt, InternalMpUint, MpInt, MpUint};
 
-impl ArbiInt {
+impl MpInt {
     /// Returns `true` if this integer is zero.
     #[inline]
     #[must_use]
@@ -17,7 +17,7 @@ impl ArbiInt {
     /// Returns `true` if the value is positive (greater than zero).
     ///
     /// Zero is neither positive nor negative, so this is not the negation of
-    /// [`ArbiInt::is_negative`].
+    /// [`MpInt::is_negative`].
     #[inline]
     #[must_use]
     #[allow(
@@ -92,8 +92,8 @@ impl ArbiInt {
         clippy::same_name_method,
         reason = "Inherent method mirrors num_traits trait for ergonomic access without trait import"
     )]
-    pub fn unsigned_abs(&self) -> ArbiUint {
-        let result = ArbiUint {
+    pub fn unsigned_abs(&self) -> MpUint {
+        let result = MpUint {
             value: self.value.abs.clone(),
             precision: self.precision,
         };
@@ -111,7 +111,7 @@ impl ArbiInt {
             if self.is_zero() {
                 return (width > 1).then(|| {
                     let result = Self {
-                        value: InternalArbiInt::one(),
+                        value: InternalMpInt::one(),
                         precision: self.precision,
                     };
                     result.debug_assert_valid();
@@ -126,8 +126,8 @@ impl ArbiInt {
                 return None;
             }
             let result = Self {
-                value: InternalArbiInt {
-                    abs: InternalArbiUint::one().shl(next_bit),
+                value: InternalMpInt {
+                    abs: InternalMpUint::one().shl(next_bit),
                     is_positive: true,
                 },
                 precision: self.precision,
@@ -143,8 +143,8 @@ impl ArbiInt {
         }
         let bits = self.value.abs.significant_bits();
         let result = Self {
-            value: InternalArbiInt {
-                abs: InternalArbiUint::one().shl(bits),
+            value: InternalMpInt {
+                abs: InternalMpUint::one().shl(bits),
                 is_positive: true,
             },
             precision: self.precision,

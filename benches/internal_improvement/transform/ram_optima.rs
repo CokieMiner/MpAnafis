@@ -11,7 +11,7 @@
 
 use core::hint::black_box;
 
-use arbi_anafis::tune_api::tier::{
+use mp_anafis::tune_api::tier::{
     Limb,
     transform::{
         bench_ssa_mul_forced_plan, bench_ssa_mul_forced_plan_scratch_len,

@@ -4,9 +4,9 @@ use core::{cmp::Ordering, mem::swap};
 
 use alloc::vec::Vec;
 
-use super::{DivScratch, Division, Gcd, InternalArbiUint, Limb};
+use super::{DivScratch, Division, Gcd, InternalMpUint, Limb};
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Computes the Jacobi symbol `(self | other)`.
     ///
     /// `other` must be odd and positive. Returns `1` if `self` is a quadratic

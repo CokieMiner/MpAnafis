@@ -1,4 +1,4 @@
-name: Fuzz ArbiInt
+name: Fuzz MpInt
 
 on:
   schedule:

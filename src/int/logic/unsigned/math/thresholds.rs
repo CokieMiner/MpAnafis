@@ -11,8 +11,8 @@
 //!
 //! | Priority | Source | How |
 //! |---|---|---|
-//! | 1 | `ARBI_TUNING_PROFILE` | Explicit candidate path, used by the rebuild-and-score phase of `arbi-tune`. |
-//! | 2 | `src/int/tuned_thresholds.rs` | Local, ignored machine profile emitted by `arbi-tune`. |
+//! | 1 | `MP_TUNING_PROFILE` | Explicit candidate path, used by the rebuild-and-score phase of `mp-tune`. |
+//! | 2 | `src/int/tuned_thresholds.rs` | Local, ignored machine profile emitted by `mp-tune`. |
 //! | 3 | `build_support/tuning.rs` | Conservative target-architecture defaults, with pointer-width fallback. |
 //!
 //! Candidate and local files must define the entire profile. The build rejects
@@ -25,7 +25,7 @@
 //! Run the complete tuner on an otherwise idle, pinned CPU:
 //!
 //! ```sh
-//! taskset -c 2 cargo run --release --bin arbi-tune \
+//! taskset -c 2 cargo run --release --bin mp-tune \
 //!   --features _internal-tune
 //! ```
 //!

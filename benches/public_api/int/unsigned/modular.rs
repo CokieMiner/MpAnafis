@@ -11,8 +11,8 @@
 
 use core::ops::{Add, Mul, Rem, Sub};
 
-use arbi_anafis::ArbiUint;
 use divan::black_box;
+use mp_anafis::MpUint;
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 use rug::{Integer, ops::RemRounding};
 
@@ -21,8 +21,7 @@ use crate::int::support::rug_uint;
 use crate::int::{
     ladders::{EXTENDED_GCD, MODULAR, MODULAR_EXP},
     support::{
-        SAMPLE_COUNT_HEAVY, SAMPLE_SIZE_FAST, SAMPLE_SIZE_HEAVY, arbi_uint, coprime_hex_pair,
-        odd_hex,
+        SAMPLE_COUNT_HEAVY, SAMPLE_SIZE_FAST, SAMPLE_SIZE_HEAVY, coprime_hex_pair, mp_uint, odd_hex,
     },
 };
 
@@ -34,11 +33,11 @@ mod add_mod {
     use super::*;
 
     #[divan::bench(args = MODULAR, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let left = arbi_uint(bits, 42);
-        let right = arbi_uint(bits, 1_337);
-        let modulus = ArbiUint::from_str_radix(&odd_hex(bits, 9_999), 16)
-            .expect("generated modulus must parse as ArbiUint");
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let left = mp_uint(bits, 42);
+        let right = mp_uint(bits, 1_337);
+        let modulus = MpUint::from_str_radix(&odd_hex(bits, 9_999), 16)
+            .expect("generated modulus must parse as MpUint");
         bencher.bench_local(|| {
             let _output =
                 black_box(black_box(&left).add_mod(black_box(&right), black_box(&modulus)));
@@ -64,11 +63,11 @@ mod sub_mod {
     use super::*;
 
     #[divan::bench(args = MODULAR, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let left = arbi_uint(bits, 42);
-        let right = arbi_uint(bits, 1_337);
-        let modulus = ArbiUint::from_str_radix(&odd_hex(bits, 9_999), 16)
-            .expect("generated modulus must parse as ArbiUint");
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let left = mp_uint(bits, 42);
+        let right = mp_uint(bits, 1_337);
+        let modulus = MpUint::from_str_radix(&odd_hex(bits, 9_999), 16)
+            .expect("generated modulus must parse as MpUint");
         bencher.bench_local(|| {
             let _output =
                 black_box(black_box(&left).sub_mod(black_box(&right), black_box(&modulus)));
@@ -97,11 +96,11 @@ mod mul_mod {
     use super::*;
 
     #[divan::bench(args = MODULAR, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let left = arbi_uint(bits, 42);
-        let right = arbi_uint(bits, 1_337);
-        let modulus = ArbiUint::from_str_radix(&odd_hex(bits, 9_999), 16)
-            .expect("generated modulus must parse as ArbiUint");
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let left = mp_uint(bits, 42);
+        let right = mp_uint(bits, 1_337);
+        let modulus = MpUint::from_str_radix(&odd_hex(bits, 9_999), 16)
+            .expect("generated modulus must parse as MpUint");
         bencher.bench_local(|| {
             let _output =
                 black_box(black_box(&left).mul_mod(black_box(&right), black_box(&modulus)));
@@ -131,11 +130,11 @@ mod pow_mod {
     use super::*;
 
     #[divan::bench(args = MODULAR_EXP, sample_size = SAMPLE_SIZE_HEAVY, sample_count = SAMPLE_COUNT_HEAVY)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let base = arbi_uint(bits, 42);
-        let exponent = arbi_uint(bits, 1_337);
-        let modulus = ArbiUint::from_str_radix(&odd_hex(bits, 9_999), 16)
-            .expect("generated modulus must parse as ArbiUint");
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let base = mp_uint(bits, 42);
+        let exponent = mp_uint(bits, 1_337);
+        let modulus = MpUint::from_str_radix(&odd_hex(bits, 9_999), 16)
+            .expect("generated modulus must parse as MpUint");
         bencher.bench_local(|| {
             let _output =
                 black_box(black_box(&base).pow_mod(black_box(&exponent), black_box(&modulus)));
@@ -163,12 +162,12 @@ mod invert {
     use super::*;
 
     #[divan::bench(args = EXTENDED_GCD, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
+    fn mp(bencher: divan::Bencher, bits: usize) {
         let (value_hex, modulus_hex) = coprime_hex_pair(bits);
-        let value = ArbiUint::from_str_radix(&value_hex, 16)
-            .expect("generated hexadecimal must parse as ArbiUint");
-        let modulus = ArbiUint::from_str_radix(&modulus_hex, 16)
-            .expect("generated modulus must parse as ArbiUint");
+        let value = MpUint::from_str_radix(&value_hex, 16)
+            .expect("generated hexadecimal must parse as MpUint");
+        let modulus = MpUint::from_str_radix(&modulus_hex, 16)
+            .expect("generated modulus must parse as MpUint");
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).invert(black_box(&modulus)));
         });
@@ -198,11 +197,11 @@ mod montgomery_mul {
     use super::*;
 
     #[divan::bench(args = MODULAR, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let left = arbi_uint(bits, 42);
-        let right = arbi_uint(bits, 1_337);
-        let modulus = ArbiUint::from_str_radix(&odd_hex(bits, 9_999), 16)
-            .expect("generated modulus must parse as ArbiUint");
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let left = mp_uint(bits, 42);
+        let right = mp_uint(bits, 1_337);
+        let modulus = MpUint::from_str_radix(&odd_hex(bits, 9_999), 16)
+            .expect("generated modulus must parse as MpUint");
         bencher.bench_local(|| {
             let _output =
                 black_box(black_box(&left).montgomery_mul(black_box(&right), black_box(&modulus)));
@@ -218,10 +217,10 @@ mod barrett_reduce {
     use super::*;
 
     #[divan::bench(args = MODULAR, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
-        let modulus = ArbiUint::from_str_radix(&odd_hex(bits, 9_999), 16)
-            .expect("generated modulus must parse as ArbiUint");
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
+        let modulus = MpUint::from_str_radix(&odd_hex(bits, 9_999), 16)
+            .expect("generated modulus must parse as MpUint");
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).barrett_reduce(black_box(&modulus)));
         });

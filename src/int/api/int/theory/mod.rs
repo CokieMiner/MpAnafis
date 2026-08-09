@@ -1,6 +1,6 @@
 //! Signed integer number theory APIs organized by domain.
 
-use super::{ArbiInt, InternalArbiInt, InternalArbiUint, Precision};
+use super::{InternalMpInt, InternalMpUint, MpInt, Precision};
 
 mod arithmetic;
 mod gcd;

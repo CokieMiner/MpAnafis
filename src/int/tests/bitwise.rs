@@ -48,14 +48,14 @@ proptest! {
 proptest! {
     #[test]
     fn prop_signed_bitwise_cancellation(a in strategies::int(16)) {
-        prop_assert_eq!(&a ^ &a, ArbiInt::zero(), "bitwise XOR cancellation");
+        prop_assert_eq!(&a ^ &a, MpInt::zero(), "bitwise XOR cancellation");
     }
 }
 
 proptest! {
     #[test]
     fn prop_signed_bitwise_not_identity(a in strategies::int(16)) {
-        prop_assert_eq!(!&a, -&a - ArbiInt::one(), "bitwise NOT identity (~a == -a - 1)");
+        prop_assert_eq!(!&a, -&a - MpInt::one(), "bitwise NOT identity (~a == -a - 1)");
     }
 }
 
@@ -65,7 +65,7 @@ proptest! {
         bits in 8_usize..=128,
         input_a in strategies::bounded_int_wrapped(128),
     ) {
-        let bounded_a = ArbiInt {
+        let bounded_a = MpInt {
             value: input_a.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };
@@ -79,7 +79,7 @@ proptest! {
         prop_assert_eq!(
             ones + zeros,
             bits,
-            "ones + zeros should equal precision for bounded ArbiInt"
+            "ones + zeros should equal precision for bounded MpInt"
         );
 
         let trailing_zeros = bounded_a.trailing_zeros();
@@ -136,10 +136,10 @@ proptest! {
 proptest! {
     #[test]
     fn prop_uint_swap_bytes_old_compat(bit_width in 8_usize..=256) {
-        let mut value = ArbiUint::one() << bit_width.saturating_sub(1);
-        let byte_mask = ArbiUint::from(255_u64);
+        let mut value = MpUint::one() << bit_width.saturating_sub(1);
+        let byte_mask = MpUint::from(255_u64);
         if (&value & &byte_mask).value.is_zero() {
-            value |= ArbiUint::one();
+            value |= MpUint::one();
         }
         let swapped = value.swap_bytes();
         let swapped_back = swapped.swap_bytes();

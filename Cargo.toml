@@ -1,14 +1,33 @@
 [package]
-name = "arbi-anafis"
+name = "mp-anafis"
 version = "0.1.0"
 edition = "2024"
 authors = ["CokieMiner"]
 description = "High-performance arbitrary-precision arithmetic in pure Rust"
 license = "Apache-2.0"
-repository = "https://github.com/CokieMiner/arbi-anafis"
+repository = "https://github.com/CokieMiner/mp-anafis"
 readme = "README.md"
 keywords = ["bigint", "arbitrary-precision", "multiprecision", "numerics", "no-std"]
 categories = ["mathematics", "science"]
+# Keep the published tarball lean: ship only the library, its build script,
+# public examples/tests, the `mp-tune` bin sources, and the design docs.
+# Architecture PDF manuals, CI, audit/oracle tooling, and dev-only files stay
+# out by omission. `src/**`, `README`, `LICENSE`, `Cargo.toml`, and
+# `Cargo.lock` are always packaged by Cargo regardless of this list.
+include = [
+    "src/**",
+    "build.rs",
+    "build_support/**",
+    "benches/**",
+    "examples/**",
+    "tests/**",
+    "tools/tune/**",
+    "docs/README.md",
+    "docs/organization.md",
+    "docs/int/**",
+    "docs/float/**",
+    "docs/rational/**",
+]
 
 # ============================================================================
 # Features
@@ -48,7 +67,7 @@ harness = false
 required-features = ["_internal-tune"]
 
 [[bin]]
-name = "arbi-tune"
+name = "mp-tune"
 path = "tools/tune/main.rs"
 required-features = ["_internal-tune"]
 

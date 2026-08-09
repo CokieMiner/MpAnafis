@@ -19,14 +19,14 @@
 
 use core::hint::black_box;
 
-use arbi_anafis::tune_api::tier::{
+use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
+use mp_anafis::tune_api::tier::{
     Limb,
     transform::{
         bench_ssa_mul_forced_plan, bench_ssa_mul_forced_plan_scratch_len, bench_ssa_mul_production,
         bench_ssa_mul_scratch_len,
     },
 };
-use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
 
 use crate::shared::operands_pair;
 

@@ -1,10 +1,10 @@
 //! Checked, result-based, and strict signed arithmetic APIs.
 
-use crate::error::ArbiError;
+use crate::error::MpError;
 
-use super::ArbiInt;
+use super::MpInt;
 
-impl ArbiInt {
+impl MpInt {
     // checked_* arithmetic
     // ------------------------------------------------------------------
 
@@ -50,8 +50,8 @@ impl ArbiInt {
     /// Tries to add two values.
     ///
     /// # Errors
-    /// Returns `ArbiError::Overflow` if the result exceeds precision bounds.
-    pub fn try_add(&self, rhs: &Self) -> Result<Self, ArbiError> {
+    /// Returns `MpError::Overflow` if the result exceeds precision bounds.
+    pub fn try_add(&self, rhs: &Self) -> Result<Self, MpError> {
         let p = self.precision.combine_for_binary_op(rhs.precision);
         let sum = self.value.add(&rhs.value);
         let result = Self {
@@ -61,7 +61,7 @@ impl ArbiInt {
         if let Some(bits) = result.precision.significant_bits()
             && result.value.required_signed_bits_for_bounded_storage() > bits
         {
-            return Err(ArbiError::Overflow);
+            return Err(MpError::Overflow);
         }
         result.debug_assert_valid();
         Ok(result)
@@ -70,8 +70,8 @@ impl ArbiInt {
     /// Tries to subtract two values.
     ///
     /// # Errors
-    /// Returns `ArbiError::Overflow` if the result exceeds precision bounds.
-    pub fn try_sub(&self, rhs: &Self) -> Result<Self, ArbiError> {
+    /// Returns `MpError::Overflow` if the result exceeds precision bounds.
+    pub fn try_sub(&self, rhs: &Self) -> Result<Self, MpError> {
         let p = self.precision.combine_for_binary_op(rhs.precision);
         let diff = self.value.sub(&rhs.value);
         let result = Self {
@@ -81,7 +81,7 @@ impl ArbiInt {
         if let Some(bits) = result.precision.significant_bits()
             && result.value.required_signed_bits_for_bounded_storage() > bits
         {
-            return Err(ArbiError::Overflow);
+            return Err(MpError::Overflow);
         }
         result.debug_assert_valid();
         Ok(result)
@@ -90,8 +90,8 @@ impl ArbiInt {
     /// Tries to multiply two values.
     ///
     /// # Errors
-    /// Returns `ArbiError::Overflow` if the result exceeds precision bounds.
-    pub fn try_mul(&self, rhs: &Self) -> Result<Self, ArbiError> {
+    /// Returns `MpError::Overflow` if the result exceeds precision bounds.
+    pub fn try_mul(&self, rhs: &Self) -> Result<Self, MpError> {
         let p = self.precision.combine_for_binary_op(rhs.precision);
         let prod = self.value.mul(&rhs.value);
         let result = Self {
@@ -101,7 +101,7 @@ impl ArbiInt {
         if let Some(bits) = result.precision.significant_bits()
             && result.value.required_signed_bits_for_bounded_storage() > bits
         {
-            return Err(ArbiError::Overflow);
+            return Err(MpError::Overflow);
         }
         result.debug_assert_valid();
         Ok(result)
@@ -110,18 +110,18 @@ impl ArbiInt {
     /// Tries to divide two values.
     ///
     /// # Errors
-    /// Returns `ArbiError::DivisionByZero` if `rhs` is zero, or
-    /// `ArbiError::Overflow` if the quotient exceeds precision bounds,
+    /// Returns `MpError::DivisionByZero` if `rhs` is zero, or
+    /// `MpError::Overflow` if the quotient exceeds precision bounds,
     /// including `MIN / -1`.
-    pub fn try_div(&self, rhs: &Self) -> Result<Self, ArbiError> {
+    pub fn try_div(&self, rhs: &Self) -> Result<Self, MpError> {
         if rhs.value.abs.is_zero() {
-            return Err(ArbiError::DivisionByZero);
+            return Err(MpError::DivisionByZero);
         }
         let p = self.precision.combine_for_binary_op(rhs.precision);
         if let Some(bits) = p.significant_bits()
             && self.value.bounded_division_overflows(&rhs.value, bits)
         {
-            return Err(ArbiError::Overflow);
+            return Err(MpError::Overflow);
         }
         let quot = self.value.div(&rhs.value);
         let result = Self {
@@ -137,17 +137,17 @@ impl ArbiInt {
     /// Tries to compute remainder.
     ///
     /// # Errors
-    /// Returns `ArbiError::DivisionByZero` if `rhs` is zero, or
-    /// `ArbiError::Overflow` for the bounded signed `MIN / -1` case.
-    pub fn try_rem(&self, rhs: &Self) -> Result<Self, ArbiError> {
+    /// Returns `MpError::DivisionByZero` if `rhs` is zero, or
+    /// `MpError::Overflow` for the bounded signed `MIN / -1` case.
+    pub fn try_rem(&self, rhs: &Self) -> Result<Self, MpError> {
         if rhs.value.abs.is_zero() {
-            return Err(ArbiError::DivisionByZero);
+            return Err(MpError::DivisionByZero);
         }
         let p = self.precision.combine_for_binary_op(rhs.precision);
         if let Some(bits) = p.significant_bits()
             && self.value.bounded_division_overflows(&rhs.value, bits)
         {
-            return Err(ArbiError::Overflow);
+            return Err(MpError::Overflow);
         }
         let rem = self.value.rem(&rhs.value);
         let result = Self {

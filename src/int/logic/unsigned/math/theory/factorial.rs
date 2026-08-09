@@ -5,9 +5,9 @@
     reason = "The shift conversion is proven bounded by the u32 factorial input."
 )]
 
-use super::InternalArbiUint;
+use super::InternalMpUint;
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Computes the factorial of `n` (`n!`).
     #[must_use]
     pub fn factorial(n: u32) -> Self {
@@ -47,22 +47,22 @@ impl InternalArbiUint {
 }
 
 /// Computes the product of all odd integers in the interval `(a, b]`.
-fn product_of_odds(a: u32, b: u32) -> InternalArbiUint {
+fn product_of_odds(a: u32, b: u32) -> InternalMpUint {
     let mut first_odd = a.saturating_add(1);
     first_odd |= 1;
     if first_odd > b {
-        return InternalArbiUint::one();
+        return InternalMpUint::one();
     }
     if first_odd.wrapping_add(2) > b {
-        return InternalArbiUint::from_u64(u64::from(first_odd));
+        return InternalMpUint::from_u64(u64::from(first_odd));
     }
 
     let diff = b.wrapping_sub(first_odd);
     if diff < 64 {
-        let mut prod = InternalArbiUint::from_u64(u64::from(first_odd));
+        let mut prod = InternalMpUint::from_u64(u64::from(first_odd));
         let mut i = first_odd.wrapping_add(2);
         while i <= b {
-            prod = prod.mul(&InternalArbiUint::from_u64(u64::from(i)));
+            prod = prod.mul(&InternalMpUint::from_u64(u64::from(i)));
             i = i.wrapping_add(2);
         }
         return prod;

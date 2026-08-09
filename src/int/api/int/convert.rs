@@ -2,11 +2,11 @@
 
 use alloc::{string::String, vec::Vec};
 
-use crate::error::{ParseArbiIntError, ParseArbiIntErrorKind, ParseArbiUintErrorKind};
+use crate::error::{ParseMpIntError, ParseMpIntErrorKind, ParseMpUintErrorKind};
 
-use super::{ArbiInt, ArbiUint, InternalArbiInt, InternalArbiUint, Precision};
+use super::{InternalMpInt, InternalMpUint, MpInt, MpUint, Precision};
 
-impl ArbiInt {
+impl MpInt {
     /// Converts the value to a `u64`, or `None` if it does not fit or is negative.
     #[must_use]
     #[allow(
@@ -128,16 +128,16 @@ impl ArbiInt {
         }
     }
 
-    /// Parses an `ArbiInt` from a string slice in the given radix.
+    /// Parses an `MpInt` from a string slice in the given radix.
     ///
     /// # Errors
-    /// Returns a `ParseArbiIntError` if the string contains invalid digits,
+    /// Returns a `ParseMpIntError` if the string contains invalid digits,
     /// an invalid radix is provided, or the value is empty or too large.
     #[allow(
         clippy::same_name_method,
         reason = "Provided as an inherent method for convenience without needing to import num_traits"
     )]
-    pub fn from_str_radix(str: &str, radix: u32) -> Result<Self, ParseArbiIntError> {
+    pub fn from_str_radix(str: &str, radix: u32) -> Result<Self, ParseMpIntError> {
         let (is_positive, rest) = str.strip_prefix('-').map_or_else(
             || {
                 str.strip_prefix('+')
@@ -145,19 +145,19 @@ impl ArbiInt {
             },
             |stripped| (false, stripped),
         );
-        let uint = ArbiUint::from_str_radix(rest, radix).map_err(|e| {
+        let uint = MpUint::from_str_radix(rest, radix).map_err(|e| {
             let kind = match e.kind {
-                ParseArbiUintErrorKind::Empty | ParseArbiUintErrorKind::Negative => {
-                    ParseArbiIntErrorKind::Empty
+                ParseMpUintErrorKind::Empty | ParseMpUintErrorKind::Negative => {
+                    ParseMpIntErrorKind::Empty
                 }
-                ParseArbiUintErrorKind::InvalidDigit => ParseArbiIntErrorKind::InvalidDigit,
-                ParseArbiUintErrorKind::InvalidRadix => ParseArbiIntErrorKind::InvalidRadix,
-                ParseArbiUintErrorKind::TooLarge => ParseArbiIntErrorKind::TooLarge,
+                ParseMpUintErrorKind::InvalidDigit => ParseMpIntErrorKind::InvalidDigit,
+                ParseMpUintErrorKind::InvalidRadix => ParseMpIntErrorKind::InvalidRadix,
+                ParseMpUintErrorKind::TooLarge => ParseMpIntErrorKind::TooLarge,
             };
-            ParseArbiIntError { kind }
+            ParseMpIntError { kind }
         })?;
         let final_is_positive = is_positive || uint.is_zero();
-        let internal = InternalArbiInt {
+        let internal = InternalMpInt {
             abs: uint.value,
             is_positive: final_is_positive,
         };
@@ -171,7 +171,7 @@ impl ArbiInt {
         Ok(result)
     }
 
-    /// Formats the `ArbiInt` into a string in radix `2..=36`.
+    /// Formats the `MpInt` into a string in radix `2..=36`.
     ///
     /// # Panics
     ///
@@ -233,25 +233,25 @@ impl ArbiInt {
         bytes
     }
 
-    /// Constructs an `ArbiInt` from a two's complement little-endian byte slice.
+    /// Constructs an `MpInt` from a two's complement little-endian byte slice.
     #[must_use]
     pub fn from_le_bytes(bytes: &[u8]) -> Self {
         if bytes.is_empty() {
             return Self::zero();
         }
         let width = bytes.len().wrapping_mul(8);
-        let tc_uint = InternalArbiUint::from_le_bytes(bytes);
+        let tc_uint = InternalMpUint::from_le_bytes(bytes);
         let internal = if bytes.last().is_some_and(|&b| b & 0x80 != 0) {
             let mut abs = tc_uint.not(width);
             abs.increment();
-            InternalArbiInt {
+            InternalMpInt {
                 abs,
                 is_positive: false,
             }
         } else if tc_uint.is_zero() {
-            InternalArbiInt::zero()
+            InternalMpInt::zero()
         } else {
-            InternalArbiInt {
+            InternalMpInt {
                 abs: tc_uint,
                 is_positive: true,
             }
@@ -266,25 +266,25 @@ impl ArbiInt {
         result
     }
 
-    /// Constructs an `ArbiInt` from a two's complement big-endian byte slice.
+    /// Constructs an `MpInt` from a two's complement big-endian byte slice.
     #[must_use]
     pub fn from_be_bytes(bytes: &[u8]) -> Self {
         if bytes.is_empty() {
             return Self::zero();
         }
         let width = bytes.len().wrapping_mul(8);
-        let tc_uint = InternalArbiUint::from_be_bytes(bytes);
+        let tc_uint = InternalMpUint::from_be_bytes(bytes);
         let internal = if bytes.first().is_some_and(|&b| b & 0x80 != 0) {
             let mut abs = tc_uint.not(width);
             abs.increment();
-            InternalArbiInt {
+            InternalMpInt {
                 abs,
                 is_positive: false,
             }
         } else if tc_uint.is_zero() {
-            InternalArbiInt::zero()
+            InternalMpInt::zero()
         } else {
-            InternalArbiInt {
+            InternalMpInt {
                 abs: tc_uint,
                 is_positive: true,
             }

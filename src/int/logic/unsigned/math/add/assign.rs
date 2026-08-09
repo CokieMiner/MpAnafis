@@ -5,9 +5,9 @@ use core::{
     slice::{from_raw_parts, from_raw_parts_mut},
 };
 
-use super::{Addition, ArchKernels, INLINE_LIMBS, InternalArbiUint, UintRepr};
+use super::{Addition, ArchKernels, INLINE_LIMBS, InternalMpUint, UintRepr};
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Adds `src` directly into `self`.
     #[allow(
         clippy::inline_always,
@@ -19,7 +19,7 @@ impl InternalArbiUint {
     )]
     #[allow(
         unsafe_code,
-        reason = "Bypasses InternalArbiUint enum dispatch by extracting the inner Vec<Limb> and working with raw pointers."
+        reason = "Bypasses InternalMpUint enum dispatch by extracting the inner Vec<Limb> and working with raw pointers."
     )]
     #[allow(
         clippy::many_single_char_names,
@@ -182,7 +182,7 @@ impl InternalArbiUint {
     )]
     #[allow(
         unsafe_code,
-        reason = "Bypasses InternalArbiUint enum dispatch by extracting the inner Vec<Limb> and working with raw pointers."
+        reason = "Bypasses InternalMpUint enum dispatch by extracting the inner Vec<Limb> and working with raw pointers."
     )]
     #[inline(always)]
     pub fn sub_assign_with_underflow(&mut self, src: &Self) -> bool {

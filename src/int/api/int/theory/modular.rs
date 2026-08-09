@@ -1,8 +1,8 @@
 //! Modular arithmetic and reduction APIs for signed integers.
 
-use super::{ArbiInt, InternalArbiInt};
+use super::{InternalMpInt, MpInt};
 
-impl ArbiInt {
+impl MpInt {
     /// Returns `(self + other) % modulus` on the absolute values.
     #[must_use]
     pub fn add_mod(&self, other: &Self, modulus: &Self) -> Option<Self> {
@@ -14,7 +14,7 @@ impl ArbiInt {
             .combine_for_binary_op(other.precision)
             .combine_for_binary_op(modulus.precision);
         let result = Self {
-            value: InternalArbiInt {
+            value: InternalMpInt {
                 abs: self.value.abs.add_mod(&other.value.abs, &modulus.value.abs),
                 is_positive: true,
             },
@@ -35,7 +35,7 @@ impl ArbiInt {
             .combine_for_binary_op(other.precision)
             .combine_for_binary_op(modulus.precision);
         let result = Self {
-            value: InternalArbiInt {
+            value: InternalMpInt {
                 abs: self.value.abs.sub_mod(&other.value.abs, &modulus.value.abs),
                 is_positive: true,
             },
@@ -56,7 +56,7 @@ impl ArbiInt {
             .combine_for_binary_op(other.precision)
             .combine_for_binary_op(modulus.precision);
         let result = Self {
-            value: InternalArbiInt {
+            value: InternalMpInt {
                 abs: self.value.abs.mul_mod(&other.value.abs, &modulus.value.abs),
                 is_positive: true,
             },
@@ -83,7 +83,7 @@ impl ArbiInt {
             .combine_for_binary_op(exp.precision)
             .combine_for_binary_op(modulus.precision);
         let result = Self {
-            value: InternalArbiInt {
+            value: InternalMpInt {
                 abs: base.value.abs.pow_mod(&exp.value.abs, &modulus.value.abs),
                 is_positive: true,
             },
@@ -102,7 +102,7 @@ impl ArbiInt {
         self.value.abs.invert(&modulus.value.abs).map(|v| {
             let p = self.precision.combine_for_binary_op(modulus.precision);
             let result = Self {
-                value: InternalArbiInt {
+                value: InternalMpInt {
                     abs: v,
                     is_positive: true,
                 },
@@ -139,7 +139,7 @@ impl ArbiInt {
             return None;
         }
         let result = Self {
-            value: InternalArbiInt {
+            value: InternalMpInt {
                 abs: self
                     .value
                     .abs
@@ -164,7 +164,7 @@ impl ArbiInt {
             return None;
         }
         let result = Self {
-            value: InternalArbiInt {
+            value: InternalMpInt {
                 abs: self.value.abs.barrett_reduce(&modulus.value.abs),
                 is_positive: true,
             },

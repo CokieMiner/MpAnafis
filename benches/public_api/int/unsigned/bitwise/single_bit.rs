@@ -21,7 +21,7 @@ use rug::Integer;
 use crate::int::support::rug_uint;
 use crate::int::{
     ladders::NARROW,
-    support::{SAMPLE_SIZE_FAST, arbi_uint},
+    support::{SAMPLE_SIZE_FAST, mp_uint},
 };
 
 /// The bit these benchmarks address, inside the first limb on every supported
@@ -32,8 +32,8 @@ mod get_bit {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).get_bit(TARGET_BIT));
         });
@@ -55,8 +55,8 @@ mod test_bit {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).test_bit(TARGET_BIT));
         });
@@ -77,8 +77,8 @@ mod set_bit {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).set_bit(TARGET_BIT));
         });
@@ -101,8 +101,8 @@ mod clear_bit {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).clear_bit(TARGET_BIT));
         });
@@ -125,8 +125,8 @@ mod toggle_bit {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).toggle_bit(TARGET_BIT));
         });
@@ -149,8 +149,8 @@ mod set_bit_to {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).set_bit_to(TARGET_BIT, true));
         });
@@ -180,8 +180,8 @@ mod bit_range {
     const RANGE_END: usize = 200;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).bit_range(RANGE_START, RANGE_END));
         });

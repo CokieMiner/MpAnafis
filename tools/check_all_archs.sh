@@ -57,7 +57,7 @@ readonly -a SOURCE_NO_STD_TARGETS=(
     "wasm64-unknown-unknown|"
 )
 
-# These targets are still attempted. A failure in arbi-anafis is fatal, while
+# These targets are still attempted. A failure in mp-anafis is fatal, while
 # a failure building rust-src itself is reported as an explicit toolchain block.
 readonly -a TOOLCHAIN_PROBE_TARGETS=(
     "xtensa-esp32-none-elf|"
@@ -258,10 +258,10 @@ for entry in "${TOOLCHAIN_PROBE_TARGETS[@]}"; do
             "$extra_rustflags" \
             -Z build-std=core,alloc --release --locked --lib --no-default-features \
             --features num-traits --target "$target"
-    elif grep -Fq 'could not compile `arbi-anafis`' "$log_path"; then
-        FAILURES+=("$target: arbi-anafis failed during toolchain probe")
+    elif grep -Fq 'could not compile `mp-anafis`' "$log_path"; then
+        FAILURES+=("$target: mp-anafis failed during toolchain probe")
     else
-        TOOLCHAIN_BLOCKS+=("$target: rust-src/compiler backend failed before arbi-anafis")
+        TOOLCHAIN_BLOCKS+=("$target: rust-src/compiler backend failed before mp-anafis")
     fi
 done
 

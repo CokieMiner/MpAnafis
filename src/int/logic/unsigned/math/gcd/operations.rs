@@ -1,4 +1,4 @@
-//! GCD and LCM entry points owned by [`InternalArbiUint`].
+//! GCD and LCM entry points owned by [`InternalMpUint`].
 
 use core::{
     cmp::{Ordering, min},
@@ -7,7 +7,7 @@ use core::{
 
 use alloc::vec::Vec;
 
-use super::{DivScratch, Division, InternalArbiUint, Limb};
+use super::{DivScratch, Division, InternalMpUint, Limb};
 
 /// Namespace for the cross-file GCD algorithm surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,7 +18,7 @@ impl Gcd {
     pub const WIDE_LEHMER_THRESHOLD: usize = 32;
 }
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Computes the greatest common divisor using Lehmer's algorithm for
     /// large numbers, and Stein's (binary GCD) for small numbers.
     ///

@@ -1,8 +1,8 @@
 //! Fused in-place signed arithmetic APIs.
 
-use super::ArbiInt;
+use super::MpInt;
 
-impl ArbiInt {
+impl MpInt {
     /// Fused in-place addition. Computes `self = a + b` directly into `self`'s buffer,
     /// avoiding intermediate allocations and extra memory passes.
     ///
@@ -101,7 +101,7 @@ impl ArbiInt {
 )]
 #[inline(always)]
 #[track_caller]
-fn assert_fused_assignment_fits(destination: &mut ArbiInt, operation: &str) {
+fn assert_fused_assignment_fits(destination: &mut MpInt, operation: &str) {
     if let Some(bits) = destination.precision.significant_bits() {
         let overflow = destination.value.required_signed_bits_for_bounded_storage() > bits;
         if overflow {
@@ -112,7 +112,7 @@ fn assert_fused_assignment_fits(destination: &mut ArbiInt, operation: &str) {
         }
         assert!(
             !overflow,
-            "ArbiInt fused {operation} overflow for Bounded({bits})"
+            "MpInt fused {operation} overflow for Bounded({bits})"
         );
     }
 }

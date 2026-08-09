@@ -22,13 +22,13 @@
 
 use core::hint::black_box;
 
-use arbi_anafis::tune_api::tier::{
+use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
+use mp_anafis::tune_api::tier::{
     Limb,
     algorithms::{bench_toom_cook_8_mul_with_scratch, bench_toom_cook_8_scratch_len},
     state::bench_mul_tower_pooled,
     transform::{bench_ssa_mul_scratch_len, bench_ssa_mul_with_scratch},
 };
-use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
 
 use crate::shared::operands_pair;
 

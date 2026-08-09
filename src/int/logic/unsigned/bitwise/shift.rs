@@ -12,8 +12,8 @@ use core::{
 
 use alloc::vec::Vec;
 
-use super::{ArchKernels, INLINE_LIMBS, InternalArbiUint, LIMB_BITS, Limb, UintRepr};
-impl InternalArbiUint {
+use super::{ArchKernels, INLINE_LIMBS, InternalMpUint, LIMB_BITS, Limb, UintRepr};
+impl InternalMpUint {
     /// Left-shifts the integer by `shift` bits (padded with zero limbs).
     #[must_use]
     #[allow(
@@ -247,7 +247,7 @@ impl InternalArbiUint {
 
         if word_shift > 0 {
             let src_len = self.limbs().len();
-            // No overflow: same bound as `InternalArbiUint::shl`; `word_shift
+            // No overflow: same bound as `InternalMpUint::shl`; `word_shift
             // <= shift >> log2(LIMB_BITS)` and `src_len <= isize::MAX`, so
             // `src_len + word_shift` cannot wrap on any supported width.
             let new_len = src_len.wrapping_add(word_shift);

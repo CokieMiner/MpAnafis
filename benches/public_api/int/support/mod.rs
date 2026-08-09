@@ -2,7 +2,7 @@
 //! benchmarks.
 //!
 //! Operands are derived from a fixed linear congruential stream keyed by a seed,
-//! so an `arbi` function and its `rug` counterpart that pass the same seed and
+//! so an `mp` function and its `rug` counterpart that pass the same seed and
 //! bit width receive numerically identical inputs. Nothing here is timed; every
 //! generator runs outside the `bencher.bench_local` closure.
 
@@ -25,8 +25,8 @@ mod verification;
 ))]
 pub use flint::{FlintInt, pin_flint_to_one_thread};
 pub use operands::{
-    arbi_int, arbi_int_pairs, arbi_uint, arbi_uint_pairs, arbi_uint_pairs_with_widths,
-    bounded_arbi_uint, odd_hex, random_hex,
+    bounded_mp_uint, mp_int, mp_int_pairs, mp_uint, mp_uint_pairs, mp_uint_pairs_with_widths,
+    odd_hex, random_hex,
 };
 #[cfg(all(
     feature = "_internal-tune",
@@ -38,8 +38,8 @@ pub use operands::{flint_odd_uint, flint_uint, flint_uint_pairs};
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 pub use operands::{rug_int, rug_int_pairs, rug_uint, rug_uint_pairs, rug_uint_pairs_with_widths};
 pub use shapes::{
-    arbi_div_pairs_2n_n, arbi_div_pairs_3n2_n, arbi_div_pairs_same_limbs_ge_2, arbi_known_primes,
-    arbi_semiprimes_no_small_factors, arbi_square_plus_one, arbi_true_squares, coprime_hex_pair,
+    coprime_hex_pair, mp_div_pairs_2n_n, mp_div_pairs_3n2_n, mp_div_pairs_same_limbs_ge_2,
+    mp_known_primes, mp_semiprimes_no_small_factors, mp_square_plus_one, mp_true_squares,
 };
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 pub use shapes::{
@@ -52,8 +52,8 @@ pub use shapes::{
     target_os = "linux",
     target_pointer_width = "64"
 ))]
-pub use verification::verify_flint_matches_arbi;
-pub use verification::{verify_arbi_int_division_pairs, verify_arbi_uint_division_pairs};
+pub use verification::verify_flint_matches_mp;
+pub use verification::{verify_mp_int_division_pairs, verify_mp_uint_division_pairs};
 
 /// Operands per generated batch.
 ///

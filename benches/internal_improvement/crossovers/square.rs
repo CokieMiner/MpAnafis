@@ -21,12 +21,12 @@
 
 use core::hint::black_box;
 
-use arbi_anafis::tune_api::tier::{
+use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
+use mp_anafis::tune_api::tier::{
     Limb,
     state::SquareBenchScratch,
     transform::{bench_ssa_sqr_scratch_len, bench_ssa_sqr_with_scratch},
 };
-use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
 
 use crate::shared::operand;
 

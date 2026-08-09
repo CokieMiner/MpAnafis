@@ -1,5 +1,5 @@
-//! Comparison and equality implementations for `InternalArbiUint`.
+//! Comparison and equality implementations for `InternalMpUint`.
 
 mod traits;
 
-use super::{InternalArbiUint, Limb};
+use super::{InternalMpUint, Limb};

@@ -54,7 +54,7 @@ pub struct Ntt;
 impl Ntt {
     /// Whether [`Self::try_mul`] can compute a product of these operand widths.
     ///
-    /// The capability counterpart of [`ssa_admits_mul`](super::super::ssa_admits_mul):
+    /// The capability counterpart of [`Ssa::admits_mul`](super::super::Ssa::admits_mul):
     /// it reports whether the fixed prime set carries a transform long enough for
     /// this product, and says nothing about whether the transform is the fastest
     /// tier. Empty operands are accepted because the product is then a fill.

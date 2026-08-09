@@ -5,25 +5,25 @@ use core::{
     hash::{Hash, Hasher},
 };
 
-use super::InternalArbiInt;
+use super::InternalMpInt;
 
-impl PartialEq for InternalArbiInt {
+impl PartialEq for InternalMpInt {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.is_positive == other.is_positive && self.abs == other.abs
     }
 }
 
-impl Eq for InternalArbiInt {}
+impl Eq for InternalMpInt {}
 
-impl PartialOrd for InternalArbiInt {
+impl PartialOrd for InternalMpInt {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for InternalArbiInt {
+impl Ord for InternalMpInt {
     #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
         match (self.is_positive, other.is_positive) {
@@ -35,7 +35,7 @@ impl Ord for InternalArbiInt {
     }
 }
 
-impl Hash for InternalArbiInt {
+impl Hash for InternalMpInt {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.is_positive.hash(state);

@@ -1,11 +1,11 @@
 //! Exact-width operand generators for both libraries.
 //!
-//! Every generator is seeded, so `arbi_uint(bits, seed)` and
+//! Every generator is seeded, so `mp_uint(bits, seed)` and
 //! `rug_uint(bits, seed)` are the same number in two representations. Widths are
 //! exact: the leading nibble always has its high bit set, so a request for 1024
 //! bits never yields a 1021-bit value that would silently shorten a limb count.
 
-use arbi_anafis::{ArbiInt, ArbiUint, BoundedPrecision};
+use mp_anafis::{BoundedPrecision, MpInt, MpUint};
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 use rug::Integer;
 
@@ -82,33 +82,33 @@ pub fn negative_hex(bits: usize, seed: u32) -> String {
     signed
 }
 
-/// Generates a deterministic, exact-width `ArbiUint`.
+/// Generates a deterministic, exact-width `MpUint`.
 ///
 /// # Panics
 ///
 /// Panics when `bits` is zero or is not divisible by four.
 #[must_use]
-pub fn arbi_uint(bits: usize, seed: u32) -> ArbiUint {
-    ArbiUint::from_str_radix(&random_hex(bits, seed), 16)
-        .expect("generated hexadecimal must parse as ArbiUint")
+pub fn mp_uint(bits: usize, seed: u32) -> MpUint {
+    MpUint::from_str_radix(&random_hex(bits, seed), 16)
+        .expect("generated hexadecimal must parse as MpUint")
 }
 
-/// Generates a deterministic, exact-width `ArbiInt` of the requested sign.
+/// Generates a deterministic, exact-width `MpInt` of the requested sign.
 ///
 /// # Panics
 ///
 /// Panics when `bits` is zero or is not divisible by four.
 #[must_use]
-pub fn arbi_int(bits: usize, seed: u32, negative: bool) -> ArbiInt {
+pub fn mp_int(bits: usize, seed: u32, negative: bool) -> MpInt {
     let text = if negative {
         negative_hex(bits, seed)
     } else {
         random_hex(bits, seed)
     };
-    ArbiInt::from_str_radix(&text, 16).expect("generated hexadecimal must parse as ArbiInt")
+    MpInt::from_str_radix(&text, 16).expect("generated hexadecimal must parse as MpInt")
 }
 
-/// Generates a deterministic, exact-width `ArbiUint` carrying bounded precision.
+/// Generates a deterministic, exact-width `MpUint` carrying bounded precision.
 ///
 /// Saturating and wrapping policies are no-ops on unlimited values, so the
 /// benchmarks that exercise them need an operand whose precision is a real cap.
@@ -118,9 +118,9 @@ pub fn arbi_int(bits: usize, seed: u32, negative: bool) -> ArbiInt {
 /// Panics when `bits` is not a valid bounded precision or the operand does not
 /// fit it.
 #[must_use]
-pub fn bounded_arbi_uint(bits: usize, seed: u32) -> ArbiUint {
+pub fn bounded_mp_uint(bits: usize, seed: u32) -> MpUint {
     let width = BoundedPrecision::new(bits).expect("benchmark widths are valid bounded precision");
-    ArbiUint::with_precision_checked(arbi_uint(bits, seed), width)
+    MpUint::with_precision_checked(mp_uint(bits, seed), width)
         .expect("the exact-width benchmark operand fits its precision")
 }
 
@@ -184,40 +184,33 @@ pub fn rug_int(bits: usize, seed: u32, negative: bool) -> Integer {
     Integer::from_str_radix(&text, 16).expect("generated hexadecimal must parse as Rug Integer")
 }
 
-/// Generates [`SAMPLES`] equal-width `ArbiUint` operand pairs.
+/// Generates [`SAMPLES`] equal-width `MpUint` operand pairs.
 #[must_use]
-pub fn arbi_uint_pairs(bits: usize) -> Vec<(ArbiUint, ArbiUint)> {
-    arbi_uint_pairs_with_widths(bits, bits)
+pub fn mp_uint_pairs(bits: usize) -> Vec<(MpUint, MpUint)> {
+    mp_uint_pairs_with_widths(bits, bits)
 }
 
-/// Generates [`SAMPLES`] `ArbiUint` operand pairs of independent widths.
+/// Generates [`SAMPLES`] `MpUint` operand pairs of independent widths.
 #[must_use]
-pub fn arbi_uint_pairs_with_widths(
-    left_bits: usize,
-    right_bits: usize,
-) -> Vec<(ArbiUint, ArbiUint)> {
+pub fn mp_uint_pairs_with_widths(left_bits: usize, right_bits: usize) -> Vec<(MpUint, MpUint)> {
     (0..SAMPLES)
         .map(|index| {
             (
-                arbi_uint(left_bits, 42_u32.wrapping_add(index)),
-                arbi_uint(right_bits, 1_337_u32.wrapping_add(index)),
+                mp_uint(left_bits, 42_u32.wrapping_add(index)),
+                mp_uint(right_bits, 1_337_u32.wrapping_add(index)),
             )
         })
         .collect()
 }
 
-/// Generates [`SAMPLES`] equal-width `ArbiInt` operand pairs of fixed signs.
+/// Generates [`SAMPLES`] equal-width `MpInt` operand pairs of fixed signs.
 #[must_use]
-pub fn arbi_int_pairs(
-    bits: usize,
-    left_negative: bool,
-    right_negative: bool,
-) -> Vec<(ArbiInt, ArbiInt)> {
+pub fn mp_int_pairs(bits: usize, left_negative: bool, right_negative: bool) -> Vec<(MpInt, MpInt)> {
     (0..SAMPLES)
         .map(|index| {
             (
-                arbi_int(bits, 42_u32.wrapping_add(index), left_negative),
-                arbi_int(bits, 1_337_u32.wrapping_add(index), right_negative),
+                mp_int(bits, 42_u32.wrapping_add(index), left_negative),
+                mp_int(bits, 1_337_u32.wrapping_add(index), right_negative),
             )
         })
         .collect()

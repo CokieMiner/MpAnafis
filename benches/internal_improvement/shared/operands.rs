@@ -8,7 +8,7 @@
 
 use core::ops::BitXor;
 
-use arbi_anafis::tune_api::tier::Limb;
+use mp_anafis::tune_api::tier::Limb;
 
 pub fn operands(len: usize) -> (Vec<Limb>, Vec<Limb>, Vec<Limb>) {
     operands_pair(len, len)

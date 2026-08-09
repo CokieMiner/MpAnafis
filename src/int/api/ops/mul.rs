@@ -2,9 +2,9 @@
 
 use core::ops::{Mul, MulAssign};
 
-use super::{ArbiInt, ArbiUint};
+use super::{MpInt, MpUint};
 
-impl Mul<Self> for ArbiUint {
+impl Mul<Self> for MpUint {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -20,7 +20,7 @@ impl Mul<Self> for ArbiUint {
     }
 }
 
-impl Mul<&Self> for ArbiUint {
+impl Mul<&Self> for MpUint {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -34,11 +34,11 @@ impl Mul<&Self> for ArbiUint {
     }
 }
 
-impl Mul<ArbiUint> for &ArbiUint {
-    type Output = ArbiUint;
+impl Mul<MpUint> for &MpUint {
+    type Output = MpUint;
     #[inline]
     #[track_caller]
-    fn mul(self, mut rhs: ArbiUint) -> Self::Output {
+    fn mul(self, mut rhs: MpUint) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
         rhs.value.mul_assign(&self.value);
         rhs.precision = precision;
@@ -48,13 +48,13 @@ impl Mul<ArbiUint> for &ArbiUint {
     }
 }
 
-impl Mul<&ArbiUint> for &ArbiUint {
-    type Output = ArbiUint;
+impl Mul<&MpUint> for &MpUint {
+    type Output = MpUint;
     #[inline]
     #[track_caller]
-    fn mul(self, rhs: &ArbiUint) -> Self::Output {
+    fn mul(self, rhs: &MpUint) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
-        let result = ArbiUint {
+        let result = MpUint {
             value: self.value.mul(&rhs.value),
             precision,
         };
@@ -64,7 +64,7 @@ impl Mul<&ArbiUint> for &ArbiUint {
     }
 }
 
-impl MulAssign<Self> for ArbiUint {
+impl MulAssign<Self> for MpUint {
     #[inline]
     #[track_caller]
     fn mul_assign(&mut self, mut rhs: Self) {
@@ -86,7 +86,7 @@ impl MulAssign<Self> for ArbiUint {
     }
 }
 
-impl MulAssign<&Self> for ArbiUint {
+impl MulAssign<&Self> for MpUint {
     #[inline]
     #[track_caller]
     fn mul_assign(&mut self, rhs: &Self) {
@@ -107,7 +107,7 @@ impl MulAssign<&Self> for ArbiUint {
     }
 }
 
-impl Mul<Self> for ArbiInt {
+impl Mul<Self> for MpInt {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -123,7 +123,7 @@ impl Mul<Self> for ArbiInt {
     }
 }
 
-impl Mul<&Self> for ArbiInt {
+impl Mul<&Self> for MpInt {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -137,11 +137,11 @@ impl Mul<&Self> for ArbiInt {
     }
 }
 
-impl Mul<ArbiInt> for &ArbiInt {
-    type Output = ArbiInt;
+impl Mul<MpInt> for &MpInt {
+    type Output = MpInt;
     #[inline]
     #[track_caller]
-    fn mul(self, mut rhs: ArbiInt) -> Self::Output {
+    fn mul(self, mut rhs: MpInt) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
         rhs.value.mul_assign(&self.value);
         rhs.precision = precision;
@@ -151,13 +151,13 @@ impl Mul<ArbiInt> for &ArbiInt {
     }
 }
 
-impl Mul<&ArbiInt> for &ArbiInt {
-    type Output = ArbiInt;
+impl Mul<&MpInt> for &MpInt {
+    type Output = MpInt;
     #[inline]
     #[track_caller]
-    fn mul(self, rhs: &ArbiInt) -> Self::Output {
+    fn mul(self, rhs: &MpInt) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
-        let result = ArbiInt {
+        let result = MpInt {
             value: self.value.mul(&rhs.value),
             precision,
         };
@@ -167,7 +167,7 @@ impl Mul<&ArbiInt> for &ArbiInt {
     }
 }
 
-impl MulAssign<Self> for ArbiInt {
+impl MulAssign<Self> for MpInt {
     #[inline]
     #[track_caller]
     fn mul_assign(&mut self, mut rhs: Self) {
@@ -189,7 +189,7 @@ impl MulAssign<Self> for ArbiInt {
     }
 }
 
-impl MulAssign<&Self> for ArbiInt {
+impl MulAssign<&Self> for MpInt {
     #[inline]
     #[track_caller]
     fn mul_assign(&mut self, rhs: &Self) {

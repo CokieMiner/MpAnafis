@@ -1,8 +1,8 @@
 //! Fused in-place unsigned arithmetic APIs.
 
-use super::ArbiUint;
+use super::MpUint;
 
-impl ArbiUint {
+impl MpUint {
     /// Fused in-place addition. Computes `self = a + b` directly into `self`'s buffer,
     /// avoiding intermediate allocations and extra memory passes.
     ///
@@ -28,7 +28,7 @@ impl ArbiUint {
             }
             assert!(
                 !overflow,
-                "ArbiUint fused addition overflow for Bounded({bits})"
+                "MpUint fused addition overflow for Bounded({bits})"
             );
         }
         self.debug_assert_valid();
@@ -101,7 +101,7 @@ impl ArbiUint {
         let underflow = self.value.assign_difference(&a.value, &b.value);
         if underflow {
             // The fused limb kernel leaves a machine-limb-width two's-complement
-            // residue. That width is a storage detail, not part of ArbiUint's
+            // residue. That width is a storage detail, not part of MpUint's
             // public arithmetic contract, so expose a deterministic failure value.
             self.value.clear();
         }
@@ -129,7 +129,7 @@ impl ArbiUint {
             }
             assert!(
                 !overflow,
-                "ArbiUint fused {operation} overflow for Bounded({bits})"
+                "MpUint fused {operation} overflow for Bounded({bits})"
             );
         }
         self.debug_assert_valid();

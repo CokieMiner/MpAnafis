@@ -18,7 +18,7 @@ fn main() {
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
     let destination = Path::new(&out_dir).join("thresholds.rs");
     let tuned_path = Path::new("src/int/tuned_thresholds.rs");
-    let candidate_path = env::var_os("ARBI_TUNING_PROFILE").map(std::path::PathBuf::from);
+    let candidate_path = env::var_os("MP_TUNING_PROFILE").map(std::path::PathBuf::from);
     let content = candidate_path.as_deref().map_or_else(
         || resolve_installed_profile(tuned_path),
         resolve_candidate_profile,
@@ -47,7 +47,7 @@ fn main() {
     }
     drop(writeln!(
         stdout(),
-        "cargo:rerun-if-env-changed=ARBI_TUNING_PROFILE"
+        "cargo:rerun-if-env-changed=MP_TUNING_PROFILE"
     ));
 
     emit_flint_search_path();
@@ -59,14 +59,14 @@ fn main() {
 /// compiles out `fft_small` — its small-prime FFT needs AVX2 — and leaves the
 /// legacy Schoenhage-Strassen fallback as the only large-operand path. A
 /// comparison against that build understates FLINT by a wide margin, so
-/// `ARBI_FLINT_LIB_DIR` allows pointing at a locally built one. An rpath is
+/// `MP_ANAFIS_FLINT_LIB_DIR` allows pointing at a locally built one. An rpath is
 /// emitted alongside the search path so the benchmark also *runs* against it.
 fn emit_flint_search_path() {
     drop(writeln!(
         stdout(),
-        "cargo:rerun-if-env-changed=ARBI_FLINT_LIB_DIR"
+        "cargo:rerun-if-env-changed=MP_ANAFIS_FLINT_LIB_DIR"
     ));
-    if let Some(configured) = env::var_os("ARBI_FLINT_LIB_DIR") {
+    if let Some(configured) = env::var_os("MP_ANAFIS_FLINT_LIB_DIR") {
         let dir = configured.to_string_lossy();
         drop(writeln!(stdout(), "cargo:rustc-link-search=native={dir}"));
         drop(writeln!(stdout(), "cargo:rustc-link-arg=-Wl,-rpath,{dir}"));
@@ -77,7 +77,7 @@ fn resolve_installed_profile(tuned_path: &Path) -> String {
     if tuned_path.exists() {
         drop(writeln!(
             stdout(),
-            "cargo:warning=arbi-anafis: Using tuned profile from src/int/tuned_thresholds.rs"
+            "cargo:warning=mp-anafis: Using tuned profile from src/int/tuned_thresholds.rs"
         ));
         read_complete_profile(tuned_path)
     } else {
@@ -91,7 +91,7 @@ fn resolve_installed_profile(tuned_path: &Path) -> String {
 fn resolve_candidate_profile(path: &Path) -> String {
     drop(writeln!(
         stdout(),
-        "cargo:warning=arbi-anafis: Using autotuner candidate profile {}",
+        "cargo:warning=mp-anafis: Using autotuner candidate profile {}",
         path.display()
     ));
     drop(writeln!(
@@ -109,7 +109,7 @@ fn emit_thread_local_configuration() {
     // and therefore support the same const initialization.
     drop(writeln!(
         stdout(),
-        "cargo:rustc-check-cfg=cfg(arbi_eager_thread_local)"
+        "cargo:rustc-check-cfg=cfg(mp_eager_thread_local)"
     ));
     let target_family = env::var("CARGO_CFG_TARGET_FAMILY").unwrap_or_default();
     let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
@@ -120,10 +120,7 @@ fn emit_thread_local_configuration() {
             .any(|feature| feature == "atomics"))
         || matches!(target_os.as_str(), "uefi" | "zkvm" | "trusty" | "vexos");
     if env::var_os("CARGO_CFG_TARGET_THREAD_LOCAL").is_some() || single_thread_backend {
-        drop(writeln!(
-            stdout(),
-            "cargo:rustc-cfg=arbi_eager_thread_local"
-        ));
+        drop(writeln!(stdout(), "cargo:rustc-cfg=mp_eager_thread_local"));
     }
 }
 
@@ -132,7 +129,7 @@ fn read_complete_profile(path: &Path) -> String {
     let missing = missing_definition(&source);
     assert!(
         missing.is_none(),
-        "arbi-anafis: tuning profile {} is missing {missing:?}",
+        "mp-anafis: tuning profile {} is missing {missing:?}",
         path.display()
     );
     source

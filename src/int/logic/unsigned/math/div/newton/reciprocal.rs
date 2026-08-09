@@ -8,7 +8,7 @@
 use core::mem::replace;
 
 use super::{
-    Addition, DivScratch, Division, InternalArbiUint, Limb, Multiplication,
+    Addition, DivScratch, Division, InternalMpUint, Limb, Multiplication,
     NEWTON_RAPHSON_BASECASE_LIMBS, ScratchBuffer,
 };
 
@@ -20,7 +20,7 @@ impl Division {
         clippy::too_many_lines,
         reason = "Newton reciprocal combines initialization, multiplication, correction, and bit-level shifts in one state machine."
     )]
-    pub fn newton_reciprocal(den: &[Limb], scratch: &mut DivScratch) -> InternalArbiUint {
+    pub fn newton_reciprocal(den: &[Limb], scratch: &mut DivScratch) -> InternalMpUint {
         let n = den.len();
         if n <= NEWTON_RAPHSON_BASECASE_LIMBS || n <= 4 {
             return compute_reciprocal_basecase(den, scratch);
@@ -140,7 +140,7 @@ impl Division {
         }
 
         // Transfer the result into dummy_rem to avoid a Vec allocation.
-        let mut result = replace(&mut scratch.dummy_rem, InternalArbiUint::zero());
+        let mut result = replace(&mut scratch.dummy_rem, InternalMpUint::zero());
         let result_len = scratch.newton_v_norm.len();
         result.reserve(result_len);
         // SAFETY: reserve ensures capacity >= result_len.
@@ -154,25 +154,25 @@ impl Division {
 }
 
 /// Derives the reciprocal directly, by dividing `B^2n - 1` by `den`.
-fn compute_reciprocal_basecase(den: &[Limb], scratch: &mut DivScratch) -> InternalArbiUint {
+fn compute_reciprocal_basecase(den: &[Limb], scratch: &mut DivScratch) -> InternalMpUint {
     let n = den.len();
     // Reuse scratch dummy fields to avoid Vec allocations in the base case.
-    let mut n_a = replace(&mut scratch.dummy_u, InternalArbiUint::zero());
+    let mut n_a = replace(&mut scratch.dummy_u, InternalMpUint::zero());
     n_a.reserve(n.wrapping_mul(2));
     // SAFETY: reserve ensures capacity >= n.wrapping_mul(2).
     unsafe {
         n_a.set_len(n.wrapping_mul(2));
     }
     n_a.limbs_mut().fill(Limb::MAX);
-    let mut n_b = replace(&mut scratch.dummy_quot, InternalArbiUint::zero());
+    let mut n_b = replace(&mut scratch.dummy_quot, InternalMpUint::zero());
     n_b.reserve(n);
     // SAFETY: reserve ensures capacity >= n.
     unsafe {
         n_b.set_len(n);
     }
     n_b.limbs_mut().copy_from_slice(den);
-    let mut q = replace(&mut scratch.dummy_rem, InternalArbiUint::zero());
-    let mut rem = InternalArbiUint::zero();
+    let mut q = replace(&mut scratch.dummy_rem, InternalMpUint::zero());
+    let mut rem = InternalMpUint::zero();
     Division::algorithm_d(&n_a, &n_b, &mut q, &mut rem, scratch);
     scratch.dummy_rem = rem;
     scratch.dummy_u = n_a;

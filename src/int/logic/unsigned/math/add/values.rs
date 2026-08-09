@@ -7,9 +7,9 @@ use core::{
 
 use alloc::vec::Vec;
 
-use super::{Addition, ArchKernels, INLINE_LIMBS, InternalArbiUint, LIMB_BITS, Limb, UintRepr};
+use super::{Addition, ArchKernels, INLINE_LIMBS, InternalMpUint, LIMB_BITS, Limb, UintRepr};
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Computes `self + rhs`, returning a new value.
     #[allow(
         unsafe_code,

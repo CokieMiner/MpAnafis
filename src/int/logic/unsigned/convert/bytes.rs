@@ -8,8 +8,8 @@ use core::ptr::copy_nonoverlapping;
 
 use alloc::vec::Vec;
 
-use super::{InternalArbiUint, LIMB_BYTES, Limb};
-impl InternalArbiUint {
+use super::{InternalMpUint, LIMB_BYTES, Limb};
+impl InternalMpUint {
     /// Returns the integer as a little-endian byte vector (least significant byte first).
     ///
     /// Leading zero bytes are not included. Returns an empty `Vec` for zero.
@@ -54,7 +54,7 @@ impl InternalArbiUint {
         let Some((&top_limb, lower_limbs)) = limbs.split_last() else {
             return Vec::new();
         };
-        debug_assert!(top_limb != 0, "InternalArbiUint limbs must be normalized");
+        debug_assert!(top_limb != 0, "InternalMpUint limbs must be normalized");
         let top_be: [u8; LIMB_BYTES] = top_limb.to_be_bytes();
         let first_non_zero = top_be.iter().position(|&b| b != 0).unwrap_or(0);
         // SAFETY: `position` returns an index below `top_be.len()`; the
@@ -73,7 +73,7 @@ impl InternalArbiUint {
         bytes
     }
 
-    /// Constructs an `InternalArbiUint` from a little-endian byte slice.
+    /// Constructs an `InternalMpUint` from a little-endian byte slice.
     ///
     /// The bytes are interpreted as an unsigned integer in little-endian order
     /// (least significant byte first). An empty slice is treated as zero.
@@ -98,7 +98,7 @@ impl InternalArbiUint {
         Self::from_limbs(limbs)
     }
 
-    /// Constructs an `InternalArbiUint` from a big-endian byte slice.
+    /// Constructs an `InternalMpUint` from a big-endian byte slice.
     ///
     /// The bytes are interpreted as an unsigned integer in big-endian order
     /// (most significant byte first). An empty slice is treated as zero.

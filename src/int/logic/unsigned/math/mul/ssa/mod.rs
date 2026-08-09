@@ -32,7 +32,7 @@
 //!   exponent search looks either side of the analytic centre.
 //! - `plan::MAX_COST_RECURSION_DEPTH` — a termination bound on the cost model.
 //! - `SSA_BNM1_BASECASE_LIMBS` — where `mul_mod_bnm1` stops splitting. Also a
-//!   *correctness* input: [`plan::crt_half_width`] only emits half-widths whose
+//!   *correctness* input: [`SsaPlan::crt_half_width`] only emits half-widths whose
 //!   odd part fits inside it, which is what keeps the halving recursion off an
 //!   odd width. Raising it is always safe; lowering it below the half-widths the
 //!   planner emits is not.

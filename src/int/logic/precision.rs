@@ -12,7 +12,7 @@ use super::{AmbientPrecision, BoundedPrecision};
 const UNSET_SENTINEL: usize = 0;
 const UNLIMITED_SENTINEL: usize = usize::MAX;
 
-#[cfg(all(feature = "std", arbi_eager_thread_local))]
+#[cfg(all(feature = "std", mp_eager_thread_local))]
 thread_local! {
     static THREAD_PRECISION: Cell<AmbientPrecision> = const { Cell::new(AmbientPrecision::Unset) };
 }
@@ -20,7 +20,7 @@ thread_local! {
 // OS-key TLS cannot eagerly materialize a const value. `Cell::from` keeps that
 // necessarily lazy initializer distinct from the const-capable branch and
 // produces the identical initial value without suppressing Clippy.
-#[cfg(all(feature = "std", not(arbi_eager_thread_local)))]
+#[cfg(all(feature = "std", not(mp_eager_thread_local)))]
 thread_local! {
     static THREAD_PRECISION: Cell<AmbientPrecision> = Cell::from(AmbientPrecision::Unset);
 }

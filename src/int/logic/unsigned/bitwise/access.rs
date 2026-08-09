@@ -7,9 +7,9 @@
 
 use alloc::vec::Vec;
 
-use super::{InternalArbiUint, LIMB_BITS, Limb};
+use super::{InternalMpUint, LIMB_BITS, Limb};
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Returns the bit at position `bit` (0-indexed, LSB first).
     #[must_use]
     pub fn get_bit(&self, bit: usize) -> bool {

@@ -7,13 +7,13 @@
 
 use core::{cmp::Ordering, hint::unreachable_unchecked, mem::swap};
 
-use super::{InternalArbiUint, Limb, MontgomeryDomain, MulScratch, Primality};
+use super::{InternalMpUint, Limb, MontgomeryDomain, MulScratch, Primality};
 
 const MR_U64_BASES: [u64; 7] = [2, 325, 9375, 28178, 450_775, 9_780_504, 1_795_265_022];
 
 /// Simple trial division by the first few dozen primes.
 impl Primality {
-    pub fn trial_division(a: &InternalArbiUint) -> bool {
+    pub fn trial_division(a: &InternalMpUint) -> bool {
         // Products of primes up to 241 (excluding 2)
         const PRIME_PRODUCTS: [u64; 6] = [
             16_294_579_238_595_022_365,
@@ -180,13 +180,13 @@ const fn gcd_u64(mut a: u64, mut b: u64) -> u64 {
 impl Primality {
     #[must_use]
     pub fn miller_rabin_test(
-        a: &InternalArbiUint,
-        d: &InternalArbiUint,
+        a: &InternalMpUint,
+        d: &InternalMpUint,
         s: usize,
-        n_minus_1_mont: &InternalArbiUint,
-        one_mont: &InternalArbiUint,
-        temp_prod: &mut InternalArbiUint,
-        temp_rem: &mut InternalArbiUint,
+        n_minus_1_mont: &InternalMpUint,
+        one_mont: &InternalMpUint,
+        temp_prod: &mut InternalMpUint,
+        temp_rem: &mut InternalMpUint,
         domain: &MontgomeryDomain,
         mul_scratch: &mut MulScratch,
     ) -> bool {

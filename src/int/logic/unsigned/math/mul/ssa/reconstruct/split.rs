@@ -1,8 +1,8 @@
 //! Operand-to-coefficient splitting, including the fused whole-bit pre-twist.
 //!
-//! Declares the [`Coefficients`] namespace, because splitting is where an operand
-//! first becomes a coefficient matrix; [`accumulate`](super::accumulate) and
-//! [`fold`](super::fold) contribute the reverse direction to the same namespace.
+//! Declares the [`SsaCoefficients`] namespace, because splitting is where an operand
+//! first becomes a coefficient matrix; [`accumulate`](super::accumulate) contributes
+//! the reverse direction to the same namespace.
 
 use super::{Addition, LIMB_BITS, Limb, SsaCarry, SsaRing, SsaTransform};
 

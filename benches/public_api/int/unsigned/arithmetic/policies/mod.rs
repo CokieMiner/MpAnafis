@@ -2,7 +2,7 @@
 //!
 //! GMP has no checked, wrapping, overflowing, saturating, or strict integer
 //! type. Each `rug` cell therefore performs the GMP arithmetic and the same
-//! policy transformation as its paired `arbi` cell. The ordinary unlimited
+//! policy transformation as its paired `mp` cell. The ordinary unlimited
 //! GMP kernel costs remain available in [`super::operators`].
 //!
 //! Every operation has a bounded successful-path ladder. A representative

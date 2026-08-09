@@ -1,8 +1,6 @@
-//! Inherent `ArbiUint` API implementations by category.
+//! Inherent `MpUint` API implementations by category.
 
-use super::{
-    ArbiUint, BoundedPrecision, DebugVerbose, InternalArbiUint, Precision, PrecisionContext,
-};
+use super::{BoundedPrecision, DebugVerbose, InternalMpUint, MpUint, Precision, PrecisionContext};
 
 mod bitwise;
 mod capacity;

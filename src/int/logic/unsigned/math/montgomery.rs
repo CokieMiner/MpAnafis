@@ -2,7 +2,7 @@
 
 use core::{cmp::Ordering, ptr::eq};
 
-use super::{ArchKernels, DivScratch, Division, InternalArbiUint, LIMB_BITS, Limb, MulScratch};
+use super::{ArchKernels, DivScratch, Division, InternalMpUint, LIMB_BITS, Limb, MulScratch};
 
 /// Montgomery reduction domain for modular arithmetic with odd moduli.
 ///
@@ -12,15 +12,15 @@ use super::{ArchKernels, DivScratch, Division, InternalArbiUint, LIMB_BITS, Limb
 /// - `r2`: `R^2 mod M` where `R = 2^{LIMB_BITS*n}` and `n` is the number of limbs in M
 #[derive(Clone, Debug)]
 pub struct MontgomeryDomain {
-    pub modulus: InternalArbiUint,
+    pub modulus: InternalMpUint,
     pub m_inv: Limb,
-    pub r2: InternalArbiUint,
+    pub r2: InternalMpUint,
 }
 
 impl MontgomeryDomain {
     /// Creates a new Montgomery domain for the given odd modulus.
     #[must_use]
-    pub fn new(modulus: &InternalArbiUint) -> Self {
+    pub fn new(modulus: &InternalMpUint) -> Self {
         let m_limbs = modulus.limbs();
         let m0 = m_limbs.first().copied().unwrap_or(0);
         debug_assert!(m0 & 1 == 1, "Montgomery modulus must be non-zero and odd");
@@ -34,11 +34,11 @@ impl MontgomeryDomain {
 
         // Calculate R^2 mod M
         let n = m_limbs.len();
-        let mut r2_uint = InternalArbiUint::one();
+        let mut r2_uint = InternalMpUint::one();
         let shift_amount = n.wrapping_mul(LIMB_BITS).wrapping_mul(2);
         r2_uint.shl_assign(shift_amount);
 
-        let mut rem = InternalArbiUint::zero();
+        let mut rem = InternalMpUint::zero();
         let mut scratch = DivScratch::default();
         Division::rem_into(&r2_uint, modulus, &mut rem, &mut scratch);
 
@@ -57,7 +57,7 @@ impl MontgomeryDomain {
         unsafe_code,
         reason = "The t_top branch proves 2*n < t_len; t is then resized to 2*n for i < n rows and n-limb tails, while out is resized to n+1 before accesses through index n."
     )]
-    pub fn reduce_into(&self, t: &mut InternalArbiUint, out: &mut InternalArbiUint) {
+    pub fn reduce_into(&self, t: &mut InternalMpUint, out: &mut InternalMpUint) {
         let m_limbs = self.modulus.limbs();
         let n = m_limbs.len();
 
@@ -125,9 +125,9 @@ impl MontgomeryDomain {
 
     pub fn square_into_with_scratch(
         &self,
-        a: &InternalArbiUint,
-        out: &mut InternalArbiUint,
-        t: &mut InternalArbiUint,
+        a: &InternalMpUint,
+        out: &mut InternalMpUint,
+        t: &mut InternalMpUint,
         scratch: &mut MulScratch,
     ) {
         t.assign_square_with_scratch(a, scratch);
@@ -137,10 +137,10 @@ impl MontgomeryDomain {
     /// Performs a Montgomery multiplication utilizing pre-allocated scratch space.
     pub fn mul_into_with_scratch(
         &self,
-        a: &InternalArbiUint,
-        b: &InternalArbiUint,
-        out: &mut InternalArbiUint,
-        t: &mut InternalArbiUint,
+        a: &InternalMpUint,
+        b: &InternalMpUint,
+        out: &mut InternalMpUint,
+        t: &mut InternalMpUint,
         scratch: &mut MulScratch,
     ) {
         if eq(a, b) {
@@ -161,10 +161,10 @@ impl MontgomeryDomain {
     )]
     fn mul_into_with_scratch_internal(
         &self,
-        a: &InternalArbiUint,
-        b: &InternalArbiUint,
-        out: &mut InternalArbiUint,
-        t: &mut InternalArbiUint,
+        a: &InternalMpUint,
+        b: &InternalMpUint,
+        out: &mut InternalMpUint,
+        t: &mut InternalMpUint,
         scratch: &mut MulScratch,
     ) {
         let m_limbs = self.modulus.limbs();
@@ -243,16 +243,16 @@ impl MontgomeryDomain {
     #[must_use]
     pub fn transform_into_with_scratch(
         &self,
-        a: &InternalArbiUint,
-        temp_prod: &mut InternalArbiUint,
+        a: &InternalMpUint,
+        temp_prod: &mut InternalMpUint,
         scratch: &mut MulScratch,
-    ) -> InternalArbiUint {
-        let mut out = InternalArbiUint::zero();
+    ) -> InternalMpUint {
+        let mut out = InternalMpUint::zero();
         if a.limbs().len() > self.modulus.limbs().len() {
             // Reduce a modulo the modulus first so a * r2 fits in 2n+1 limbs.
             // (a mod N) * R mod N == a * R mod N, so this is correct.
             let mut div_scratch = DivScratch::default();
-            let mut rem = InternalArbiUint::zero();
+            let mut rem = InternalMpUint::zero();
             Division::rem_into(a, &self.modulus, &mut rem, &mut div_scratch);
             self.mul_into_with_scratch(&rem, &self.r2, &mut out, temp_prod, scratch);
         } else {
@@ -266,12 +266,12 @@ impl MontgomeryDomain {
     #[must_use]
     pub fn transform_out_with_scratch(
         &self,
-        a: &InternalArbiUint,
-        temp_prod: &mut InternalArbiUint,
+        a: &InternalMpUint,
+        temp_prod: &mut InternalMpUint,
         scratch: &mut MulScratch,
-    ) -> InternalArbiUint {
-        let one = InternalArbiUint::one();
-        let mut out = InternalArbiUint::zero();
+    ) -> InternalMpUint {
+        let one = InternalMpUint::one();
+        let mut out = InternalMpUint::zero();
         self.mul_into_with_scratch(a, &one, &mut out, temp_prod, scratch);
         out
     }

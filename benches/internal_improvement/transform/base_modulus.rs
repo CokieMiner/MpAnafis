@@ -8,11 +8,11 @@
 //!
 //! This forces the transform across balanced widths spanning the range where the
 //! nested branch is reachable. It is meant to be run once per candidate value
-//! through `ARBI_TUNING_PROFILE`, because the constant is compiled in.
+//! through `MP_TUNING_PROFILE`, because the constant is compiled in.
 
 use core::hint::black_box;
 
-use arbi_anafis::tune_api::tier::{
+use mp_anafis::tune_api::tier::{
     Limb,
     transform::{bench_ssa_mul_scratch_len, bench_ssa_mul_with_scratch},
 };

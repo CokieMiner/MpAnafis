@@ -4,7 +4,7 @@
 //!
 //! - [`MulScratch`] and the owned-path scratch policy — how a product's workspace
 //!   is sourced from the caller's stack or a pooled allocation.
-//! - `impl InternalArbiUint` — allocating, destination-reusing, and in-place
+//! - `impl InternalMpUint` — allocating, destination-reusing, and in-place
 //!   products and squares on owned big integers.
 //! - `impl Multiplication` — raw limb-slice products and squares for callers that
 //!   already hold [`Limb`] spans and their own scratch.
@@ -17,7 +17,7 @@
 use core::{mem::MaybeUninit, ptr::eq};
 
 use super::{
-    INLINE_LIMBS, InternalArbiUint, KARATSUBA_THRESHOLD, Karatsuba, Limb, MulPlan, Multiplication,
+    INLINE_LIMBS, InternalMpUint, KARATSUBA_THRESHOLD, Karatsuba, Limb, MulPlan, Multiplication,
     Schoolbook, ScratchBuffer, SquarePlan, TierCeiling,
 };
 
@@ -59,7 +59,7 @@ impl MulScratch {
     }
 }
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Computes `self * other`.
     pub fn mul(&self, other: &Self) -> Self {
         if eq(self, other) {

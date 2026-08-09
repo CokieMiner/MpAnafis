@@ -7,9 +7,9 @@
 
 use alloc::vec::Vec;
 
-use crate::error::{ParseArbiUintError, ParseArbiUintErrorKind};
+use crate::error::{ParseMpUintError, ParseMpUintErrorKind};
 
-use super::{ArchKernels, DoubleLimb, InternalArbiUint, KARATSUBA_THRESHOLD, LIMB_BITS, Limb};
+use super::{ArchKernels, DoubleLimb, InternalMpUint, KARATSUBA_THRESHOLD, LIMB_BITS, Limb};
 
 // --- Const lookup tables for radix conversion ---
 
@@ -165,35 +165,35 @@ impl RadixParameters {
     }
 }
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Parses a string in the given radix (2..=36).
     ///
     /// Supports both uppercase and lowercase digits.
     ///
     /// # Errors
     ///
-    /// Returns `ParseArbiUintError` if the string is empty, the radix is out of range,
+    /// Returns `ParseMpUintError` if the string is empty, the radix is out of range,
     /// or a character is not a valid digit for the radix.
     #[allow(
         clippy::too_many_lines,
         reason = "parsing loop is tightly coupled and efficient"
     )]
-    pub fn from_str_radix(s: &str, radix: u32) -> Result<Self, ParseArbiUintError> {
+    pub fn from_str_radix(s: &str, radix: u32) -> Result<Self, ParseMpUintError> {
         if !(2..=36).contains(&radix) {
-            return Err(ParseArbiUintError {
-                kind: ParseArbiUintErrorKind::InvalidRadix,
+            return Err(ParseMpUintError {
+                kind: ParseMpUintErrorKind::InvalidRadix,
             });
         }
 
         if s.is_empty() {
-            return Err(ParseArbiUintError {
-                kind: ParseArbiUintErrorKind::Empty,
+            return Err(ParseMpUintError {
+                kind: ParseMpUintErrorKind::Empty,
             });
         }
 
         if s.starts_with('-') {
-            return Err(ParseArbiUintError {
-                kind: ParseArbiUintErrorKind::Negative,
+            return Err(ParseMpUintError {
+                kind: ParseMpUintErrorKind::Negative,
             });
         }
 
@@ -216,8 +216,8 @@ impl InternalArbiUint {
             let mut current_chunk_power: Limb = 1;
 
             for &byte in s.as_bytes() {
-                let digit = digit_from_ascii_byte(byte, radix).ok_or(ParseArbiUintError {
-                    kind: ParseArbiUintErrorKind::InvalidDigit,
+                let digit = digit_from_ascii_byte(byte, radix).ok_or(ParseMpUintError {
+                    kind: ParseMpUintErrorKind::InvalidDigit,
                 })?;
                 #[allow(
                     clippy::as_conversions,
@@ -248,7 +248,7 @@ impl InternalArbiUint {
         // Divide and Conquer path for huge strings.
         // Validation is done inline during chunk processing to avoid a
         // separate full-string pass. Chunks are stored as bare Limb values,
-        // avoiding per-chunk InternalArbiUint allocation overhead.
+        // avoiding per-chunk InternalMpUint allocation overhead.
         let bytes = s.as_bytes();
         let mut chunk_vals: Vec<Limb> = Vec::new();
         let mut i = bytes.len();
@@ -258,8 +258,8 @@ impl InternalArbiUint {
             let chunk_bytes = unsafe { bytes.get_unchecked(start..i) };
             let mut chunk_val: Limb = 0;
             for &byte in chunk_bytes {
-                let digit = digit_from_ascii_byte(byte, radix).ok_or(ParseArbiUintError {
-                    kind: ParseArbiUintErrorKind::InvalidDigit,
+                let digit = digit_from_ascii_byte(byte, radix).ok_or(ParseMpUintError {
+                    kind: ParseMpUintErrorKind::InvalidDigit,
                 })?;
                 #[allow(
                     clippy::as_conversions,
@@ -280,7 +280,7 @@ impl InternalArbiUint {
         }
         chunk_vals.resize(len_pow2, 0);
 
-        // Convert bare Limb chunks to InternalArbiUint for combine_chunks.
+        // Convert bare Limb chunks to InternalMpUint for combine_chunks.
         // Allocation is deferred to here (one Vec per chunk) rather than
         // performed during the parsing loop.
         let chunks: Vec<Self> = chunk_vals.into_iter().map(Self::from_limb).collect();
@@ -299,9 +299,9 @@ impl InternalArbiUint {
     }
 }
 
-fn combine_chunks(chunks: &[InternalArbiUint], powers: &[InternalArbiUint]) -> InternalArbiUint {
+fn combine_chunks(chunks: &[InternalMpUint], powers: &[InternalMpUint]) -> InternalMpUint {
     if chunks.is_empty() {
-        return InternalArbiUint::zero();
+        return InternalMpUint::zero();
     }
     if chunks.len() == 1 {
         // SAFETY: the early return for an empty chunks slice proves length >= 1.
@@ -346,7 +346,7 @@ fn combine_chunks(chunks: &[InternalArbiUint], powers: &[InternalArbiUint]) -> I
     reason = "Limb→DoubleLimb is a widening cast; DoubleLimb→Limb truncation \
               is correct — the low LIMB_BITS bits form the result limb"
 )]
-fn mul_small_add(value: &InternalArbiUint, mul: Limb, add: Limb) -> InternalArbiUint {
+fn mul_small_add(value: &InternalMpUint, mul: Limb, add: Limb) -> InternalMpUint {
     let limbs = value.limbs();
     let len = limbs.len();
     // Allocate result with room for a possible carry limb
@@ -380,7 +380,7 @@ fn mul_small_add(value: &InternalArbiUint, mul: Limb, add: Limb) -> InternalArbi
         }
     }
 
-    InternalArbiUint::from_limbs(result_limbs)
+    InternalMpUint::from_limbs(result_limbs)
 }
 
 /// Converts an ASCII digit byte into its numeric value for `radix`.

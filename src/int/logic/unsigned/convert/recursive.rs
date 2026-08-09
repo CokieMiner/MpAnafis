@@ -14,7 +14,7 @@ use core::{
 use alloc::vec::Vec;
 
 use super::{
-    BarrettDomain, BarrettScratch, InternalArbiUint, Limb, MulScratch, RadixParameters,
+    BarrettDomain, BarrettScratch, InternalMpUint, Limb, MulScratch, RadixParameters,
     byte_from_digit, div_rem_small, write_decimal_chunks,
 };
 
@@ -37,7 +37,7 @@ pub struct FormatCache {
     /// Barrett reduction scratch shared by every divide node.
     barrett_scratch: BarrettScratch,
     /// Base-case value reused by the recursion leaves.
-    leaf_value: InternalArbiUint,
+    leaf_value: InternalMpUint,
     /// One quotient/remainder frame per active recursion depth.
     frames: Vec<FormatFrame>,
 }
@@ -47,15 +47,15 @@ pub struct FormatCache {
 /// integer objects per node.
 #[derive(Debug)]
 struct FormatFrame {
-    quotient: InternalArbiUint,
-    remainder: InternalArbiUint,
+    quotient: InternalMpUint,
+    remainder: InternalMpUint,
 }
 
 impl Default for FormatFrame {
     fn default() -> Self {
         Self {
-            quotient: InternalArbiUint::from_limb(0),
-            remainder: InternalArbiUint::from_limb(0),
+            quotient: InternalMpUint::from_limb(0),
+            remainder: InternalMpUint::from_limb(0),
         }
     }
 }
@@ -76,13 +76,13 @@ impl FormatCache {
             digit_scratch: Vec::new(),
             mul_scratch: MulScratch::default(),
             barrett_scratch: BarrettScratch::default(),
-            leaf_value: InternalArbiUint::from_limb(0),
+            leaf_value: InternalMpUint::from_limb(0),
             frames: Vec::new(),
         }
     }
 }
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Formats the integer in the given radix with the recursive Barrett
     /// divide-and-conquer path, reusing the working state in `cache`.
     ///
@@ -142,13 +142,13 @@ fn get_domains<'domains>(
     domains: &'domains mut [Vec<BarrettDomain>; 35],
     radix: u32,
     max_power: Limb,
-    value: &InternalArbiUint,
+    value: &InternalMpUint,
 ) -> &'domains [BarrettDomain] {
     #[allow(clippy::as_conversions, reason = "radix is in 2..=36")]
     // SAFETY: radix is bounded in 2..=36, so `radix as usize - 2` is in 0..=34.
     let entry = unsafe { domains.get_unchecked_mut((radix as usize).wrapping_sub(2)) };
     if entry.is_empty() {
-        entry.push(BarrettDomain::new(&InternalArbiUint::from_limb(max_power)));
+        entry.push(BarrettDomain::new(&InternalMpUint::from_limb(max_power)));
     }
 
     // SAFETY: We just ensured the vec is not empty.
@@ -174,7 +174,7 @@ fn get_domains<'domains>(
     reason = "divide and conquer recursion requires passing multiple scratches, frames, and thresholds"
 )]
 fn format_recursive_into<W: Write + ?Sized>(
-    value: &InternalArbiUint,
+    value: &InternalMpUint,
     domains: &[BarrettDomain],
     radix: Limb,
     max_digits: usize,
@@ -183,7 +183,7 @@ fn format_recursive_into<W: Write + ?Sized>(
     scratch: &mut Vec<u8>,
     mul_scratch: &mut MulScratch,
     barrett_scratch: &mut BarrettScratch,
-    leaf_value: &mut InternalArbiUint,
+    leaf_value: &mut InternalMpUint,
     frames: &mut [FormatFrame],
 ) -> FmtResult {
     if domains.is_empty() {

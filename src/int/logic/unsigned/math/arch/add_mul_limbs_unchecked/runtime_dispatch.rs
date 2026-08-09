@@ -6,9 +6,9 @@
 //! ## Testing override (debug builds only)
 //!
 //! ```bash
-//! ARBI_TEST_BACKEND=adx cargo test test_
-//! ARBI_TEST_BACKEND=bmi2 cargo test test_
-//! ARBI_TEST_BACKEND=vanilla cargo test test_
+//! MP_ANAFIS_TEST_BACKEND=adx cargo test test_
+//! MP_ANAFIS_TEST_BACKEND=bmi2 cargo test test_
+//! MP_ANAFIS_TEST_BACKEND=vanilla cargo test test_
 //! ```
 
 use std::sync::OnceLock;

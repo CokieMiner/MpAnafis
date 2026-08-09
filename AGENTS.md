@@ -1,20 +1,20 @@
-# arbi-anafis — Project Guidelines
+# mp-anafis — Project Guidelines
 
 This file defines the architecture, correctness rules, performance discipline,
-organization, and release gates for work on `arbi-anafis`.
+organization, and release gates for work on `mp-anafis`.
 
 ## 1. Project and priorities
 
-`arbi-anafis` is a high-performance multi-precision mathematics library written
+`mp-anafis` is a high-performance multi-precision mathematics library written
 in Rust. Its current integer engine provides:
 
-- `ArbiUint`, an unsigned arbitrary-precision integer backed by native
+- `MpUint`, an unsigned arbitrary-precision integer backed by native
   `usize` limbs (`Limb = usize`). Serde `[u64]` wire-format serialization is a
   planned roadmap item, not yet implemented (see `docs/int/api-inventory.md`).
-- `ArbiInt`, a signed wrapper that delegates magnitude arithmetic to the
+- `MpInt`, a signed wrapper that delegates magnitude arithmetic to the
   unsigned engine while enforcing sign and two's-complement boundary rules.
 
-`InternalArbiUint` and `InternalArbiInt` store up to `INLINE_LIMBS = 4` limbs
+`InternalMpUint` and `InternalMpInt` store up to `INLINE_LIMBS = 4` limbs
 inline: 256 bits on 64-bit targets, 128 bits on 32-bit targets, and 64 bits on
 16-bit targets. Reusable scratch buffers serve larger algorithms without
 changing the value representation.
@@ -37,7 +37,7 @@ once the relevant invariants have been proved.
   precision policies belong in `api/`.
 - Unsigned storage, raw limb arithmetic, bitwise logic, number theory, scratch
   management, and algorithm dispatch belong in `logic/unsigned/`.
-- Signed internals delegate magnitude work to `InternalArbiUint` and add only
+- Signed internals delegate magnitude work to `InternalMpUint` and add only
   sign, signed-domain, and two's-complement semantics.
 - Target selection, assembly, SIMD, and architecture-specific `cfg` logic
   belong in `src/int/logic/unsigned/math/arch/`. Generic callers must not
@@ -184,7 +184,7 @@ internals where the optimization is necessary.
 ### Inherent methods and algorithm namespaces
 
 - Put operations naturally owned by a real value or state directly on that
-  type. Inherent methods on `InternalArbiUint`, scratch owners, plans, and tuner
+  type. Inherent methods on `InternalMpUint`, scratch owners, plans, and tuner
   runners are preferable to detached wrappers.
 - When one cohesive algorithm family spans several files and would otherwise
   expose a large flat function list, use a descriptive zero-sized namespace
@@ -200,7 +200,7 @@ internals where the optimization is necessary.
   inherent type.
 - A namespace propagated through several unrelated folders is a cohesion
   signal: reconsider the folder boundary or introduce one owning orchestrator.
-  Broad propagation is expected for `InternalArbiUint` and reusable stateful
+  Broad propagation is expected for `InternalMpUint` and reusable stateful
   `Tuner` types. Necessary cross-family arithmetic dependencies may be encoded
   in `tools/structure_audit.py` only as narrow namespace-to-consumer paths;
   never suppress every consumer of an algorithm namespace globally.

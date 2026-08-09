@@ -2,9 +2,9 @@
 
 use core::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Not};
 
-use super::ArbiUint;
+use super::MpUint;
 
-impl BitAnd<Self> for ArbiUint {
+impl BitAnd<Self> for MpUint {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -20,7 +20,7 @@ impl BitAnd<Self> for ArbiUint {
     }
 }
 
-impl BitAnd<&Self> for ArbiUint {
+impl BitAnd<&Self> for MpUint {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -36,13 +36,13 @@ impl BitAnd<&Self> for ArbiUint {
     }
 }
 
-impl BitAnd<ArbiUint> for &ArbiUint {
-    type Output = ArbiUint;
+impl BitAnd<MpUint> for &MpUint {
+    type Output = MpUint;
     #[inline]
     #[track_caller]
-    fn bitand(self, rhs: ArbiUint) -> Self::Output {
+    fn bitand(self, rhs: MpUint) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
-        let result = ArbiUint {
+        let result = MpUint {
             value: self.value.bitand(&rhs.value),
             precision,
         };
@@ -52,13 +52,13 @@ impl BitAnd<ArbiUint> for &ArbiUint {
     }
 }
 
-impl BitAnd<&ArbiUint> for &ArbiUint {
-    type Output = ArbiUint;
+impl BitAnd<&MpUint> for &MpUint {
+    type Output = MpUint;
     #[inline]
     #[track_caller]
-    fn bitand(self, rhs: &ArbiUint) -> Self::Output {
+    fn bitand(self, rhs: &MpUint) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
-        let result = ArbiUint {
+        let result = MpUint {
             value: self.value.bitand(&rhs.value),
             precision,
         };
@@ -68,7 +68,7 @@ impl BitAnd<&ArbiUint> for &ArbiUint {
     }
 }
 
-impl BitAndAssign<Self> for ArbiUint {
+impl BitAndAssign<Self> for MpUint {
     #[inline]
     #[track_caller]
     fn bitand_assign(&mut self, rhs: Self) {
@@ -76,7 +76,7 @@ impl BitAndAssign<Self> for ArbiUint {
     }
 }
 
-impl BitAndAssign<&Self> for ArbiUint {
+impl BitAndAssign<&Self> for MpUint {
     #[inline]
     #[track_caller]
     fn bitand_assign(&mut self, rhs: &Self) {
@@ -90,7 +90,7 @@ impl BitAndAssign<&Self> for ArbiUint {
     }
 }
 
-impl BitOr<Self> for ArbiUint {
+impl BitOr<Self> for MpUint {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -106,7 +106,7 @@ impl BitOr<Self> for ArbiUint {
     }
 }
 
-impl BitOr<&Self> for ArbiUint {
+impl BitOr<&Self> for MpUint {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -122,13 +122,13 @@ impl BitOr<&Self> for ArbiUint {
     }
 }
 
-impl BitOr<ArbiUint> for &ArbiUint {
-    type Output = ArbiUint;
+impl BitOr<MpUint> for &MpUint {
+    type Output = MpUint;
     #[inline]
     #[track_caller]
-    fn bitor(self, rhs: ArbiUint) -> Self::Output {
+    fn bitor(self, rhs: MpUint) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
-        let result = ArbiUint {
+        let result = MpUint {
             value: self.value.bitor(&rhs.value),
             precision,
         };
@@ -138,13 +138,13 @@ impl BitOr<ArbiUint> for &ArbiUint {
     }
 }
 
-impl BitOr<&ArbiUint> for &ArbiUint {
-    type Output = ArbiUint;
+impl BitOr<&MpUint> for &MpUint {
+    type Output = MpUint;
     #[inline]
     #[track_caller]
-    fn bitor(self, rhs: &ArbiUint) -> Self::Output {
+    fn bitor(self, rhs: &MpUint) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
-        let result = ArbiUint {
+        let result = MpUint {
             value: self.value.bitor(&rhs.value),
             precision,
         };
@@ -154,7 +154,7 @@ impl BitOr<&ArbiUint> for &ArbiUint {
     }
 }
 
-impl BitOrAssign<Self> for ArbiUint {
+impl BitOrAssign<Self> for MpUint {
     #[inline]
     #[track_caller]
     fn bitor_assign(&mut self, rhs: Self) {
@@ -162,7 +162,7 @@ impl BitOrAssign<Self> for ArbiUint {
     }
 }
 
-impl BitOrAssign<&Self> for ArbiUint {
+impl BitOrAssign<&Self> for MpUint {
     #[inline]
     #[track_caller]
     fn bitor_assign(&mut self, rhs: &Self) {
@@ -176,7 +176,7 @@ impl BitOrAssign<&Self> for ArbiUint {
     }
 }
 
-impl BitXor<Self> for ArbiUint {
+impl BitXor<Self> for MpUint {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -192,7 +192,7 @@ impl BitXor<Self> for ArbiUint {
     }
 }
 
-impl BitXor<&Self> for ArbiUint {
+impl BitXor<&Self> for MpUint {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -208,13 +208,13 @@ impl BitXor<&Self> for ArbiUint {
     }
 }
 
-impl BitXor<ArbiUint> for &ArbiUint {
-    type Output = ArbiUint;
+impl BitXor<MpUint> for &MpUint {
+    type Output = MpUint;
     #[inline]
     #[track_caller]
-    fn bitxor(self, rhs: ArbiUint) -> Self::Output {
+    fn bitxor(self, rhs: MpUint) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
-        let result = ArbiUint {
+        let result = MpUint {
             value: self.value.bitxor(&rhs.value),
             precision,
         };
@@ -224,13 +224,13 @@ impl BitXor<ArbiUint> for &ArbiUint {
     }
 }
 
-impl BitXor<&ArbiUint> for &ArbiUint {
-    type Output = ArbiUint;
+impl BitXor<&MpUint> for &MpUint {
+    type Output = MpUint;
     #[inline]
     #[track_caller]
-    fn bitxor(self, rhs: &ArbiUint) -> Self::Output {
+    fn bitxor(self, rhs: &MpUint) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
-        let result = ArbiUint {
+        let result = MpUint {
             value: self.value.bitxor(&rhs.value),
             precision,
         };
@@ -240,7 +240,7 @@ impl BitXor<&ArbiUint> for &ArbiUint {
     }
 }
 
-impl BitXorAssign<Self> for ArbiUint {
+impl BitXorAssign<Self> for MpUint {
     #[inline]
     #[track_caller]
     fn bitxor_assign(&mut self, rhs: Self) {
@@ -248,7 +248,7 @@ impl BitXorAssign<Self> for ArbiUint {
     }
 }
 
-impl BitXorAssign<&Self> for ArbiUint {
+impl BitXorAssign<&Self> for MpUint {
     #[inline]
     #[track_caller]
     fn bitxor_assign(&mut self, rhs: &Self) {
@@ -262,7 +262,7 @@ impl BitXorAssign<&Self> for ArbiUint {
     }
 }
 
-impl Not for ArbiUint {
+impl Not for MpUint {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -270,7 +270,7 @@ impl Not for ArbiUint {
         let width = self
             .precision
             .significant_bits()
-            .expect("`!` on unlimited ArbiUint: use `.not_with_width(width)` or `.try_not()`");
+            .expect("`!` on unlimited MpUint: use `.not_with_width(width)` or `.try_not()`");
         let result = Self {
             value: self.value.not(width),
             precision: self.precision,
@@ -281,16 +281,16 @@ impl Not for ArbiUint {
     }
 }
 
-impl Not for &ArbiUint {
-    type Output = ArbiUint;
+impl Not for &MpUint {
+    type Output = MpUint;
     #[inline]
     #[track_caller]
     fn not(self) -> Self::Output {
         let width = self
             .precision
             .significant_bits()
-            .expect("`!` on &ArbiUint unlimited: use `.not_with_width(width)` or `.try_not()`");
-        let result = ArbiUint {
+            .expect("`!` on &MpUint unlimited: use `.not_with_width(width)` or `.try_not()`");
+        let result = MpUint {
             value: self.value.not(width),
             precision: self.precision,
         };

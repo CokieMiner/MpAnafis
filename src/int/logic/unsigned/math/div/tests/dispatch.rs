@@ -8,35 +8,35 @@ use core::cmp::Ordering;
 
 use proptest::prelude::*;
 
-use super::{BURNIKEL_ZIEGLER_THRESHOLD, DivScratch, Division, InternalArbiUint, LIMB_BITS, Limb};
+use super::{BURNIKEL_ZIEGLER_THRESHOLD, DivScratch, Division, InternalMpUint, LIMB_BITS, Limb};
 
-fn internal_uint(max_limbs: usize) -> impl Strategy<Value = InternalArbiUint> {
-    proptest::collection::vec(any::<usize>(), 0..=max_limbs).prop_map(InternalArbiUint::from_limbs)
+fn internal_uint(max_limbs: usize) -> impl Strategy<Value = InternalMpUint> {
+    proptest::collection::vec(any::<usize>(), 0..=max_limbs).prop_map(InternalMpUint::from_limbs)
 }
 
-fn internal_uint_nonzero(max_limbs: usize) -> impl Strategy<Value = InternalArbiUint> {
+fn internal_uint_nonzero(max_limbs: usize) -> impl Strategy<Value = InternalMpUint> {
     internal_uint(max_limbs).prop_filter("denominator must be non-zero", |value| !value.is_zero())
 }
 
-fn dense_shape(limbs: usize, top: Limb) -> InternalArbiUint {
+fn dense_shape(limbs: usize, top: Limb) -> InternalMpUint {
     let mut values = alloc::vec![Limb::MAX; limbs];
     *values.last_mut().expect("test shape must have one limb") = top;
-    InternalArbiUint::from_limbs(values)
+    InternalMpUint::from_limbs(values)
 }
 
-fn joined_blocks(low: &[Limb], high: &[Limb]) -> InternalArbiUint {
+fn joined_blocks(low: &[Limb], high: &[Limb]) -> InternalMpUint {
     let mut limbs = low.to_vec();
     limbs.extend_from_slice(high);
-    InternalArbiUint::from_limbs(limbs)
+    InternalMpUint::from_limbs(limbs)
 }
 
 fn burnikel_matches_algorithm_d(
-    numerator: &InternalArbiUint,
-    denominator: &InternalArbiUint,
+    numerator: &InternalMpUint,
+    denominator: &InternalMpUint,
     scratch: &mut DivScratch,
-) -> (InternalArbiUint, InternalArbiUint) {
-    let mut actual_quotient = InternalArbiUint::zero();
-    let mut actual_remainder = InternalArbiUint::zero();
+) -> (InternalMpUint, InternalMpUint) {
+    let mut actual_quotient = InternalMpUint::zero();
+    let mut actual_remainder = InternalMpUint::zero();
     Division::burnikel_ziegler(
         numerator,
         denominator,
@@ -45,8 +45,8 @@ fn burnikel_matches_algorithm_d(
         scratch,
     );
 
-    let mut expected_quotient = InternalArbiUint::zero();
-    let mut expected_remainder = InternalArbiUint::zero();
+    let mut expected_quotient = InternalMpUint::zero();
+    let mut expected_remainder = InternalMpUint::zero();
     let mut expected_scratch = DivScratch::default();
     Division::algorithm_d(
         numerator,
@@ -77,7 +77,7 @@ fn burnikel_matches_algorithm_d(
 /// overflowing the shortcut's quotient buffer. Random pairs vary the divisor
 /// limb count and numerator-to-divisor width ratio with an already-normalized
 /// divisor; focused tests below cover nonzero shifts and exact guard boundaries.
-fn burnikel_shape_pair() -> impl Strategy<Value = (InternalArbiUint, InternalArbiUint)> {
+fn burnikel_shape_pair() -> impl Strategy<Value = (InternalMpUint, InternalMpUint)> {
     let top_bit = (Limb::MAX >> 1).wrapping_add(1);
     let random_pair = (2_usize..=24).prop_flat_map(move |n| {
         let den = dense_shape(n, top_bit.wrapping_add(1));
@@ -109,8 +109,8 @@ fn burnikel_shape_pair() -> impl Strategy<Value = (InternalArbiUint, InternalArb
 }
 
 fn assert_divisibility_matches_remainder(
-    value: &InternalArbiUint,
-    divisor: &InternalArbiUint,
+    value: &InternalMpUint,
+    divisor: &InternalMpUint,
     expected: bool,
 ) {
     assert!(
@@ -123,8 +123,8 @@ fn assert_divisibility_matches_remainder(
 
 #[test]
 fn divisibility_zero_semantics_are_explicit() {
-    let zero = InternalArbiUint::zero();
-    let nonzero = InternalArbiUint::from_limb(17);
+    let zero = InternalMpUint::zero();
+    let nonzero = InternalMpUint::from_limb(17);
 
     assert!(zero.is_divisible_by(&zero));
     assert!(zero.is_divisible_by(&nonzero));
@@ -137,11 +137,11 @@ fn equal_length_divisibility_handles_exact_and_near_multiples() {
     *divisor_limbs
         .last_mut()
         .expect("the test divisor is non-empty") = 1;
-    let divisor = InternalArbiUint::from_limbs(divisor_limbs);
-    let exact = divisor.mul(&InternalArbiUint::from_limb(7));
+    let divisor = InternalMpUint::from_limbs(divisor_limbs);
+    let exact = divisor.mul(&InternalMpUint::from_limb(7));
     assert_eq!(exact.limbs().len(), divisor.limbs().len());
 
-    let one = InternalArbiUint::one();
+    let one = InternalMpUint::one();
     assert_divisibility_matches_remainder(&exact.sub(&one), &divisor, false);
     assert_divisibility_matches_remainder(&exact, &divisor, true);
     assert_divisibility_matches_remainder(&exact.add(&one), &divisor, false);
@@ -149,16 +149,16 @@ fn equal_length_divisibility_handles_exact_and_near_multiples() {
 
 #[test]
 fn divisibility_removes_whole_and_partial_limb_power_of_two_factors() {
-    let odd_divisor = InternalArbiUint::from_limbs(alloc::vec![3, 5, 1]);
+    let odd_divisor = InternalMpUint::from_limbs(alloc::vec![3, 5, 1]);
     let tz = LIMB_BITS
         .checked_add(3)
         .expect("one limb plus three bits fits usize");
     let divisor = odd_divisor.shl(tz);
-    let valuation_unit = InternalArbiUint::power_of_two(tz);
+    let valuation_unit = InternalMpUint::power_of_two(tz);
 
     // A one-limb factor keeps the operands equal-width and exercises the
     // shifted low-limb reconstruction in the scalar divisibility path.
-    let equal_exact = divisor.mul(&InternalArbiUint::from_limb(3));
+    let equal_exact = divisor.mul(&InternalMpUint::from_limb(3));
     assert_eq!(equal_exact.limbs().len(), divisor.limbs().len());
     assert_divisibility_matches_remainder(&equal_exact, &divisor, true);
     assert_divisibility_matches_remainder(&equal_exact.add(&valuation_unit), &divisor, false);
@@ -166,7 +166,7 @@ fn divisibility_removes_whole_and_partial_limb_power_of_two_factors() {
     // The sparse three-limb factor forces the low-to-high exact-division loop.
     // Adding or subtracting `2^tz` preserves the necessary 2-adic condition, so
     // the false cases cannot be rejected by the valuation precheck alone.
-    let factor = InternalArbiUint::from_limbs(alloc::vec![5, 0, 1]);
+    let factor = InternalMpUint::from_limbs(alloc::vec![5, 0, 1]);
     let unequal_exact = divisor.mul(&factor);
     assert!(unequal_exact.limbs().len() > divisor.limbs().len());
     assert_divisibility_matches_remainder(&unequal_exact, &divisor, true);
@@ -189,7 +189,7 @@ fn divisibility_matches_at_subquadratic_fallback_threshold_neighbors() {
     *divisor_limbs
         .last_mut()
         .expect("the threshold divisor is non-empty") = 1;
-    let divisor = InternalArbiUint::from_limbs(divisor_limbs);
+    let divisor = InternalMpUint::from_limbs(divisor_limbs);
     let below = BURNIKEL_ZIEGLER_THRESHOLD
         .checked_sub(1)
         .expect("the threshold is positive");
@@ -247,7 +247,7 @@ fn burnikel_three_by_two_checks_exact_quotient_width_boundaries() {
     *denominator_limbs
         .last_mut()
         .expect("test divisor is nonzero") = top_bit.wrapping_add(7);
-    let denominator = InternalArbiUint::from_limbs(denominator_limbs.clone());
+    let denominator = InternalMpUint::from_limbs(denominator_limbs.clone());
     let low_block = alloc::vec![23; 4];
 
     // `a21 = V - 1` is the largest numerator prefix whose quotient still fits
@@ -273,7 +273,7 @@ fn burnikel_three_by_two_checks_exact_quotient_width_boundaries() {
     let (fallback_quotient, fallback_remainder) =
         burnikel_matches_algorithm_d(&fallback_numerator, &denominator, &mut fallback_scratch);
     assert_eq!(fallback_quotient.limbs(), &[0, 0, 0, 0, 1]);
-    assert_eq!(fallback_remainder, InternalArbiUint::from_limbs(low_block));
+    assert_eq!(fallback_remainder, InternalMpUint::from_limbs(low_block));
     assert!(
         !fallback_scratch.bz_a_pad.is_empty(),
         "a21 = V must fall back instead of overflowing the direct quotient"
@@ -287,7 +287,7 @@ fn burnikel_two_by_one_removes_an_equal_upper_block() {
     *denominator_limbs
         .last_mut()
         .expect("test divisor is nonzero") = top_bit.wrapping_add(11);
-    let denominator = InternalArbiUint::from_limbs(denominator_limbs.clone());
+    let denominator = InternalMpUint::from_limbs(denominator_limbs.clone());
     let low_block = alloc::vec![31; 8];
     let numerator = joined_blocks(&low_block, &denominator_limbs);
 
@@ -295,7 +295,7 @@ fn burnikel_two_by_one_removes_an_equal_upper_block() {
     let (quotient, remainder) =
         burnikel_matches_algorithm_d(&numerator, &denominator, &mut scratch);
     assert_eq!(quotient.limbs(), &[0, 0, 0, 0, 0, 0, 0, 0, 1]);
-    assert_eq!(remainder, InternalArbiUint::from_limbs(low_block));
+    assert_eq!(remainder, InternalMpUint::from_limbs(low_block));
     assert!(
         scratch.bz_a_pad.is_empty(),
         "upper = V must take the direct 2n/n path after one subtraction"
@@ -326,11 +326,11 @@ fn burnikel_reuses_scratch_across_direct_miss_and_general_paths() {
 #[test]
 fn algorithm_d_normalization_boundary_covers_output_modes() {
     for top in [Limb::MAX, Limb::MAX >> 1] {
-        let denominator = InternalArbiUint::from_limbs(alloc::vec![5, top]);
+        let denominator = InternalMpUint::from_limbs(alloc::vec![5, top]);
         let stack_numerator = dense_shape(63, Limb::MAX);
         let mut stack_scratch = DivScratch::default();
-        let mut expected_quotient = InternalArbiUint::zero();
-        let mut expected_remainder = InternalArbiUint::zero();
+        let mut expected_quotient = InternalMpUint::zero();
+        let mut expected_remainder = InternalMpUint::zero();
         Division::algorithm_d(
             &stack_numerator,
             &denominator,
@@ -346,8 +346,8 @@ fn algorithm_d_normalization_boundary_covers_output_modes() {
         );
         assert!(expected_remainder < denominator);
 
-        let untouched_remainder = InternalArbiUint::from_limb(37);
-        let mut quotient_only = InternalArbiUint::zero();
+        let untouched_remainder = InternalMpUint::from_limb(37);
+        let mut quotient_only = InternalMpUint::zero();
         let mut remainder_sentinel = untouched_remainder.clone();
         assert!(Division::try_algorithm_d_unscratched::<true, false, false>(
             &stack_numerator,
@@ -358,9 +358,9 @@ fn algorithm_d_normalization_boundary_covers_output_modes() {
         assert_eq!(quotient_only, expected_quotient);
         assert_eq!(remainder_sentinel, untouched_remainder);
 
-        let untouched_quotient = InternalArbiUint::from_limb(41);
+        let untouched_quotient = InternalMpUint::from_limb(41);
         let mut quotient_sentinel = untouched_quotient.clone();
-        let mut remainder_only = InternalArbiUint::zero();
+        let mut remainder_only = InternalMpUint::zero();
         assert!(Division::try_algorithm_d_unscratched::<false, true, true>(
             &stack_numerator,
             &denominator,
@@ -372,8 +372,8 @@ fn algorithm_d_normalization_boundary_covers_output_modes() {
 
         let heap_numerator = dense_shape(64, Limb::MAX);
         let mut heap_scratch = DivScratch::default();
-        let mut heap_quotient = InternalArbiUint::zero();
-        let mut heap_remainder = InternalArbiUint::zero();
+        let mut heap_quotient = InternalMpUint::zero();
+        let mut heap_remainder = InternalMpUint::zero();
         Division::algorithm_d(
             &heap_numerator,
             &denominator,
@@ -389,7 +389,7 @@ fn algorithm_d_normalization_boundary_covers_output_modes() {
         );
         assert!(heap_remainder < denominator);
 
-        let mut heap_remainder_only = InternalArbiUint::zero();
+        let mut heap_remainder_only = InternalMpUint::zero();
         Division::algorithm_d_rem(
             &heap_numerator,
             &denominator,
@@ -398,8 +398,8 @@ fn algorithm_d_normalization_boundary_covers_output_modes() {
         );
         assert_eq!(heap_remainder_only, heap_remainder);
 
-        let untouched_heap_quotient = InternalArbiUint::from_limb(43);
-        let untouched_heap_remainder = InternalArbiUint::from_limb(47);
+        let untouched_heap_quotient = InternalMpUint::from_limb(43);
+        let untouched_heap_remainder = InternalMpUint::from_limb(47);
         let mut heap_quotient_sentinel = untouched_heap_quotient.clone();
         let mut heap_remainder_sentinel = untouched_heap_remainder.clone();
         assert!(
@@ -428,8 +428,8 @@ proptest! {
         pair in burnikel_shape_pair(),
     ) {
         let (numerator, denominator) = pair;
-        let mut actual_quotient = InternalArbiUint::zero();
-        let mut actual_remainder = InternalArbiUint::zero();
+        let mut actual_quotient = InternalMpUint::zero();
+        let mut actual_remainder = InternalMpUint::zero();
         let mut actual_scratch = DivScratch::default();
         Division::burnikel_ziegler(
             &numerator,
@@ -439,8 +439,8 @@ proptest! {
             &mut actual_scratch,
         );
 
-        let mut expected_quotient = InternalArbiUint::zero();
-        let mut expected_remainder = InternalArbiUint::zero();
+        let mut expected_quotient = InternalMpUint::zero();
+        let mut expected_remainder = InternalMpUint::zero();
         let mut expected_scratch = DivScratch::default();
         Division::algorithm_d(
             &numerator,
@@ -467,8 +467,8 @@ proptest! {
         numerator in internal_uint(10),
         denominator in internal_uint_nonzero(6),
     ) {
-        let mut quotient_out = InternalArbiUint::zero();
-        let mut remainder_out = InternalArbiUint::zero();
+        let mut quotient_out = InternalMpUint::zero();
+        let mut remainder_out = InternalMpUint::zero();
         let mut scratch = DivScratch::default();
 
         Division::div_rem_into(
@@ -489,7 +489,7 @@ proptest! {
         numerator in internal_uint(10),
         denominator in internal_uint_nonzero(10),
     ) {
-        let mut remainder_out = InternalArbiUint::zero();
+        let mut remainder_out = InternalMpUint::zero();
         let mut scratch = DivScratch::default();
 
         Division::rem_into(
@@ -553,7 +553,7 @@ proptest! {
         denominator_limb in any::<usize>()
             .prop_filter("denominator must be non-zero", |value| *value != 0),
     ) {
-        let denominator = InternalArbiUint::from_limb(denominator_limb);
+        let denominator = InternalMpUint::from_limb(denominator_limb);
         let quotient = numerator.div(&denominator);
         let remainder = numerator.rem(&denominator);
         let recombined = quotient.mul(&denominator).add(&remainder);

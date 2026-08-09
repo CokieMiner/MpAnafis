@@ -2,19 +2,19 @@
 
 use core::cmp::Ordering;
 
-use crate::error::ArbiError;
+use crate::error::MpError;
 
-use super::{ArbiInt, InternalArbiInt, InternalArbiUint, Precision};
+use super::{InternalMpInt, InternalMpUint, MpInt, Precision};
 
-impl ArbiInt {
-    fn to_tc_bits(&self, width: usize) -> Option<InternalArbiUint> {
+impl MpInt {
+    fn to_tc_bits(&self, width: usize) -> Option<InternalMpUint> {
         let _precision = Precision::new_bounded(width)?;
         Some(self.value.to_tc_bits(width))
     }
 
-    fn from_tc_bits_with_width(bits: InternalArbiUint, width: usize) -> Option<Self> {
+    fn from_tc_bits_with_width(bits: InternalMpUint, width: usize) -> Option<Self> {
         let precision = Precision::new_bounded(width)?;
-        let internal = InternalArbiInt::from_tc_bits(bits, width);
+        let internal = InternalMpInt::from_tc_bits(bits, width);
         let result = Self {
             value: internal,
             precision,
@@ -55,7 +55,7 @@ impl ArbiInt {
 
     /// Computes the bitwise NOT within the given width.
     ///
-    /// `!self` is already total on `ArbiInt`, including at unlimited precision,
+    /// `!self` is already total on `MpInt`, including at unlimited precision,
     /// because the sign supplies the infinite extension. This method exists for
     /// the cases where the caller wants the complement of a *specific* width
     /// rather than of the value.
@@ -71,15 +71,15 @@ impl ArbiInt {
     /// Computes the bitwise NOT within this value's own bounded precision.
     ///
     /// # Errors
-    /// Returns `ArbiError::WidthRequired` when the precision is unlimited. Note
+    /// Returns `MpError::WidthRequired` when the precision is unlimited. Note
     /// that `!self` is still defined there and is the operation to reach for;
     /// this method is the fallible width-bound form.
-    pub fn try_not(&self) -> Result<Self, ArbiError> {
+    pub fn try_not(&self) -> Result<Self, MpError> {
         let width = self
             .precision
             .significant_bits()
-            .ok_or(ArbiError::WidthRequired)?;
-        self.not_with_width(width).ok_or(ArbiError::WidthRequired)
+            .ok_or(MpError::WidthRequired)?;
+        self.not_with_width(width).ok_or(MpError::WidthRequired)
     }
 
     /// Returns the number of leading zeros within the current bounded width.
@@ -145,8 +145,8 @@ impl ArbiInt {
                 self.clone()
             } else {
                 let bit_val = Self {
-                    value: InternalArbiInt {
-                        abs: InternalArbiUint::one().shl(bit),
+                    value: InternalMpInt {
+                        abs: InternalMpUint::one().shl(bit),
                         is_positive: true,
                     },
                     precision: self.precision,
@@ -165,7 +165,7 @@ impl ArbiInt {
             }
         } else {
             let result = Self {
-                value: InternalArbiInt {
+                value: InternalMpInt {
                     abs: self.value.abs.set_bit_to(bit, value),
                     is_positive: true,
                 },
@@ -277,9 +277,9 @@ impl ArbiInt {
             let width = self.precision.significant_bits().unwrap_or(to);
             let bits = self
                 .to_tc_bits(width.max(to))
-                .unwrap_or_else(InternalArbiUint::zero);
+                .unwrap_or_else(InternalMpUint::zero);
             let result = Self {
-                value: InternalArbiInt {
+                value: InternalMpInt {
                     abs: bits.bit_range(from, to),
                     is_positive: true,
                 },
@@ -289,7 +289,7 @@ impl ArbiInt {
             result
         } else {
             let result = Self {
-                value: InternalArbiInt {
+                value: InternalMpInt {
                     abs: self.value.abs.bit_range(from, to),
                     is_positive: true,
                 },

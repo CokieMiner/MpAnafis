@@ -1,8 +1,8 @@
 //! Wrapping, overflowing, and saturating signed arithmetic APIs.
 
-use super::{ArbiInt, ArbiUint, InternalArbiInt, Precision};
+use super::{InternalMpInt, MpInt, MpUint, Precision};
 
-impl ArbiInt {
+impl MpInt {
     // wrapping_* arithmetic
     // ------------------------------------------------------------------
 
@@ -65,7 +65,7 @@ impl ArbiInt {
     pub fn wrapping_div(&self, rhs: &Self) -> Self {
         let p = self.precision.combine_for_binary_op(rhs.precision);
         let value = if rhs.value.abs.is_zero() {
-            InternalArbiInt::zero()
+            InternalMpInt::zero()
         } else if p
             .significant_bits()
             .is_some_and(|bits| self.value.bounded_division_overflows(&rhs.value, bits))
@@ -92,7 +92,7 @@ impl ArbiInt {
     pub fn wrapping_rem(&self, rhs: &Self) -> Self {
         let p = self.precision.combine_for_binary_op(rhs.precision);
         let value = if rhs.value.abs.is_zero() {
-            InternalArbiInt::zero()
+            InternalMpInt::zero()
         } else {
             self.value.rem(&rhs.value)
         };
@@ -177,7 +177,7 @@ impl ArbiInt {
         let p = self.precision.combine_for_binary_op(rhs.precision);
         if rhs.value.abs.is_zero() {
             let result = Self {
-                value: InternalArbiInt::zero(),
+                value: InternalMpInt::zero(),
                 precision: p,
             };
             result.debug_assert_valid();
@@ -207,7 +207,7 @@ impl ArbiInt {
         let p = self.precision.combine_for_binary_op(rhs.precision);
         if rhs.value.abs.is_zero() {
             let result = Self {
-                value: InternalArbiInt::zero(),
+                value: InternalMpInt::zero(),
                 precision: p,
             };
             result.debug_assert_valid();
@@ -219,7 +219,7 @@ impl ArbiInt {
         let value = if overflow {
             // Rust-compatible overflowing remainder reports the `MIN / -1`
             // overflow even though its wrapped remainder is exactly zero.
-            InternalArbiInt::zero()
+            InternalMpInt::zero()
         } else {
             self.value.rem(&rhs.value)
         };
@@ -283,7 +283,7 @@ impl ArbiInt {
 
     /// Computes the absolute difference between `self` and `other`.
     #[must_use]
-    pub fn abs_diff(&self, other: &Self) -> ArbiUint {
+    pub fn abs_diff(&self, other: &Self) -> MpUint {
         let diff_val = if self.is_negative() == other.is_negative() {
             let (larger, smaller) = if self.value.abs >= other.value.abs {
                 (&self.value.abs, &other.value.abs)
@@ -303,7 +303,7 @@ impl ArbiInt {
             _ => Precision::Unlimited,
         };
 
-        let result = ArbiUint {
+        let result = MpUint {
             value: diff_val,
             precision: p,
         };
@@ -340,7 +340,7 @@ impl ArbiInt {
         let p = self.precision.combine_for_binary_op(rhs.precision);
         if rhs.value.abs.is_zero() {
             let result = Self {
-                value: InternalArbiInt::zero(),
+                value: InternalMpInt::zero(),
                 precision: p,
             };
             result.debug_assert_valid();
@@ -367,7 +367,7 @@ impl ArbiInt {
         let p = self.precision.combine_for_binary_op(rhs.precision);
         if rhs.value.abs.is_zero() {
             let result = Self {
-                value: InternalArbiInt::zero(),
+                value: InternalMpInt::zero(),
                 precision: p,
             };
             result.debug_assert_valid();

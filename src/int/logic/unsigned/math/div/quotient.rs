@@ -31,7 +31,7 @@
 
 use core::cmp::Ordering;
 
-use super::{ArchKernels, Division, InternalArbiUint, LIMB_BITS, Limb};
+use super::{ArchKernels, Division, InternalMpUint, LIMB_BITS, Limb};
 
 /// Guard limbs retained in the truncated divisor beyond the quotient length.
 ///
@@ -61,10 +61,10 @@ impl Division {
     /// four downward corrections. An estimate outside the supported range
     /// returns to the caller without changing either output.
     pub fn small_quotient_div_rem(
-        num_a: &InternalArbiUint,
-        den_b: &InternalArbiUint,
-        quotient_out: &mut InternalArbiUint,
-        rem_out: &mut InternalArbiUint,
+        num_a: &InternalMpUint,
+        den_b: &InternalMpUint,
+        quotient_out: &mut InternalMpUint,
+        rem_out: &mut InternalMpUint,
     ) -> bool {
         let u_limbs = Self::significant_limbs(num_a.limbs());
         let v_limbs = Self::significant_limbs(den_b.limbs());
@@ -100,12 +100,12 @@ impl Division {
                 // leading limbs already prove `num > den`; only equality needs
                 // a full comparison of the lower limbs.
                 if numerator_top == denominator_top
-                    && InternalArbiUint::cmp_limbs(u_limbs, v_limbs) == Ordering::Less
+                    && InternalMpUint::cmp_limbs(u_limbs, v_limbs) == Ordering::Less
                 {
                     quotient_out.clear();
                     rem_out.clone_from(num_a);
                 } else {
-                    *quotient_out = InternalArbiUint::one();
+                    *quotient_out = InternalMpUint::one();
                     *rem_out = num_a.sub(den_b);
                 }
                 return true;
@@ -113,7 +113,7 @@ impl Division {
             return false;
         }
 
-        let mut work = InternalArbiUint::with_capacity(u_limbs.len().wrapping_add(1));
+        let mut work = InternalMpUint::with_capacity(u_limbs.len().wrapping_add(1));
         let mut corrections = 0_u8;
         loop {
             let work_len = u_limbs.len().wrapping_add(1);
@@ -143,7 +143,7 @@ impl Division {
             }
 
             work.normalize();
-            if InternalArbiUint::cmp_limbs(work.limbs(), v_limbs) != Ordering::Less {
+            if InternalMpUint::cmp_limbs(work.limbs(), v_limbs) != Ordering::Less {
                 if corrections >= 4 {
                     return false;
                 }
@@ -154,7 +154,7 @@ impl Division {
                 continue;
             }
 
-            *quotient_out = InternalArbiUint::from_limb(quotient);
+            *quotient_out = InternalMpUint::from_limb(quotient);
             *rem_out = work;
             return true;
         }
@@ -167,9 +167,9 @@ impl Division {
     /// the full division engine. Returns `true` with the exact floor quotient
     /// written to `quotient_out` otherwise — never an approximation.
     pub fn truncated_quotient(
-        num_a: &InternalArbiUint,
-        den_b: &InternalArbiUint,
-        quotient_out: &mut InternalArbiUint,
+        num_a: &InternalMpUint,
+        den_b: &InternalMpUint,
+        quotient_out: &mut InternalMpUint,
     ) -> bool {
         let u_limbs = Self::significant_limbs(num_a.limbs());
         let v_limbs = Self::significant_limbs(den_b.limbs());
@@ -188,17 +188,17 @@ impl Division {
             return true;
         }
         if num_len == den_len {
-            match InternalArbiUint::cmp_limbs(u_limbs, v_limbs) {
+            match InternalMpUint::cmp_limbs(u_limbs, v_limbs) {
                 Ordering::Less => {
                     quotient_out.clear();
                     return true;
                 }
                 Ordering::Equal => {
-                    *quotient_out = InternalArbiUint::one();
+                    *quotient_out = InternalMpUint::one();
                     return true;
                 }
                 Ordering::Greater if Self::less_than_double(u_limbs, v_limbs) => {
-                    *quotient_out = InternalArbiUint::one();
+                    *quotient_out = InternalMpUint::one();
                     return true;
                 }
                 Ordering::Greater => {}
@@ -228,9 +228,9 @@ impl Division {
                 v_limbs.get_unchecked(split..),
             )
         };
-        let mut num_prime = InternalArbiUint::zero();
+        let mut num_prime = InternalMpUint::zero();
         num_prime.clone_from_slice(num_head);
-        let mut den_prime = InternalArbiUint::zero();
+        let mut den_prime = InternalMpUint::zero();
         den_prime.clone_from_slice(den_head);
 
         // `den_head` ends on the non-zero top limb of the divisor, so the
@@ -242,7 +242,7 @@ impl Division {
             // full-width product separates the two.
             let product = quot.mul(den_b);
             let overshoots =
-                InternalArbiUint::cmp_limbs(Self::significant_limbs(product.limbs()), u_limbs)
+                InternalMpUint::cmp_limbs(Self::significant_limbs(product.limbs()), u_limbs)
                     == Ordering::Greater;
             *quotient_out = quot;
             if overshoots {

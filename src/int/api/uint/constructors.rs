@@ -1,12 +1,12 @@
 //! Unsigned integer constructors and precision constructors.
 
-use crate::error::ArbiError;
+use crate::error::MpError;
 
-use super::{ArbiUint, BoundedPrecision, InternalArbiUint, Precision, PrecisionContext};
+use super::{BoundedPrecision, InternalMpUint, MpUint, Precision, PrecisionContext};
 
-impl ArbiUint {
+impl MpUint {
     // Constructors
-    /// Creates a zero-valued `ArbiUint` with unlimited precision.
+    /// Creates a zero-valued `MpUint` with unlimited precision.
     #[must_use]
     #[allow(
         clippy::same_name_method,
@@ -14,13 +14,13 @@ impl ArbiUint {
     )]
     pub fn zero() -> Self {
         let result = Self {
-            value: InternalArbiUint::zero(),
+            value: InternalMpUint::zero(),
             precision: Precision::Unlimited,
         };
         result.debug_assert_valid();
         result
     }
-    /// Creates a one-valued `ArbiUint` with unlimited precision.
+    /// Creates a one-valued `MpUint` with unlimited precision.
     #[must_use]
     #[allow(
         clippy::same_name_method,
@@ -28,17 +28,17 @@ impl ArbiUint {
     )]
     pub fn one() -> Self {
         let result = Self {
-            value: InternalArbiUint::one(),
+            value: InternalMpUint::one(),
             precision: Precision::Unlimited,
         };
         result.debug_assert_valid();
         result
     }
-    /// Creates an `ArbiUint` with the given initial limb capacity.
+    /// Creates an `MpUint` with the given initial limb capacity.
     #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
         let result = Self {
-            value: InternalArbiUint::with_capacity(capacity),
+            value: InternalMpUint::with_capacity(capacity),
             precision: Precision::from(PrecisionContext::active()),
         };
         result.debug_assert_valid();
@@ -48,7 +48,7 @@ impl ArbiUint {
     // Precision-aware constructors
     // ------------------------------------------------------------------
 
-    /// Create a new `ArbiUint` from any value that implements `Into<ArbiUint>`,
+    /// Create a new `MpUint` from any value that implements `Into<MpUint>`,
     /// applying ambient precision.
     #[must_use]
     pub fn new<T>(value: T) -> Self
@@ -58,19 +58,19 @@ impl ArbiUint {
         Self::from(value)
     }
 
-    /// Create an `ArbiUint` with an explicit bounded precision check.
+    /// Create an `MpUint` with an explicit bounded precision check.
     ///
     /// # Errors
     ///
-    /// Returns `ArbiError::PrecisionExceeded` if the magnitude exceeds the
+    /// Returns `MpError::PrecisionExceeded` if the magnitude exceeds the
     /// given bit width.
-    pub fn with_precision_checked<T>(value: T, bits: BoundedPrecision) -> Result<Self, ArbiError>
+    pub fn with_precision_checked<T>(value: T, bits: BoundedPrecision) -> Result<Self, MpError>
     where
         Self: From<T>,
     {
         let v = Self::from(value);
         if v.value.significant_bits() > bits.get() {
-            return Err(ArbiError::PrecisionExceeded);
+            return Err(MpError::PrecisionExceeded);
         }
         let result = Self {
             value: v.value,
@@ -80,7 +80,7 @@ impl ArbiUint {
         Ok(result)
     }
 
-    /// Create an `ArbiUint` with wrapping precision (truncates to fit).
+    /// Create an `MpUint` with wrapping precision (truncates to fit).
     ///
     /// # Panics
     /// Panics if the bit count is larger than fits in a `usize` index.
@@ -100,7 +100,7 @@ impl ArbiUint {
         result
     }
 
-    /// Create an `ArbiUint` with saturating precision (clamps to max value).
+    /// Create an `MpUint` with saturating precision (clamps to max value).
     #[must_use]
     pub fn with_precision_saturating<T>(value: T, bits: BoundedPrecision) -> Self
     where
@@ -116,7 +116,7 @@ impl ArbiUint {
             result
         } else {
             let result = Self {
-                value: InternalArbiUint::max_for_bits(bits.get()),
+                value: InternalMpUint::max_for_bits(bits.get()),
                 precision: Precision::Bounded(bits),
             };
             result.debug_assert_valid();
@@ -133,7 +133,7 @@ impl ArbiUint {
         let precision = Precision::new_bounded(bits)
             .expect("bits must be in the bounded-precision range 1..usize::MAX");
         Self {
-            value: InternalArbiUint::max_for_bits(bits),
+            value: InternalMpUint::max_for_bits(bits),
             precision,
         }
     }
@@ -156,14 +156,14 @@ impl ArbiUint {
     #[must_use]
     pub const fn zero_with_precision(bits: BoundedPrecision) -> Self {
         Self {
-            value: InternalArbiUint::zero(),
+            value: InternalMpUint::zero(),
             precision: Precision::Bounded(bits),
         }
     }
 
     // ------------------------------------------------------------------
 }
-impl Default for ArbiUint {
+impl Default for MpUint {
     #[inline]
     fn default() -> Self {
         Self::zero()

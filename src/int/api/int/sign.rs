@@ -1,17 +1,17 @@
 //! Sign manipulation: the operations that read or rewrite the sign without
 //! touching the magnitude.
 //!
-//! `ArbiInt` stores a magnitude and a sign flag, so each of these is a flag
+//! `MpInt` stores a magnitude and a sign flag, so each of these is a flag
 //! write plus one precision check. The check is the reason they are not free:
 //! under a bounded precision the minimum value has no representable negation,
-//! and every method here has to decide whether to panic ([`ArbiInt::abs`],
-//! [`ArbiInt::abs_assign`]) or report ([`ArbiInt::checked_abs`]).
+//! and every method here has to decide whether to panic ([`MpInt::abs`],
+//! [`MpInt::abs_assign`]) or report ([`MpInt::checked_abs`]).
 
 use core::cmp::Ordering;
 
-use super::{ArbiInt, InternalArbiInt, InternalArbiUint};
+use super::{InternalMpInt, InternalMpUint, MpInt};
 
-impl ArbiInt {
+impl MpInt {
     /// Returns the absolute value.
     ///
     /// # Panics
@@ -26,7 +26,7 @@ impl ArbiInt {
     pub fn abs(&self) -> Self {
         self.assert_negation_fits("abs");
         let result = Self {
-            value: InternalArbiInt {
+            value: InternalMpInt {
                 abs: self.value.abs.clone(),
                 is_positive: true,
             },
@@ -62,7 +62,7 @@ impl ArbiInt {
     ///
     /// This is `num_traits::Signed::abs_sub`, which is *not* the absolute
     /// difference: it clamps at zero rather than taking a magnitude. Use
-    /// [`ArbiInt::abs_diff`] for `|self - other|`.
+    /// [`MpInt::abs_diff`] for `|self - other|`.
     ///
     /// # Panics
     /// Panics if `checked_sub` evaluates an underflow when `self > other` (for example, precision mismatch limits).
@@ -74,7 +74,7 @@ impl ArbiInt {
     pub fn abs_sub(&self, other: &Self) -> Self {
         if *self <= *other {
             let result = Self {
-                value: InternalArbiInt::zero(),
+                value: InternalMpInt::zero(),
                 precision: self.precision.combine_for_binary_op(other.precision),
             };
             result.debug_assert_valid();
@@ -94,18 +94,18 @@ impl ArbiInt {
     pub fn signum(&self) -> Self {
         let result = if self.value.abs.is_zero() {
             Self {
-                value: InternalArbiInt::zero(),
+                value: InternalMpInt::zero(),
                 precision: self.precision,
             }
         } else if self.value.is_positive {
             Self {
-                value: InternalArbiInt::one(),
+                value: InternalMpInt::one(),
                 precision: self.precision,
             }
         } else {
             Self {
-                value: InternalArbiInt {
-                    abs: InternalArbiUint::one(),
+                value: InternalMpInt {
+                    abs: InternalMpUint::one(),
                     is_positive: false,
                 },
                 precision: self.precision,
@@ -123,7 +123,7 @@ impl ArbiInt {
         let Some(bits) = self.precision.significant_bits() else {
             return false;
         };
-        let min_magnitude = InternalArbiUint::one().shl(bits.saturating_sub(1));
+        let min_magnitude = InternalMpUint::one().shl(bits.saturating_sub(1));
         !self.value.is_positive && self.value.abs.cmp(&min_magnitude) == Ordering::Equal
     }
 
@@ -133,7 +133,7 @@ impl ArbiInt {
         if let Some(bits) = self.precision.significant_bits() {
             assert!(
                 !self.is_bounded_minimum(),
-                "ArbiInt {operation} overflow for Bounded({bits})"
+                "MpInt {operation} overflow for Bounded({bits})"
             );
         }
     }

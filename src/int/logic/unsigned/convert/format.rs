@@ -18,7 +18,7 @@ use std::thread_local;
 use alloc::{string::String, vec::Vec};
 
 use super::{
-    FormatCache, InternalArbiUint, LIMB_BYTES, Limb, RADIX_DECIMAL_RECURSIVE_THRESHOLD,
+    FormatCache, InternalMpUint, LIMB_BYTES, Limb, RADIX_DECIMAL_RECURSIVE_THRESHOLD,
     RADIX_LARGE_RECURSIVE_THRESHOLD, RADIX_SMALL_RECURSIVE_THRESHOLD,
 };
 
@@ -33,7 +33,7 @@ const HEX_BYTE_DIGITS: [[u8; 2]; 256] = power_of_two_byte_digits::<2>(4);
 const BASE8_DIGITS: [u8; 32] = power_of_two_digit_bytes::<3>();
 const BASE32_DIGITS: [u8; 32] = power_of_two_digit_bytes::<5>();
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Formats the integer as a string in the given radix (2..=36).
     ///
     /// Uses lowercase letters for digits above 9. Invalid radices, zero,
@@ -80,7 +80,7 @@ impl InternalArbiUint {
     }
 }
 
-impl Display for InternalArbiUint {
+impl Display for InternalMpUint {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
         if formatter.width().is_some() || formatter.precision().is_some() {
             let string = self.to_string_radix(10);
@@ -91,7 +91,7 @@ impl Display for InternalArbiUint {
     }
 }
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Formats the integer as a string in the given radix (2..=36).
     ///
     /// Uses lowercase letters for digits above 9.
@@ -182,7 +182,7 @@ impl InternalArbiUint {
 /// 32 extract digits from digit-aligned byte blocks. Neither path divides by
 /// the radix, and every emitted digit holds at most five bits.
 #[inline]
-fn format_power_of_two(value: &InternalArbiUint, radix: u32) -> String {
+fn format_power_of_two(value: &InternalMpUint, radix: u32) -> String {
     debug_assert!(
         (2..=32).contains(&radix) && radix.is_power_of_two(),
         "the dispatcher accepts only supported power-of-two radices"
@@ -211,7 +211,7 @@ fn format_power_of_two(value: &InternalArbiUint, radix: u32) -> String {
 /// partial; copying its suffix removes leading zero digits.
 #[inline]
 fn format_byte_aligned_power_of_two<const DIGITS_PER_BYTE: usize>(
-    value: &InternalArbiUint,
+    value: &InternalMpUint,
     bits_per_digit: usize,
     table: &[[u8; DIGITS_PER_BYTE]; 256],
 ) -> String {
@@ -299,7 +299,7 @@ fn format_block_power_of_two<
     const BLOCK_BITS: usize,
     const BLOCK_BYTES: usize,
 >(
-    value: &InternalArbiUint,
+    value: &InternalMpUint,
     digits: &[u8; 32],
 ) -> String {
     debug_assert!(
@@ -553,7 +553,7 @@ pub const fn byte_from_digit(digit: u8) -> u8 {
     }
 }
 
-#[cfg(all(feature = "std", arbi_eager_thread_local))]
+#[cfg(all(feature = "std", mp_eager_thread_local))]
 thread_local! {
     static FORMAT_CACHE: RefCell<Option<FormatCache>> = const { RefCell::new(None) };
 }
@@ -561,7 +561,7 @@ thread_local! {
 // OS-key TLS cannot eagerly materialize a const value. `RefCell::from` keeps
 // that necessarily lazy initializer distinct from the const-capable branch and
 // produces the identical initial value without suppressing Clippy.
-#[cfg(all(feature = "std", not(arbi_eager_thread_local)))]
+#[cfg(all(feature = "std", not(mp_eager_thread_local)))]
 thread_local! {
     static FORMAT_CACHE: RefCell<Option<FormatCache>> = RefCell::from(None);
 }

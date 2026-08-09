@@ -329,7 +329,7 @@ impl Geometry {
     ///
     /// `whole_step` asks for an inner ring aligned to a whole transform length
     /// rather than a half, which makes the pre-twist a plain shift at the price
-    /// of a wider ring. Both are valid; [`search_exponents`] prices each and
+    /// of a wider ring. Both are valid; [`SsaPlan::best_exponent`] prices each and
     /// keeps the cheaper, because the `sqrt(2)` factor pays for itself only once
     /// the pointwise stage is large enough to dominate the twist passes.
     pub fn for_exponent(exponent: u32, modulus_bits: usize, whole_step: bool) -> Option<Self> {

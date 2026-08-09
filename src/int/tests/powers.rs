@@ -7,15 +7,15 @@ use super::{std::panic::catch_unwind, *};
 proptest! {
     #[test]
     fn prop_pow_identity(a in strategies::uint(8), exponent in 0_u32..=128) {
-        prop_assert_eq!(a.pow(0_u32), ArbiUint::one(), "a^0 != 1");
+        prop_assert_eq!(a.pow(0_u32), MpUint::one(), "a^0 != 1");
         prop_assert!(a.pow(1_u32) == a, "a^1 != a");
-        prop_assert_eq!(ArbiUint::zero().pow(0_u32), ArbiUint::one(), "0^0 != 1");
+        prop_assert_eq!(MpUint::zero().pow(0_u32), MpUint::one(), "0^0 != 1");
         if exponent == 0 {
-            prop_assert_eq!(ArbiUint::zero().pow(exponent), ArbiUint::one());
+            prop_assert_eq!(MpUint::zero().pow(exponent), MpUint::one());
         } else {
-            prop_assert_eq!(ArbiUint::zero().pow(exponent), ArbiUint::zero());
+            prop_assert_eq!(MpUint::zero().pow(exponent), MpUint::zero());
         }
-        prop_assert_eq!(ArbiUint::one().pow(exponent), ArbiUint::one());
+        prop_assert_eq!(MpUint::one().pow(exponent), MpUint::one());
     }
 }
 
@@ -40,7 +40,7 @@ proptest! {
     fn prop_isqrt_lower_bound(a in strategies::uint(4)) {
         let root = a.isqrt().expect("isqrt should succeed");
         let root_sq = &root * &root;
-        let next_sq = &(&root + &ArbiUint::one()) * &(&root + &ArbiUint::one());
+        let next_sq = &(&root + &MpUint::one()) * &(&root + &MpUint::one());
         prop_assert!(root_sq <= a, "isqrt^2 > a");
         prop_assert!(a < next_sq, "isqrt too small");
     }
@@ -58,7 +58,7 @@ proptest! {
         prop_assert_eq!(signed_value.try_pow(exponent), Ok(signed_power.clone()));
 
         if exponent == 0 {
-            prop_assert_eq!(signed_power, ArbiInt::from(1_u8));
+            prop_assert_eq!(signed_power, MpInt::from(1_u8));
         } else if exponent == 1 {
             prop_assert_eq!(&signed_power, &signed_value);
         } else if exponent == 2 {
@@ -86,7 +86,7 @@ proptest! {
         unsigned_seed in strategies::bounded_uint_wrapped(16),
         exponent in 0_u32..=8,
     ) {
-        let bounded_signed = ArbiInt {
+        let bounded_signed = MpInt {
             value: signed_seed.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };
@@ -110,7 +110,7 @@ proptest! {
             prop_assert_eq!(&tried_value, &exact_signed);
             prop_assert_eq!(tried_value.precision, Precision::Bounded(nz(bits)));
         } else {
-            prop_assert_eq!(signed_try, Err(ArbiError::Overflow));
+            prop_assert_eq!(signed_try, Err(MpError::Overflow));
         }
 
         let signed_square_checked = bounded_signed.checked_mul(&bounded_signed);
@@ -122,10 +122,10 @@ proptest! {
         prop_assert_eq!(signed_square_panicked, signed_square_checked.is_none());
         prop_assert_eq!(
             signed_square_panicked,
-            signed_square_try == Err(ArbiError::Overflow)
+            signed_square_try == Err(MpError::Overflow)
         );
 
-        let bounded_unsigned = ArbiUint {
+        let bounded_unsigned = MpUint {
             value: unsigned_seed.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };
@@ -148,7 +148,7 @@ proptest! {
             prop_assert_eq!(&tried_value, &exact_unsigned);
             prop_assert_eq!(tried_value.precision, Precision::Bounded(nz(bits)));
         } else {
-            prop_assert_eq!(unsigned_try, Err(ArbiError::Overflow));
+            prop_assert_eq!(unsigned_try, Err(MpError::Overflow));
         }
 
         let unsigned_square_checked = bounded_unsigned.checked_mul(&bounded_unsigned);
@@ -160,7 +160,7 @@ proptest! {
         prop_assert_eq!(unsigned_square_panicked, unsigned_square_checked.is_none());
         prop_assert_eq!(
             unsigned_square_panicked,
-            unsigned_square_try == Err(ArbiError::Overflow)
+            unsigned_square_try == Err(MpError::Overflow)
         );
     }
 
@@ -169,26 +169,26 @@ proptest! {
         bits in 1_usize..=128,
         input_seed in strategies::bounded_uint_wrapped(128),
     ) {
-        let bounded_zero = ArbiUint {
-            value: InternalArbiUint::zero(),
+        let bounded_zero = MpUint {
+            value: InternalMpUint::zero(),
             precision: Precision::Bounded(nz(bits)),
         };
         let zero_next = bounded_zero
             .checked_next_power_of_two()
             .expect("one fits every valid unsigned precision");
-        prop_assert_eq!(&zero_next, &ArbiUint::one());
+        prop_assert_eq!(&zero_next, &MpUint::one());
         prop_assert_eq!(zero_next.precision, Precision::Bounded(nz(bits)));
 
-        let bounded_value = ArbiUint {
+        let bounded_value = MpUint {
             value: input_seed.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };
         let mut exact_next = if bounded_value.is_zero() {
-            ArbiUint::one()
+            MpUint::one()
         } else if bounded_value.is_power_of_two() {
             bounded_value.clone()
         } else {
-            ArbiUint::one() << bounded_value.significant_bits()
+            MpUint::one() << bounded_value.significant_bits()
         };
         exact_next.precision = Precision::Unlimited;
         let should_fit = exact_next.value.significant_bits() <= bits;
@@ -210,11 +210,11 @@ proptest! {
         n in 0_u32..=50,
         bits in 1_usize..=256,
     ) {
-        let unsigned_exact = ArbiUint::factorial(n, Precision::Unlimited);
+        let unsigned_exact = MpUint::factorial(n, Precision::Unlimited);
         let unsigned_should_fit =
             unsigned_exact.value.required_unsigned_bits_for_bounded_storage() <= bits;
         let unsigned_bounded = catch_unwind(AssertUnwindSafe(|| {
-            ArbiUint::factorial(n, Precision::Bounded(nz(bits)))
+            MpUint::factorial(n, Precision::Bounded(nz(bits)))
         }));
         prop_assert_eq!(unsigned_bounded.is_ok(), unsigned_should_fit);
         if let Ok(value) = unsigned_bounded {
@@ -222,11 +222,11 @@ proptest! {
             prop_assert_eq!(value.precision, Precision::Bounded(nz(bits)));
         }
 
-        let signed_exact = ArbiInt::factorial(n, Precision::Unlimited);
+        let signed_exact = MpInt::factorial(n, Precision::Unlimited);
         let signed_should_fit =
             signed_exact.value.required_signed_bits_for_bounded_storage() <= bits;
         let signed_bounded = catch_unwind(AssertUnwindSafe(|| {
-            ArbiInt::factorial(n, Precision::Bounded(nz(bits)))
+            MpInt::factorial(n, Precision::Bounded(nz(bits)))
         }));
         prop_assert_eq!(signed_bounded.is_ok(), signed_should_fit);
         if let Ok(value) = signed_bounded {
@@ -246,19 +246,19 @@ proptest! {
         modular_base in 1_u32..=10_000,
         prime in prop_oneof![Just(3_u32), Just(5), Just(17), Just(97)],
     ) {
-        let base = ArbiUint::from(large_base);
+        let base = MpUint::from(large_base);
         let large_power = base.pow(exponent);
         let previous_power = base.pow(exponent - 1);
         prop_assert_eq!(large_power, previous_power * &base);
 
-        let prime_value = ArbiUint::from(prime);
-        let fermat = ArbiUint::from(modular_base)
-            .pow_mod(&ArbiUint::from(prime - 1), &prime_value)
+        let prime_value = MpUint::from(prime);
+        let fermat = MpUint::from(modular_base)
+            .pow_mod(&MpUint::from(prime - 1), &prime_value)
             .expect("prime modulus is non-zero");
         let expected = if modular_base.is_multiple_of(prime) {
-            ArbiUint::zero()
+            MpUint::zero()
         } else {
-            ArbiUint::one()
+            MpUint::one()
         };
         prop_assert_eq!(fermat, expected, "Fermat residue mismatch");
     }

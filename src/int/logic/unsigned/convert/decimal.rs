@@ -7,7 +7,7 @@
 
 use alloc::{string::String, vec::Vec};
 
-use super::{ArchKernels, InternalArbiUint, Limb, byte_from_digit, estimated_digits};
+use super::{ArchKernels, InternalMpUint, Limb, byte_from_digit, estimated_digits};
 
 // Decimal chunking: radix 10 divides by a single-limb power of ten per step,
 // emitting `DECIMAL_CHUNK_DIGITS` digits per division instead of one. The
@@ -41,7 +41,7 @@ const DECIMAL_DIGIT_PAIRS: [[u8; 2]; 100] = [
     *b"96", *b"97", *b"98", *b"99",
 ];
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Formats the integer as a string in the given radix using the schoolbook algorithm.
     ///
     /// Uses the decimal chunk kernel for radix 10 and the generic per-digit
@@ -85,7 +85,7 @@ impl InternalArbiUint {
 /// The loop walks the limbs most significant first, feeding the running
 /// remainder of the previous step into the architecture division kernel, and
 /// renormalizes the value before returning.
-pub fn div_rem_small(value: &mut InternalArbiUint, divisor: Limb) -> Limb {
+pub fn div_rem_small(value: &mut InternalMpUint, divisor: Limb) -> Limb {
     let len = value.limbs().len();
     let mut remainder = 0;
 
@@ -116,7 +116,7 @@ pub fn div_rem_small(value: &mut InternalArbiUint, divisor: Limb) -> Limb {
 /// appended without leading zero padding: it is the final remainder of
 /// dividing a non-zero value by a positive power of ten, so it is itself
 /// non-zero.
-pub fn write_decimal_chunks(value: &mut InternalArbiUint, output: &mut Vec<u8>) {
+pub fn write_decimal_chunks(value: &mut InternalMpUint, output: &mut Vec<u8>) {
     debug_assert!(!value.is_zero(), "only non-zero decimal values are chunked");
     loop {
         let chunk = div_rem_decimal_chunk(value);
@@ -201,7 +201,7 @@ const DECIMAL_CHUNK_PREINV: u64 = 0xd83c_94fb_6d2a_c34a;
     reason = "integer division kernels rely on checked wrapping semantics, bounded indexing on limbs, and explicit truncation"
 )]
 #[inline]
-fn div_rem_decimal_chunk(value: &mut InternalArbiUint) -> Limb {
+fn div_rem_decimal_chunk(value: &mut InternalMpUint) -> Limb {
     // `DECIMAL_CHUNK_DIVISOR` is `10^19` on 64-bit targets, so this is the
     // identity conversion; the shared constant keeps a single source of truth.
     const D: u64 = DECIMAL_CHUNK_DIVISOR as u64;
@@ -259,7 +259,7 @@ fn div_rem_decimal_chunk(value: &mut InternalArbiUint) -> Limb {
 /// double-limb steps exactly, so the chunk remainder is `value % divisor`.
 #[cfg(not(target_pointer_width = "64"))]
 #[inline]
-fn div_rem_decimal_chunk(value: &mut InternalArbiUint) -> Limb {
+fn div_rem_decimal_chunk(value: &mut InternalMpUint) -> Limb {
     div_rem_small(value, DECIMAL_CHUNK_DIVISOR)
 }
 
@@ -286,7 +286,7 @@ mod tests {
             const DIVISOR: u128 = 10_000_000_000_000_000_000;
 
             let dividend = u128::from(high).wrapping_shl(64).wrapping_add(u128::from(low));
-            let mut value = InternalArbiUint::from_limbs(vec![
+            let mut value = InternalMpUint::from_limbs(vec![
                 usize::try_from(low).expect("u64 fits in usize on 64-bit targets"),
                 usize::try_from(high).expect("u64 fits in usize on 64-bit targets"),
             ]);
@@ -322,13 +322,13 @@ mod tests {
             mid in any::<Limb>(),
             high in any::<Limb>(),
         ) {
-            let original = InternalArbiUint::from_limbs(vec![low, mid, high]);
+            let original = InternalMpUint::from_limbs(vec![low, mid, high]);
             let mut value = original.clone();
             let remainder = div_rem_decimal_chunk(&mut value);
-            let divisor = InternalArbiUint::from_limb(DECIMAL_CHUNK_DIVISOR);
+            let divisor = InternalMpUint::from_limb(DECIMAL_CHUNK_DIVISOR);
             let reconstructed = value
                 .mul(&divisor)
-                .add(&InternalArbiUint::from_limb(remainder));
+                .add(&InternalMpUint::from_limb(remainder));
             prop_assert_eq!(reconstructed, original);
         }
     }
@@ -339,7 +339,7 @@ mod tests {
     fn decimal_chunk_exact_division_boundaries() {
         // One below the chunk divisor: the quotient must be zero and the
         // remainder the value itself.
-        let mut value = InternalArbiUint::from_limb(DECIMAL_CHUNK_DIVISOR.wrapping_sub(1));
+        let mut value = InternalMpUint::from_limb(DECIMAL_CHUNK_DIVISOR.wrapping_sub(1));
         let remainder = div_rem_decimal_chunk(&mut value);
         assert!(
             value.is_zero(),
@@ -348,20 +348,17 @@ mod tests {
         assert_eq!(remainder, DECIMAL_CHUNK_DIVISOR.wrapping_sub(1));
 
         // Exactly the chunk divisor: quotient one, remainder zero.
-        let exact = InternalArbiUint::from_limb(DECIMAL_CHUNK_DIVISOR);
+        let exact = InternalMpUint::from_limb(DECIMAL_CHUNK_DIVISOR);
         let mut exact_value = exact.clone();
         let exact_remainder = div_rem_decimal_chunk(&mut exact_value);
-        assert_eq!(exact_value, InternalArbiUint::from_limb(1));
+        assert_eq!(exact_value, InternalMpUint::from_limb(1));
         assert_eq!(exact_remainder, 0);
 
         // `divisor << LIMB_BITS`: quotient `1 << LIMB_BITS`, remainder zero.
         let mut shifted_value = exact;
         shifted_value.shl_assign(LIMB_BITS);
         let shifted_remainder = div_rem_decimal_chunk(&mut shifted_value);
-        assert_eq!(
-            shifted_value,
-            InternalArbiUint::from_limbs(alloc::vec![0, 1])
-        );
+        assert_eq!(shifted_value, InternalMpUint::from_limbs(alloc::vec![0, 1]));
         assert_eq!(shifted_remainder, 0);
     }
 }

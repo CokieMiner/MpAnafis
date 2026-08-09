@@ -13,7 +13,7 @@ extern crate std;
 use proptest::prelude::*;
 
 use self::std::panic::{AssertUnwindSafe, catch_unwind};
-use super::{ArbiInt, ArbiUint, bounded_int, bounded_uint, signed_max, signed_min, unsigned_max};
+use super::{MpInt, MpUint, bounded_int, bounded_uint, signed_max, signed_min, unsigned_max};
 
 fn assert_panics(operation: impl FnOnce()) {
     assert!(
@@ -62,18 +62,18 @@ proptest! {
     fn bounded_assignment_panics_instead_of_widening(bits in 2_usize..=63) {
         let uint_max = bounded_uint(unsigned_max(bits), bits);
         let uint_shift = u32::try_from(bits).expect("width fits u32");
-        let uint_high_bit = ArbiUint::from(
+        let uint_high_bit = MpUint::from(
             1_u128
                 .checked_shl(uint_shift)
                 .expect("property width is below 128")
         );
         assert_panics(|| {
             let mut value = uint_max.clone();
-            AddAssign::add_assign(&mut value, ArbiUint::from(1_u8));
+            AddAssign::add_assign(&mut value, MpUint::from(1_u8));
         });
         assert_panics(|| {
             let mut value = uint_max.clone();
-            MulAssign::mul_assign(&mut value, ArbiUint::from(2_u8));
+            MulAssign::mul_assign(&mut value, MpUint::from(2_u8));
         });
         assert_panics(|| {
             let mut value = bounded_uint(0, bits);
@@ -87,23 +87,23 @@ proptest! {
         let int_min = bounded_int(signed_min(bits), bits);
         let int_max = bounded_int(signed_max(bits), bits);
         let int_shift = u32::try_from(bits.wrapping_sub(1)).expect("width fits u32");
-        let int_high_bit = ArbiInt::from(
+        let int_high_bit = MpInt::from(
             1_i128
                 .checked_shl(int_shift)
                 .expect("property width is below 128")
         );
-        let int_neg_one = ArbiInt::from(-1_i8);
+        let int_neg_one = MpInt::from(-1_i8);
         assert_panics(|| {
             let mut value = int_max.clone();
-            AddAssign::add_assign(&mut value, ArbiInt::from(1_i8));
+            AddAssign::add_assign(&mut value, MpInt::from(1_i8));
         });
         assert_panics(|| {
             let mut value = int_min.clone();
-            SubAssign::sub_assign(&mut value, ArbiInt::from(1_i8));
+            SubAssign::sub_assign(&mut value, MpInt::from(1_i8));
         });
         assert_panics(|| {
             let mut value = int_max.clone();
-            MulAssign::mul_assign(&mut value, ArbiInt::from(2_i8));
+            MulAssign::mul_assign(&mut value, MpInt::from(2_i8));
         });
         assert_panics(|| {
             let mut value = bounded_int(0, bits);
@@ -127,9 +127,9 @@ proptest! {
     fn bounded_arithmetic_assignment_failure_is_transactional(bits in 2_usize..=63) {
         let uint_max = bounded_uint(unsigned_max(bits), bits);
         let uint_zero = bounded_uint(0, bits);
-        let uint_one = ArbiUint::from(1_u8);
-        let uint_two = ArbiUint::from(2_u8);
-        let uint_zero_divisor = ArbiUint::from(0_u8);
+        let uint_one = MpUint::from(1_u8);
+        let uint_two = MpUint::from(2_u8);
+        let uint_zero_divisor = MpUint::from(0_u8);
 
         assert_panics_without_mutation(&uint_max, |receiver| {
             AddAssign::add_assign(receiver, uint_one.clone());
@@ -158,10 +158,10 @@ proptest! {
 
         let int_max = bounded_int(signed_max(bits), bits);
         let int_min = bounded_int(signed_min(bits), bits);
-        let int_one = ArbiInt::from(1_i8);
-        let int_two = ArbiInt::from(2_i8);
-        let int_zero_divisor = ArbiInt::from(0_i8);
-        let int_neg_one = ArbiInt::from(-1_i8);
+        let int_one = MpInt::from(1_i8);
+        let int_two = MpInt::from(2_i8);
+        let int_zero_divisor = MpInt::from(0_i8);
+        let int_neg_one = MpInt::from(-1_i8);
 
         assert_panics_without_mutation(&int_max, |receiver| {
             AddAssign::add_assign(receiver, int_one.clone());

@@ -1,6 +1,6 @@
 //! Unsigned integer number theory APIs organized by domain.
 
-use super::{ArbiUint, InternalArbiUint, Precision};
+use super::{InternalMpUint, MpUint, Precision};
 
 mod arithmetic;
 mod gcd;

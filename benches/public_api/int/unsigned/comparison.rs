@@ -19,7 +19,7 @@ use rug::Integer;
 use crate::int::support::{rug_uint, rug_uint_pairs};
 use crate::int::{
     ladders::NARROW,
-    support::{SAMPLE_SIZE_FAST, arbi_uint, arbi_uint_pairs},
+    support::{SAMPLE_SIZE_FAST, mp_uint, mp_uint_pairs},
 };
 
 /// Total ordering of two equal-width values.
@@ -31,8 +31,8 @@ mod cmp {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(left).cmp(black_box(right)));
@@ -57,8 +57,8 @@ mod eq {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(left) == black_box(right));
@@ -83,8 +83,8 @@ mod hash {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             black_box(&value).hash(&mut hasher);
@@ -109,8 +109,8 @@ mod min {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(left).min(black_box(right)));
@@ -135,8 +135,8 @@ mod max {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(left).max(black_box(right)));
@@ -161,10 +161,10 @@ mod clamp {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
-        let first_bound = arbi_uint(bits, 1);
-        let second_bound = arbi_uint(bits, 9_999);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
+        let first_bound = mp_uint(bits, 1);
+        let second_bound = mp_uint(bits, 9_999);
         let (lower, upper) = if first_bound <= second_bound {
             (first_bound, second_bound)
         } else {
@@ -199,8 +199,8 @@ mod is_even {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _even = black_box(black_box(&value).is_even());
             let _odd = black_box(black_box(&value).is_odd());
@@ -225,8 +225,8 @@ mod is_power_of_two {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).is_power_of_two());
         });

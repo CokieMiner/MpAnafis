@@ -12,7 +12,7 @@ use core::{
 
 use alloc::vec::Vec;
 
-use super::{ArchKernels, DivScratch, Division, Gcd, InternalArbiUint, Limb};
+use super::{ArchKernels, DivScratch, Division, Gcd, InternalMpUint, Limb};
 
 impl Division {
     /// Computes the modular inverse of `a` modulo `m` using the extended
@@ -20,20 +20,20 @@ impl Division {
     ///
     /// Returns `None` when the inverse does not exist (i.e. when
     /// `gcd(a, m) != 1`). `m` must be non-zero.
-    pub fn mod_inverse(a: &InternalArbiUint, m: &InternalArbiUint) -> Option<InternalArbiUint> {
+    pub fn mod_inverse(a: &InternalMpUint, m: &InternalMpUint) -> Option<InternalMpUint> {
         debug_assert!(
             !m.is_zero(),
             "modular inversion requires a non-zero modulus"
         );
         if m.is_one() {
-            return Some(InternalArbiUint::zero());
+            return Some(InternalMpUint::zero());
         }
 
         // The units 1 and -1 have themselves as inverses. The predecessor check
         // is limb-wise so the common `a = m - 1` case avoids extended-GCD state
         // and a temporary subtraction of the modulus.
         if a.is_one() {
-            return Some(InternalArbiUint::one());
+            return Some(InternalMpUint::one());
         }
         if is_modulus_predecessor(a, m) {
             return Some(a.clone());
@@ -53,30 +53,30 @@ impl Division {
         reason = "Extended GCD involves many repetitive swap and update steps; keeping it inline improves performance; non-performance lint."
     )]
     pub fn extended_gcd(
-        a: &InternalArbiUint,
-        b: &InternalArbiUint,
-    ) -> (InternalArbiUint, InternalArbiUint, InternalArbiUint) {
+        a: &InternalMpUint,
+        b: &InternalMpUint,
+    ) -> (InternalMpUint, InternalMpUint, InternalMpUint) {
         if a.is_zero() {
-            return (b.clone(), InternalArbiUint::zero(), InternalArbiUint::one());
+            return (b.clone(), InternalMpUint::zero(), InternalMpUint::one());
         }
         if b.is_zero() || a.cmp(b) == Ordering::Equal {
-            return (a.clone(), InternalArbiUint::one(), InternalArbiUint::zero());
+            return (a.clone(), InternalMpUint::one(), InternalMpUint::zero());
         }
 
         let mut r0 = a.clone();
         let mut r1 = b.clone();
 
         // Absolute values of coefficients
-        let mut s0 = InternalArbiUint::one();
-        let mut s1 = InternalArbiUint::zero();
-        let mut t0 = InternalArbiUint::zero();
-        let mut t1 = InternalArbiUint::one();
+        let mut s0 = InternalMpUint::one();
+        let mut s1 = InternalMpUint::zero();
+        let mut t0 = InternalMpUint::zero();
+        let mut t1 = InternalMpUint::one();
 
-        let mut q = InternalArbiUint::zero();
-        let mut next_r = InternalArbiUint::zero();
-        let mut temp = InternalArbiUint::zero();
-        let mut saved_r0 = InternalArbiUint::zero();
-        let mut saved_r1 = InternalArbiUint::zero();
+        let mut q = InternalMpUint::zero();
+        let mut next_r = InternalMpUint::zero();
+        let mut temp = InternalMpUint::zero();
+        let mut saved_r0 = InternalMpUint::zero();
+        let mut saved_r1 = InternalMpUint::zero();
         let mut u_backup = Vec::new();
         let mut v_backup = Vec::new();
 
@@ -179,9 +179,9 @@ impl Division {
             }
         }
 
-        let mut final_s = InternalArbiUint::zero();
-        let mut final_t = InternalArbiUint::zero();
-        let mut dump = InternalArbiUint::zero();
+        let mut final_s = InternalMpUint::zero();
+        let mut final_t = InternalMpUint::zero();
+        let mut dump = InternalMpUint::zero();
 
         if s0.cmp(b) == Ordering::Less {
             final_s.clone_from(&s0);
@@ -217,7 +217,7 @@ impl Division {
 /// valid length-changing case is `modulus = B^n` and `value = B^n - 1`, where
 /// `B = 2^LIMB_BITS`; normalized representations make those limb tests
 /// sufficient on every supported pointer width.
-fn is_modulus_predecessor(value: &InternalArbiUint, modulus: &InternalArbiUint) -> bool {
+fn is_modulus_predecessor(value: &InternalMpUint, modulus: &InternalMpUint) -> bool {
     let value_limbs = value.limbs();
     let modulus_limbs = modulus.limbs();
     if value_limbs.is_empty() || modulus_limbs.is_empty() {
@@ -258,8 +258,8 @@ fn is_modulus_predecessor(value: &InternalArbiUint, modulus: &InternalArbiUint) 
     reason = "u0/v0/u1/v1 represent the Lehmer transition matrix; max_len+1 ensures slice access is bounded. Using 'as' avoids checked conversions and is branchless even on 16-bit targets."
 )]
 fn update_abs_coeffs(
-    s0: &mut InternalArbiUint,
-    s1: &mut InternalArbiUint,
+    s0: &mut InternalMpUint,
+    s1: &mut InternalMpUint,
     u0: Limb,
     v0: Limb,
     u1: Limb,

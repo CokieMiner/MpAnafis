@@ -11,7 +11,7 @@ use super::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SsaPointwise;
 
-/// Memo table for [`Self::fermat_basecase_scratch_len`], indexed by `mod_limbs`.
+/// Memo table for [`SsaPointwise::fermat_basecase_scratch_len`], indexed by `mod_limbs`.
 ///
 /// The value is a pure function of the ring width and of build-time thresholds,
 /// but computing it walks the whole conventional tier tree, and that walk is

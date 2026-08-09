@@ -9,8 +9,8 @@ mod signed;
 mod unsigned;
 
 pub use precision::InternalPrecisionContext;
-pub use signed::InternalArbiInt;
-// Production callers reach the arithmetic families through `InternalArbiUint`'s
+pub use signed::InternalMpInt;
+// Production callers reach the arithmetic families through `InternalMpUint`'s
 // inherent methods, so this path exists only for the tuning facade and for the
 // colocated tests that drive individual tiers directly.
 #[cfg(test)]
@@ -21,4 +21,4 @@ pub use unsigned::{
     Multiplication, Ntt, Schoolbook, ScratchBuffer, Ssa, Toom3, Toom4, Toom6, Toom8, Toom32,
     Toom43, TransformBench, TransformChoice,
 };
-pub use unsigned::{InternalArbiUint, UintRepr};
+pub use unsigned::{InternalMpUint, UintRepr};

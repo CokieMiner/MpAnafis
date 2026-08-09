@@ -1,8 +1,8 @@
 //! Signed division and divisibility APIs.
 
-use super::{ArbiInt, InternalArbiInt, Precision};
+use super::{InternalMpInt, MpInt, Precision};
 
-impl ArbiInt {
+impl MpInt {
     /// Returns the quotient and remainder of truncating division.
     ///
     /// Returns `None` when `rhs` is zero or bounded `MIN / -1` would overflow.
@@ -83,10 +83,10 @@ impl ArbiInt {
         let (mut q, mut r) = self.div_rem(rhs)?;
         if r.is_negative() {
             if rhs.is_positive() {
-                q.value = q.value.sub(&InternalArbiInt::one());
+                q.value = q.value.sub(&InternalMpInt::one());
                 r.value = r.value.add(&rhs.value);
             } else {
-                q.value = q.value.add(&InternalArbiInt::one());
+                q.value = q.value.add(&InternalMpInt::one());
                 r.value = r.value.sub(&rhs.value);
             }
         }
@@ -135,7 +135,7 @@ impl ArbiInt {
     pub fn div_rem_floor(&self, rhs: &Self) -> Option<(Self, Self)> {
         let (mut q, mut r) = self.div_rem(rhs)?;
         if (self.is_negative() != rhs.is_negative()) && !r.is_zero() {
-            q.value = q.value.sub(&InternalArbiInt::one());
+            q.value = q.value.sub(&InternalMpInt::one());
             r.value = r.value.add(&rhs.value);
         }
         Some((q, r))
@@ -189,7 +189,7 @@ impl ArbiInt {
             .div_rem(rhs)
             .expect("division by zero or bounded overflow");
         if !r.is_zero() && (self.is_negative() == rhs.is_negative()) {
-            q.value = q.value.add(&InternalArbiInt::one());
+            q.value = q.value.add(&InternalMpInt::one());
         }
         q
     }
@@ -204,14 +204,14 @@ impl ArbiInt {
             // Mutating the internal value retains the combined precision;
             // adding public `Self::one()` would incorrectly promote it to
             // unlimited precision.
-            q.value = q.value.add(&InternalArbiInt::one());
+            q.value = q.value.add(&InternalMpInt::one());
         }
         q.debug_assert_valid();
         Some(q)
     }
 }
 
-fn combined_division_precision(lhs: &ArbiInt, rhs: &ArbiInt) -> Option<Precision> {
+fn combined_division_precision(lhs: &MpInt, rhs: &MpInt) -> Option<Precision> {
     if rhs.value.abs.is_zero() {
         return None;
     }
@@ -224,9 +224,9 @@ fn combined_division_precision(lhs: &ArbiInt, rhs: &ArbiInt) -> Option<Precision
     Some(precision)
 }
 
-fn checked_truncating_remainder(lhs: &ArbiInt, rhs: &ArbiInt) -> Option<ArbiInt> {
+fn checked_truncating_remainder(lhs: &MpInt, rhs: &MpInt) -> Option<MpInt> {
     let precision = combined_division_precision(lhs, rhs)?;
-    let remainder = ArbiInt {
+    let remainder = MpInt {
         value: lhs.value.rem(&rhs.value),
         precision,
     };
@@ -234,7 +234,7 @@ fn checked_truncating_remainder(lhs: &ArbiInt, rhs: &ArbiInt) -> Option<ArbiInt>
     Some(remainder)
 }
 
-fn euclidean_remainder(mut remainder: ArbiInt, rhs: &ArbiInt) -> ArbiInt {
+fn euclidean_remainder(mut remainder: MpInt, rhs: &MpInt) -> MpInt {
     if remainder.is_negative() {
         // The truncating remainder has sign(lhs) and |r| < |rhs|. Adding
         // |rhs| therefore yields the unique representative in [0, |rhs|).
@@ -248,7 +248,7 @@ fn euclidean_remainder(mut remainder: ArbiInt, rhs: &ArbiInt) -> ArbiInt {
     remainder
 }
 
-fn floor_remainder(mut remainder: ArbiInt, lhs: &ArbiInt, rhs: &ArbiInt) -> ArbiInt {
+fn floor_remainder(mut remainder: MpInt, lhs: &MpInt, rhs: &MpInt) -> MpInt {
     if !remainder.is_zero() && lhs.is_negative() != rhs.is_negative() {
         // Truncation and floor differ by one quotient unit exactly when the
         // signs differ and r != 0, so r_floor = r_trunc + rhs.

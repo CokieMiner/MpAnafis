@@ -1,14 +1,14 @@
-//! The operand-shape matrix: Arbi against GMP and FLINT across seven ratios.
+//! The operand-shape matrix: Mp against GMP and FLINT across seven ratios.
 //!
 //! Reported per ratio and per size band so a missing algorithm can be told from
 //! a mistuned crossover: a ratio behind in *every* band is a shape nothing
 //! serves, while a ratio behind only near a crossover is a threshold to move.
 //!
-//! Both operands are exact-width and the destination is caller-owned, and Arbi
+//! Both operands are exact-width and the destination is caller-owned, and Mp
 //! runs through the full public tower rather than any forced tier, so what is
 //! measured is the dispatcher's own shape decision.
 //!
-//! Arbi's scratch pool is acquired once per shape rather than per iteration.
+//! Mp's scratch pool is acquired once per shape rather than per iteration.
 //! GMP allocates its own workspace on the stack, so timing our pool acquisition
 //! inside the loop compares an allocator against an algorithm — and its variance
 //! is not small: it made the 200- and 400-limb columns move by up to 47% between
@@ -21,8 +21,8 @@
 
 use core::hint::black_box;
 
-use arbi_anafis::tune_api::tier::{Limb, state::MulBenchScratch};
 use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
+use mp_anafis::tune_api::tier::{Limb, state::MulBenchScratch};
 
 use crate::{
     compare::flint::{
@@ -41,7 +41,7 @@ const fn assert_one_limb_width() {
 }
 
 #[divan::bench(args = SHAPES)]
-fn arbi(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
+fn mp(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
     let (larger_len, smaller_len) = shape;
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
     let mut reusable = MulBenchScratch::default();
@@ -135,7 +135,7 @@ fn flint(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
 // sample, as in `balanced`.
 
 #[divan::bench(args = HUGE_SHAPES, sample_count = 3, sample_size = 1)]
-fn arbi_huge(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
+fn mp_huge(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
     let (larger_len, smaller_len) = shape;
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
     let mut reusable = MulBenchScratch::default();

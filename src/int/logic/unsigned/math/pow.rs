@@ -3,11 +3,11 @@
 use core::{array::from_fn, cmp::Ordering, mem::swap};
 
 use super::{
-    BarrettDomain, BarrettScratch, DivScratch, Division, InternalArbiUint, LIMB_BITS, Limb,
+    BarrettDomain, BarrettScratch, DivScratch, Division, InternalMpUint, LIMB_BITS, Limb,
     MontgomeryDomain, MulScratch,
 };
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Computes `self^exp`.
     #[must_use]
     pub fn pow(&self, exp: u32) -> Self {
@@ -53,37 +53,37 @@ impl MontgomeryDomain {
     )]
     pub fn pow(
         &self,
-        base: &InternalArbiUint,
-        exp: &InternalArbiUint,
+        base: &InternalMpUint,
+        exp: &InternalMpUint,
         mul_scratch: &mut MulScratch,
         raw: bool,
-    ) -> InternalArbiUint {
+    ) -> InternalMpUint {
         let domain = self;
-        let mut temp_prod = InternalArbiUint::zero();
+        let mut temp_prod = InternalMpUint::zero();
 
         let bits = exp.significant_bits();
         if bits == 0 {
             return if raw {
                 domain.transform_into_with_scratch(
-                    &InternalArbiUint::one(),
+                    &InternalMpUint::one(),
                     &mut temp_prod,
                     mul_scratch,
                 )
             } else {
-                InternalArbiUint::one()
+                InternalMpUint::one()
             };
         }
 
         let window = select_window_size(bits);
         let table_size = 1_usize << window.wrapping_sub(1);
 
-        let mut g: [InternalArbiUint; 32] = from_fn(|_| InternalArbiUint::zero());
+        let mut g: [InternalMpUint; 32] = from_fn(|_| InternalMpUint::zero());
         // SAFETY: the table has 32 elements, so index zero is in bounds.
         *unsafe { g.get_unchecked_mut(0) } =
             domain.transform_into_with_scratch(base, &mut temp_prod, mul_scratch);
 
         if table_size > 1 {
-            let mut base2 = InternalArbiUint::zero();
+            let mut base2 = InternalMpUint::zero();
             // SAFETY: the table has 32 elements, so index zero is in bounds.
             domain.square_into_with_scratch(
                 unsafe { g.get_unchecked(0) },
@@ -110,8 +110,8 @@ impl MontgomeryDomain {
         }
 
         let exp_limbs = exp.limbs();
-        let mut result = InternalArbiUint::zero();
-        let mut next_res = InternalArbiUint::zero();
+        let mut result = InternalMpUint::zero();
+        let mut next_res = InternalMpUint::zero();
         let mut started = false;
 
         let mut bit_pos = bits;
@@ -201,26 +201,26 @@ impl BarrettDomain {
     )]
     pub fn pow(
         &self,
-        base: &InternalArbiUint,
-        exp: &InternalArbiUint,
+        base: &InternalMpUint,
+        exp: &InternalMpUint,
         mul_scratch: &mut MulScratch,
-    ) -> InternalArbiUint {
+    ) -> InternalMpUint {
         let domain = self;
-        let mut temp_prod = InternalArbiUint::zero();
+        let mut temp_prod = InternalMpUint::zero();
         let mut barrett_scratch = BarrettScratch::default();
 
         let bits = exp.significant_bits();
         if bits == 0 {
-            return InternalArbiUint::one();
+            return InternalMpUint::one();
         }
 
         let window = select_window_size(bits);
         let table_size = 1_usize << window.wrapping_sub(1);
 
-        let mut g: [InternalArbiUint; 32] = from_fn(|_| InternalArbiUint::zero());
+        let mut g: [InternalMpUint; 32] = from_fn(|_| InternalMpUint::zero());
 
         // Base might be larger than b^{2k}, so we MUST use standard division to reduce initially
-        let mut reduced_base = InternalArbiUint::zero();
+        let mut reduced_base = InternalMpUint::zero();
         if base.cmp(&domain.modulus) == Ordering::Less {
             reduced_base.clone_from(base);
         } else {
@@ -231,7 +231,7 @@ impl BarrettDomain {
         *unsafe { g.get_unchecked_mut(0) } = reduced_base;
 
         if table_size > 1 {
-            let mut base2 = InternalArbiUint::zero();
+            let mut base2 = InternalMpUint::zero();
             domain.square_into_with_barrett_scratch(
                 // SAFETY: the table has 32 elements, so index zero is in bounds.
                 unsafe { g.get_unchecked(0) },
@@ -260,8 +260,8 @@ impl BarrettDomain {
         }
 
         let exp_limbs = exp.limbs();
-        let mut result = InternalArbiUint::zero();
-        let mut next_res = InternalArbiUint::zero();
+        let mut result = InternalMpUint::zero();
+        let mut next_res = InternalMpUint::zero();
         let mut started = false;
 
         let mut bit_pos = bits;

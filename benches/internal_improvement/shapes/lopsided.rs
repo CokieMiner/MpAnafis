@@ -7,11 +7,11 @@
 
 use core::{hint::black_box, mem::size_of};
 
-use arbi_anafis::tune_api::tier::{
+use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
+use mp_anafis::tune_api::tier::{
     Limb,
     state::{MulBenchScratch, bench_lopsided_mul_scratch_len, bench_lopsided_mul_with_scratch},
 };
-use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
 
 use crate::shared::operands_pair;
 
@@ -115,7 +115,7 @@ const GEOMETRY_SHAPES: [(usize, usize, usize, usize); 75] = [
 ];
 
 #[divan::bench(args = LOPSIDED_SHAPES)]
-fn arbi_production(bencher: divan::Bencher, shape: (usize, usize)) {
+fn mp_production(bencher: divan::Bencher, shape: (usize, usize)) {
     let (smaller_len, ratio) = shape;
     let larger_len = smaller_len
         .checked_mul(ratio)
@@ -134,7 +134,7 @@ fn arbi_production(bencher: divan::Bencher, shape: (usize, usize)) {
 }
 
 #[divan::bench(args = GEOMETRY_SHAPES)]
-fn arbi_forced_geometry(bencher: divan::Bencher, shape: (usize, usize, usize, usize)) {
+fn mp_forced_geometry(bencher: divan::Bencher, shape: (usize, usize, usize, usize)) {
     let (smaller_len, ratio, block_numerator, block_denominator) = shape;
     let larger_len = smaller_len
         .checked_mul(ratio)
@@ -163,20 +163,20 @@ fn gmp_production(bencher: divan::Bencher, shape: (usize, usize)) {
     assert_eq!(
         size_of::<Limb>(),
         size_of::<limb_t>(),
-        "benchmark requires equal Arbi and GMP limb widths"
+        "benchmark requires equal Mp and GMP limb widths"
     );
     let (smaller_len, ratio) = shape;
     let larger_len = smaller_len
         .checked_mul(ratio)
         .expect("configured lopsided benchmark width fits usize");
-    let (arbi_larger, arbi_smaller, _) = operands_pair(larger_len, smaller_len);
-    let larger: Vec<limb_t> = arbi_larger
+    let (mp_larger, mp_smaller, _) = operands_pair(larger_len, smaller_len);
+    let larger: Vec<limb_t> = mp_larger
         .into_iter()
-        .map(|limb| limb_t::try_from(limb).expect("Arbi limb fits GMP limb"))
+        .map(|limb| limb_t::try_from(limb).expect("Mp limb fits GMP limb"))
         .collect();
-    let smaller: Vec<limb_t> = arbi_smaller
+    let smaller: Vec<limb_t> = mp_smaller
         .into_iter()
-        .map(|limb| limb_t::try_from(limb).expect("Arbi limb fits GMP limb"))
+        .map(|limb| limb_t::try_from(limb).expect("Mp limb fits GMP limb"))
         .collect();
     let destination_len = larger_len
         .checked_add(smaller_len)

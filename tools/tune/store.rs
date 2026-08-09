@@ -21,7 +21,7 @@ use crate::tuning_profile::TuningProfile;
 /// Machine-stable cache file, shared across runs on one host.
 pub const SCORE_CACHE_NAME: &str = "score-cache.json";
 
-const SCORE_SCHEMA_VERSION: &str = "arbi-tune-score-v1";
+const SCORE_SCHEMA_VERSION: &str = "mp-tune-score-v1";
 
 /// FNV-1a 64-bit hash over the rendered profile source.
 ///

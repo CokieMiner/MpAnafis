@@ -8,10 +8,10 @@ step and this tool accepts only the schema version it has been reviewed against:
         -Z unstable-options --output-format json --document-private-items \\
         -A rustdoc::broken-intra-doc-links
     python3 tools/api_inventory.py \\
-        --rustdoc-json target/doc/arbi_anafis.json \\
+        --rustdoc-json target/doc/mp_anafis.json \\
         --output tools/api_inventory.tsv
     python3 tools/api_inventory.py \\
-        --rustdoc-json target/doc/arbi_anafis.json \\
+        --rustdoc-json target/doc/mp_anafis.json \\
         --output tools/api_inventory.tsv --check
 
 Private-item JSON is required because rustdoc records an enclosing module's
@@ -34,10 +34,10 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_JSON = ROOT / "target" / "doc" / "arbi_anafis.json"
+DEFAULT_JSON = ROOT / "target" / "doc" / "mp_anafis.json"
 DEFAULT_OUTPUT = ROOT / "tools" / "api_inventory.tsv"
-EXPECTED_CRATE = "arbi_anafis"
-SUPPORTED_FORMAT_VERSIONS = {60}
+EXPECTED_CRATE = "mp_anafis"
+SUPPORTED_FORMAT_VERSIONS = {60, 61}
 COLUMNS = (
     "root_path",
     "receiver",

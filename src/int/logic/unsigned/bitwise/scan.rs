@@ -7,9 +7,9 @@
 
 use core::cmp::min;
 
-use super::{InternalArbiUint, LIMB_BITS, Limb};
+use super::{InternalMpUint, LIMB_BITS, Limb};
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Returns the number of ones in the binary representation.
     #[inline]
     #[must_use]

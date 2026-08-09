@@ -6,7 +6,7 @@
 
 use core::hint::black_box;
 
-use arbi_anafis::tune_api::{
+use mp_anafis::tune_api::{
     Limb, division, formatting, multiplication, squaring,
     tier::state::{MulBenchScratch, SquareBenchScratch},
 };
@@ -214,17 +214,17 @@ fn print_ssa_score_with(coarse: bool) {
             values.push(score_sqr_cell(if coarse { cell.coarse() } else { cell }));
         }
         let prefix = if coarse {
-            "ARBI_SSA_COARSE_SCORE="
+            "MP_ANAFIS_SSA_COARSE_SCORE="
         } else {
-            "ARBI_SSA_SCORE="
+            "MP_ANAFIS_SSA_SCORE="
         };
         print_encoded(prefix, &values);
     }
     #[cfg(target_pointer_width = "16")]
     if coarse {
-        println!("ARBI_SSA_COARSE_SCORE=");
+        println!("MP_ANAFIS_SSA_COARSE_SCORE=");
     } else {
-        println!("ARBI_SSA_SCORE=");
+        println!("MP_ANAFIS_SSA_SCORE=");
     }
 }
 
@@ -243,10 +243,10 @@ pub fn print_ssa_ring_score(ring_bits: usize, coarse: bool) {
                 values.push(score_sqr_cell(if coarse { cell.coarse() } else { cell }));
             }
         }
-        print_encoded("ARBI_SSA_RING_SCORE=", &values);
+        print_encoded("MP_ANAFIS_SSA_RING_SCORE=", &values);
     }
     #[cfg(target_pointer_width = "16")]
-    println!("ARBI_SSA_RING_SCORE=");
+    println!("MP_ANAFIS_SSA_RING_SCORE=");
 }
 
 #[cfg(not(target_pointer_width = "16"))]
@@ -282,10 +282,10 @@ pub fn print_toom85_score() {
         for cell in TOOM85_SQR_SCORE_CELLS {
             values.push(score_forced_sqr_cell(cell, squaring::Algorithm::ToomCook85));
         }
-        print_encoded("ARBI_TOOM85_SCORE=", &values);
+        print_encoded("MP_ANAFIS_TOOM85_SCORE=", &values);
     }
     #[cfg(target_pointer_width = "16")]
-    println!("ARBI_TOOM85_SCORE=");
+    println!("MP_ANAFIS_TOOM85_SCORE=");
 }
 
 /// Print forced Toom-8.5 multiplication timings for multiplication-only knobs.
@@ -294,26 +294,32 @@ pub fn print_toom85_mul_score() {
     {
         let values = TOOM85_MUL_SCORE_CELLS
             .map(|cell| score_forced_mul_cell(cell, multiplication::Algorithm::ToomCook85));
-        print_encoded("ARBI_TOOM85_MUL_SCORE=", &values);
+        print_encoded("MP_ANAFIS_TOOM85_MUL_SCORE=", &values);
     }
     #[cfg(target_pointer_width = "16")]
-    println!("ARBI_TOOM85_MUL_SCORE=");
+    println!("MP_ANAFIS_TOOM85_MUL_SCORE=");
 }
 
 /// Print forced Burnikel-Ziegler timings for its compiled block-size tuner.
 pub fn print_burnikel_score() {
-    print_division_score("ARBI_BURNIKEL_SCORE=", division::Algorithm::BurnikelZiegler);
+    print_division_score(
+        "MP_ANAFIS_BURNIKEL_SCORE=",
+        division::Algorithm::BurnikelZiegler,
+    );
 }
 
 /// Print forced Newton-Raphson timings for its compiled basecase tuner.
 pub fn print_newton_score() {
-    print_division_score("ARBI_NEWTON_SCORE=", division::Algorithm::NewtonRaphson);
+    print_division_score(
+        "MP_ANAFIS_NEWTON_SCORE=",
+        division::Algorithm::NewtonRaphson,
+    );
 }
 
 /// Print production-division timings for coupled threshold tuning.
 pub fn print_production_division_score() {
     print_division_score(
-        "ARBI_PRODUCTION_DIVISION_SCORE=",
+        "MP_ANAFIS_PRODUCTION_DIVISION_SCORE=",
         division::Algorithm::Production,
     );
 }
@@ -337,10 +343,10 @@ pub fn print_production_score() {
         for cell in PRODUCTION_DIV_CELLS {
             values.push(score_division_cell(cell, division::Algorithm::Production));
         }
-        print_encoded("ARBI_PRODUCTION_SCORE=", &values);
+        print_encoded("MP_ANAFIS_PRODUCTION_SCORE=", &values);
     }
     #[cfg(target_pointer_width = "16")]
-    println!("ARBI_PRODUCTION_SCORE=");
+    println!("MP_ANAFIS_PRODUCTION_SCORE=");
 }
 
 /// Compare two forced multiplication roots while the candidate profile is
@@ -390,7 +396,7 @@ pub fn print_mul_pair_score(specification: &str) -> Result<(), String> {
         quality.samples(),
     );
     println!(
-        "ARBI_TIER_PAIR={},{}",
+        "MP_ANAFIS_TIER_PAIR={},{}",
         baseline_time.as_nanos(),
         candidate_time.as_nanos()
     );
@@ -432,7 +438,7 @@ pub fn print_sqr_pair_score(specification: &str) -> Result<(), String> {
         quality.samples(),
     );
     println!(
-        "ARBI_TIER_PAIR={},{}",
+        "MP_ANAFIS_TIER_PAIR={},{}",
         baseline_time.as_nanos(),
         candidate_time.as_nanos()
     );
@@ -470,7 +476,7 @@ pub fn print_fmt_pair_score(specification: &str) -> Result<(), String> {
         quality.samples(),
     );
     println!(
-        "ARBI_FMT_PAIR={},{}",
+        "MP_ANAFIS_FMT_PAIR={},{}",
         baseline_time.as_nanos(),
         candidate_time.as_nanos()
     );

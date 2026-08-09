@@ -1,4 +1,4 @@
-//! Unsigned integer implementation — `InternalArbiUint`, storage, math, bitwise, etc.
+//! Unsigned integer implementation — `InternalMpUint`, storage, math, bitwise, etc.
 
 use super::{DoubleLimb, INLINE_LIMBS, LIMB_BITS, LIMB_BYTES, Limb};
 
@@ -31,4 +31,4 @@ pub use math::{
     Toom3, Toom4, Toom6, Toom8, Toom32, Toom43, TransformBench, TransformChoice,
 };
 pub use memory::ScratchBuffer;
-pub use storage::{InternalArbiUint, UintRepr};
+pub use storage::{InternalMpUint, UintRepr};

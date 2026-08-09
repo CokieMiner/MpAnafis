@@ -1,6 +1,6 @@
 //! Unsigned integer arithmetic APIs organized by operation contract.
 
-use super::{ArbiUint, InternalArbiUint};
+use super::{InternalMpUint, MpUint};
 
 mod assignment;
 mod bounded;

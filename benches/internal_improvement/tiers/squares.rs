@@ -2,7 +2,7 @@
 
 use core::hint::black_box;
 
-use arbi_anafis::tune_api::tier::{
+use mp_anafis::tune_api::tier::{
     Limb,
     algorithms::{
         bench_karatsuba_sqr_scratch_len, bench_karatsuba_sqr_with_scratch, bench_schoolbook_sqr,

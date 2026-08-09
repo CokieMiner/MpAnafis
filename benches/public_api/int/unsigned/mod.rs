@@ -1,4 +1,4 @@
-//! `ArbiUint` benchmarks, grouped by the sections of
+//! `MpUint` benchmarks, grouped by the sections of
 //! `docs/int/api-inventory.md`.
 //!
 //! # What is not benchmarked

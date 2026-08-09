@@ -68,7 +68,7 @@ jobs:
   # baseline kernels are compiled and never executed, and every algorithm above
   # them is only ever exercised on the fastest path.
   #
-  # `ARBI_TEST_BACKEND` is honoured only under `debug_assertions`, which is why
+  # `MP_ANAFIS_TEST_BACKEND` is honoured only under `debug_assertions`, which is why
   # these runs are unoptimised. It also degrades rather than faults: a request
   # the host cannot satisfy falls back to baseline, so this cannot execute an
   # instruction the runner lacks.
@@ -95,7 +95,7 @@ jobs:
 
       - name: Run Tests On Selected Backend
         env:
-          ARBI_TEST_BACKEND: ${{ matrix.backend }}
+          MP_ANAFIS_TEST_BACKEND: ${{ matrix.backend }}
         run: |
           cargo test --lib --tests --features std,num-traits
           cargo test --lib --tests --no-default-features

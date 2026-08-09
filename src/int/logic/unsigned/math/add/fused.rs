@@ -8,9 +8,9 @@ use core::{
 
 use alloc::vec::Vec;
 
-use super::{Addition, ArchKernels, INLINE_LIMBS, InternalArbiUint, UintRepr};
+use super::{Addition, ArchKernels, INLINE_LIMBS, InternalMpUint, UintRepr};
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Computes `self = a + b`, overwriting the current value.
     #[allow(
         clippy::too_many_lines,

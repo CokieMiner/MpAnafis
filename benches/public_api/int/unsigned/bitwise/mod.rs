@@ -1,4 +1,4 @@
-//! Bitwise operations on `ArbiUint`.
+//! Bitwise operations on `MpUint`.
 //!
 //! - [`operators`]: `BitAnd`, `BitOr`, `BitXor`, `not_with_width`, `try_not`.
 //! - [`shifts`]: `Shl`, `Shr` and the shift policy family.

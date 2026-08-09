@@ -9,7 +9,7 @@ use super::{Limb, SSA_TRANSPOSE_TILE_LIMBS, SsaRing, SsaTransform};
 /// Coefficient addressing and the transposes the four-step layout runs over.
 ///
 /// Contributed to the [`SsaTransform`] namespace declared in
-/// [`transform`](super::transform).
+/// [`drive`](super::drive).
 impl SsaTransform {
     /// Returns a shared slice of the coefficient at `index`.
     ///
@@ -252,13 +252,13 @@ fn transpose_blocked<State, Row, Place>(
 
 /// Move one coefficient across, applying its Fermat twiddle shift.
 ///
-/// A zero shift is a plain copy: `fermat_shift_from` would still be correct, but
+/// A zero shift is a plain copy: `SsaRing::shift_from` would still be correct, but
 /// the copy skips its modular fold, and an exponent of zero is common enough
 /// along the first row and column to be worth the branch.
 ///
 /// # Safety
 ///
-/// Inherited from [`fermat_shift_from`]: `dst_coeff` and `src_coeff` each hold
+/// Inherited from [`SsaRing::shift_from`]: `dst_coeff` and `src_coeff` each hold
 /// at least `SsaRing::coeff_limbs(mod_bits)` limbs, they do not overlap, and `src_coeff`
 /// is a semi-normalized Fermat residue.
 #[allow(

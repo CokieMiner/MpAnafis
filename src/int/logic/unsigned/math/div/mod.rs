@@ -2,7 +2,7 @@
 //!
 //! Two names leave this folder. [`Division`] is the division machinery itself —
 //! every file below contributes its `impl Division` block, so the tower reads as one
-//! surface despite being spread across the folder. `InternalArbiUint` gains only
+//! surface despite being spread across the folder. `InternalMpUint` gains only
 //! the five operations a caller cannot do without (`div_rem`, `div`, `rem`, and
 //! the two in-place forms), plus `extended_gcd` and `mod_inverse`; importing the
 //! type is enough to use them.
@@ -48,6 +48,6 @@ pub use self::{dispatch::Division, scratch::DivScratch};
 // bindings below, which keeps every relative path in this tree one level deep.
 use super::{
     Addition, ArchKernels, BURNIKEL_ZIEGLER_BLOCK_LIMBS, BURNIKEL_ZIEGLER_THRESHOLD, DoubleLimb,
-    Gcd, InternalArbiUint, LIMB_BITS, Limb, LowProduct, MulScratch, Multiplication,
+    Gcd, InternalMpUint, LIMB_BITS, Limb, LowProduct, MulScratch, Multiplication,
     NEWTON_RAPHSON_BASECASE_LIMBS, NEWTON_RAPHSON_THRESHOLD, ScratchBuffer,
 };

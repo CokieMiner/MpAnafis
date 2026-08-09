@@ -2,7 +2,7 @@
 
 use core::{cmp::Ordering, mem::swap};
 
-use super::{ArchKernels, Gcd, InternalArbiUint, LIMB_BITS, Limb};
+use super::{ArchKernels, Gcd, InternalMpUint, LIMB_BITS, Limb};
 
 /// Fused trailing-zeros count + right-shift in a single pass over the limbs.
 ///
@@ -19,7 +19,7 @@ use super::{ArchKernels, Gcd, InternalArbiUint, LIMB_BITS, Limb};
     clippy::inline_always,
     reason = "Inlining this helper eliminates call overhead and exposes loop invariants to the optimizer."
 )]
-fn shr_trailing_zeros_assign(n: &mut InternalArbiUint) {
+fn shr_trailing_zeros_assign(n: &mut InternalMpUint) {
     let limbs = n.limbs();
     let len = limbs.len();
     if len == 0 {
@@ -97,7 +97,7 @@ fn shr_trailing_zeros_assign(n: &mut InternalArbiUint) {
     reason = "Bypassing vector length checks during final Stein GCD limb truncation to avoid branchy checks."
 )]
 impl Gcd {
-    pub fn binary_gcd_odd_part_assign(u: &mut InternalArbiUint, v: &mut InternalArbiUint) {
+    pub fn binary_gcd_odd_part_assign(u: &mut InternalMpUint, v: &mut InternalMpUint) {
         shr_trailing_zeros_assign(u);
         shr_trailing_zeros_assign(v);
 

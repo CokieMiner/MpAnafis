@@ -367,7 +367,7 @@ impl Ssa {
     /// other, so a plan naming this tier is a plan that runs.
     ///
     /// The bound is computed from the declared widths. A leading-zero-heavy operand
-    /// only shortens the significant width, and [`crt_half_width`] is monotone in
+    /// only shortens the significant width, and [`SsaPlan::crt_half_width`] is monotone in
     /// it, so an accepted pair stays accepted once the exact widths are known.
     pub fn admits_mul(len_a: usize, len_b: usize) -> bool {
         let Some(product_width) = len_a.checked_add(len_b) else {
@@ -435,7 +435,7 @@ impl Ssa {
     /// discards that discount entirely, and sizing such a ring means rounding the
     /// product width up to the next power of two — which on any width that is not
     /// already one inflates the ring by the rounding ratio, worth 1.67x at five
-    /// million limbs. Reaching [`crt_half_width`] avoids both.
+    /// million limbs. Reaching [`SsaPlan::crt_half_width`] avoids both.
     ///
     /// Takes the same [`TransformChoice`] and optional scratch as [`Ssa::try_mul`].
     /// [`TransformChoice::exponent`] has no effect here: the squaring transform plans

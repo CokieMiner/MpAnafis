@@ -14,8 +14,8 @@ proptest! {
             a_limbs in proptest::collection::vec(any::<Limb>(), 0..=4),
             b_limbs in proptest::collection::vec(any::<Limb>(), 0..=4),
         ) {
-            let a = InternalArbiUint::from_limbs(a_limbs);
-            let b = InternalArbiUint::from_limbs(b_limbs);
+            let a = InternalMpUint::from_limbs(a_limbs);
+            let b = InternalMpUint::from_limbs(b_limbs);
 
             let g = a.gcd(&b);
 

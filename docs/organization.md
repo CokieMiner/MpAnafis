@@ -1,4 +1,4 @@
-# arbi-anafis Source Organization
+# mp-anafis Source Organization
 
 This guide describes the repository's current module boundaries. It is a
 maintenance contract: when the code and this document disagree, fix both in the
@@ -24,8 +24,8 @@ src/int/
 ├── types.rs               # platform-adaptive limb definitions (`Limb = usize`, `DoubleLimb`, `LIMB_BITS`, `INLINE_LIMBS`)
 ├── api/                   # public types, methods, and trait implementations
 │   ├── mod.rs             # private logic imports and public API registry
-│   ├── int/               # ArbiInt API
-│   ├── uint/              # ArbiUint API
+│   ├── int/               # MpInt API
+│   ├── uint/              # MpUint API
 │   └── ops/               # operator trait implementations
 ├── logic/                 # private implementation namespace
 │   ├── signed/            # signed integer arithmetic, bitwise, and representation logic
@@ -144,8 +144,8 @@ Do not place a large inline `#[cfg(test)] mod tests` beside production code.
 
 ## Bench Placement
 
-- `public_api` (`arbi vs rug/gmp api`) contains comprehensive public-API comparisons against Rug/GMP across every implemented family listed in `docs/int/api-inventory.md`, including allocation-sensitive (`divan::AllocProfiler`) addition routines and Arbi-only workloads.
-- `internal_improvement` (`arbi vs rug gmp for internal improvement`) contains direct tier, crossover, and architecture-kernel measurements through the internal tuning facade (`_internal-tune`).
+- `public_api` (`mp vs rug/gmp api`) contains comprehensive public-API comparisons against Rug/GMP across every implemented family listed in `docs/int/api-inventory.md`, including allocation-sensitive (`divan::AllocProfiler`) addition routines and Mp-only workloads.
+- `internal_improvement` (`mp vs rug gmp for internal improvement`) contains direct tier, crossover, and architecture-kernel measurements through the internal tuning facade (`_internal-tune`).
 - `shared/` holds common support modules and generator utilities across benchmarks.
 - Operand generation and allocation belong outside timed closures unless the
   allocation itself is the operation being compared.

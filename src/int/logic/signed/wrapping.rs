@@ -1,8 +1,8 @@
-//! Signed two's-complement wrapping implemented on `InternalArbiInt`.
+//! Signed two's-complement wrapping implemented on `InternalMpInt`.
 
-use super::{InternalArbiInt, InternalArbiUint};
+use super::{InternalMpInt, InternalMpUint};
 
-impl InternalArbiInt {
+impl InternalMpInt {
     /// Wraps this value to `bits` two's-complement bits.
     #[inline]
     #[must_use]
@@ -28,7 +28,7 @@ impl InternalArbiInt {
 
         if self.is_positive {
             if sign_bit {
-                let two_pow_n = InternalArbiUint::power_of_two(bits);
+                let two_pow_n = InternalMpUint::power_of_two(bits);
                 // Width truncation proves `truncated_abs < 2^bits`.
                 let abs = two_pow_n.sub(&truncated_abs);
                 Self {
@@ -47,7 +47,7 @@ impl InternalArbiInt {
                 is_positive: false,
             }
         } else {
-            let two_pow_n = InternalArbiUint::power_of_two(bits);
+            let two_pow_n = InternalMpUint::power_of_two(bits);
             // Width truncation proves `truncated_abs < 2^bits`.
             let abs = two_pow_n.sub(&truncated_abs);
             Self {

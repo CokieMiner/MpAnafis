@@ -18,7 +18,7 @@ use divan::black_box;
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 use rug::Integer;
 
-use super::cases::{Operation, Scenario, arbi_pairs};
+use super::cases::{Operation, Scenario, mp_pairs};
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 use super::cases::{rug_pairs, rug_width, verify_value};
 use crate::int::{ladders::NARROW, support::SAMPLE_SIZE_FAST};
@@ -29,9 +29,9 @@ macro_rules! strict_benches {
             use super::*;
 
             #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-            fn arbi(bencher: divan::Bencher, bits: usize) {
+            fn mp(bencher: divan::Bencher, bits: usize) {
                 verify($operation, bits);
-                let inputs = arbi_pairs(bits, $operation, Scenario::Success);
+                let inputs = mp_pairs(bits, $operation, Scenario::Success);
                 bencher.bench_local(|| {
                     for (left, right) in &inputs {
                         let _output = black_box(black_box(left).$method(black_box(right)));
@@ -64,32 +64,32 @@ strict_benches!(rem_success, Operation::Rem, strict_rem, rug_strict_rem);
 fn verify(operation: Operation, bits: usize) {
     #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
     {
-        let arbi = arbi_pairs(bits, operation, Scenario::Success);
+        let mp = mp_pairs(bits, operation, Scenario::Success);
         let rug = rug_pairs(bits, operation, Scenario::Success);
         let width = rug_width(bits);
 
-        for ((arbi_left, arbi_right), (rug_left, rug_right)) in arbi.iter().zip(&rug) {
-            verify_value(arbi_left, rug_left);
-            verify_value(arbi_right, rug_right);
+        for ((mp_left, mp_right), (rug_left, rug_right)) in mp.iter().zip(&rug) {
+            verify_value(mp_left, rug_left);
+            verify_value(mp_right, rug_right);
             let (actual, expected) = match operation {
                 Operation::Add => (
-                    arbi_left.strict_add(arbi_right),
+                    mp_left.strict_add(mp_right),
                     rug_strict_add(rug_left, rug_right, width),
                 ),
                 Operation::Sub => (
-                    arbi_left.strict_sub(arbi_right),
+                    mp_left.strict_sub(mp_right),
                     rug_strict_sub(rug_left, rug_right, width),
                 ),
                 Operation::Mul => (
-                    arbi_left.strict_mul(arbi_right),
+                    mp_left.strict_mul(mp_right),
                     rug_strict_mul(rug_left, rug_right, width),
                 ),
                 Operation::Div => (
-                    arbi_left.strict_div(arbi_right),
+                    mp_left.strict_div(mp_right),
                     rug_strict_div(rug_left, rug_right, width),
                 ),
                 Operation::Rem => (
-                    arbi_left.strict_rem(arbi_right),
+                    mp_left.strict_rem(mp_right),
                     rug_strict_rem(rug_left, rug_right, width),
                 ),
             };

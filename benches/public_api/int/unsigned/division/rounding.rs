@@ -24,18 +24,16 @@ use rug::{
 use crate::int::support::rug_uint_pairs;
 use crate::int::{
     ladders::DIVISION,
-    support::{
-        SAMPLE_COUNT_WIDE, SAMPLE_SIZE_WIDE, arbi_uint_pairs, verify_arbi_uint_division_pairs,
-    },
+    support::{SAMPLE_COUNT_WIDE, SAMPLE_SIZE_WIDE, mp_uint_pairs, verify_mp_uint_division_pairs},
 };
 
 mod div_euclid {
     use super::*;
 
     #[divan::bench(args = DIVISION, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
-        verify_arbi_uint_division_pairs(&inputs);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
+        verify_mp_uint_division_pairs(&inputs);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(left).div_euclid(black_box(right)));
@@ -62,9 +60,9 @@ mod rem_euclid {
     use super::*;
 
     #[divan::bench(args = DIVISION, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
-        verify_arbi_uint_division_pairs(&inputs);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
+        verify_mp_uint_division_pairs(&inputs);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(left).rem_euclid(black_box(right)));
@@ -91,9 +89,9 @@ mod div_floor {
     use super::*;
 
     #[divan::bench(args = DIVISION, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
-        verify_arbi_uint_division_pairs(&inputs);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
+        verify_mp_uint_division_pairs(&inputs);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(left).div_floor(black_box(right)));
@@ -120,9 +118,9 @@ mod mod_floor {
     use super::*;
 
     #[divan::bench(args = DIVISION, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
-        verify_arbi_uint_division_pairs(&inputs);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
+        verify_mp_uint_division_pairs(&inputs);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(left).mod_floor(black_box(right)));
@@ -149,9 +147,9 @@ mod div_ceil {
     use super::*;
 
     #[divan::bench(args = DIVISION, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
-        verify_arbi_uint_division_pairs(&inputs);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
+        verify_mp_uint_division_pairs(&inputs);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(left).div_ceil(black_box(right)));
@@ -179,9 +177,9 @@ mod div_rem_floor {
     use super::*;
 
     #[divan::bench(args = DIVISION, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
-        verify_arbi_uint_division_pairs(&inputs);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
+        verify_mp_uint_division_pairs(&inputs);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(left).div_rem_floor(black_box(right)));
@@ -208,9 +206,9 @@ mod div_rem_euclid {
     use super::*;
 
     #[divan::bench(args = DIVISION, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
-        verify_arbi_uint_division_pairs(&inputs);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
+        verify_mp_uint_division_pairs(&inputs);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(left).div_rem_euclid(black_box(right)));
@@ -237,9 +235,9 @@ mod checked_rounding {
     use super::*;
 
     #[divan::bench(args = DIVISION, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
-        verify_arbi_uint_division_pairs(&inputs);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
+        verify_mp_uint_division_pairs(&inputs);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _floor = black_box(black_box(left).checked_div_floor(black_box(right)));
@@ -253,7 +251,7 @@ mod checked_rounding {
         });
     }
 
-    /// Seven GMP divisions, one per `checked_` method on the `arbi` side.
+    /// Seven GMP divisions, one per `checked_` method on the `mp` side.
     #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
     #[divan::bench(args = DIVISION, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
     fn rug(bencher: divan::Bencher, bits: usize) {

@@ -5,28 +5,26 @@ use core::{
     str::FromStr,
 };
 
-use crate::error::{
-    ParseArbiIntError, ParseArbiIntErrorKind, ParseArbiUintError, ParseArbiUintErrorKind,
-};
+use crate::error::{ParseMpIntError, ParseMpIntErrorKind, ParseMpUintError, ParseMpUintErrorKind};
 
 use super::{
-    AmbientPrecision, ArbiInt, ArbiUint, DebugVerbose, InternalArbiInt, InternalArbiUint,
-    Precision, PrecisionContext,
+    AmbientPrecision, DebugVerbose, InternalMpInt, InternalMpUint, MpInt, MpUint, Precision,
+    PrecisionContext,
 };
 
-impl Debug for DebugVerbose<'_, ArbiInt> {
+impl Debug for DebugVerbose<'_, MpInt> {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "ArbiInt({}, precision: {:?})", self.0, self.0.precision)
+        write!(f, "MpInt({}, precision: {:?})", self.0, self.0.precision)
     }
 }
 
-impl Debug for ArbiUint {
+impl Debug for MpUint {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{self}")
     }
 }
 
-impl Debug for ArbiInt {
+impl Debug for MpInt {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{self}")
     }
@@ -103,18 +101,18 @@ macro_rules! impl_fmt_int {
     };
 }
 
-impl FromStr for ArbiUint {
-    type Err = ParseArbiUintError;
+impl FromStr for MpUint {
+    type Err = ParseMpUintError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let internal = InternalArbiUint::from_str_radix(s, 10)?;
+        let internal = InternalMpUint::from_str_radix(s, 10)?;
         let required = internal.required_unsigned_bits_for_bounded_storage();
         let ambient = PrecisionContext::active();
         let precision = match ambient {
             AmbientPrecision::Unlimited | AmbientPrecision::Unset => Precision::Unlimited,
             AmbientPrecision::Bounded(n) => {
                 if required > n.get() {
-                    return Err(ParseArbiUintError {
-                        kind: ParseArbiUintErrorKind::TooLarge,
+                    return Err(ParseMpUintError {
+                        kind: ParseMpUintErrorKind::TooLarge,
                     });
                 }
                 Precision::Bounded(n)
@@ -129,8 +127,8 @@ impl FromStr for ArbiUint {
     }
 }
 
-impl FromStr for ArbiInt {
-    type Err = ParseArbiIntError;
+impl FromStr for MpInt {
+    type Err = ParseMpIntError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let (is_positive, rest) = s.strip_prefix('-').map_or_else(
             || {
@@ -140,19 +138,19 @@ impl FromStr for ArbiInt {
             |stripped| (false, stripped),
         );
 
-        let abs = InternalArbiUint::from_str_radix(rest, 10).map_err(|e| ParseArbiIntError {
+        let abs = InternalMpUint::from_str_radix(rest, 10).map_err(|e| ParseMpIntError {
             kind: match e.kind {
-                ParseArbiUintErrorKind::Empty => ParseArbiIntErrorKind::Empty,
-                ParseArbiUintErrorKind::InvalidDigit | ParseArbiUintErrorKind::Negative => {
-                    ParseArbiIntErrorKind::InvalidDigit
+                ParseMpUintErrorKind::Empty => ParseMpIntErrorKind::Empty,
+                ParseMpUintErrorKind::InvalidDigit | ParseMpUintErrorKind::Negative => {
+                    ParseMpIntErrorKind::InvalidDigit
                 }
-                ParseArbiUintErrorKind::InvalidRadix => ParseArbiIntErrorKind::InvalidRadix,
-                ParseArbiUintErrorKind::TooLarge => ParseArbiIntErrorKind::TooLarge,
+                ParseMpUintErrorKind::InvalidRadix => ParseMpIntErrorKind::InvalidRadix,
+                ParseMpUintErrorKind::TooLarge => ParseMpIntErrorKind::TooLarge,
             },
         })?;
 
         let is_pos = if abs.is_zero() { true } else { is_positive };
-        let internal = InternalArbiInt {
+        let internal = InternalMpInt {
             abs,
             is_positive: is_pos,
         };
@@ -162,8 +160,8 @@ impl FromStr for ArbiInt {
             AmbientPrecision::Unlimited | AmbientPrecision::Unset => Precision::Unlimited,
             AmbientPrecision::Bounded(n) => {
                 if required > n.get() {
-                    return Err(ParseArbiIntError {
-                        kind: ParseArbiIntErrorKind::TooLarge,
+                    return Err(ParseMpIntError {
+                        kind: ParseMpIntErrorKind::TooLarge,
                     });
                 }
                 Precision::Bounded(n)
@@ -178,5 +176,5 @@ impl FromStr for ArbiInt {
     }
 }
 
-impl_fmt_uint!(ArbiUint);
-impl_fmt_int!(ArbiInt);
+impl_fmt_uint!(MpUint);
+impl_fmt_int!(MpInt);

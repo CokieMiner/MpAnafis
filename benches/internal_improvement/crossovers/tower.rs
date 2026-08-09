@@ -2,7 +2,7 @@
 
 use core::hint::black_box;
 
-use arbi_anafis::tune_api::tier::{
+use mp_anafis::tune_api::tier::{
     Limb,
     algorithms::{
         bench_karatsuba_mul_scratch_len, bench_karatsuba_mul_with_scratch, bench_schoolbook_mul,
@@ -139,7 +139,7 @@ fn lower_crossover_toom4(bencher: divan::Bencher, len: usize) {
 }
 
 #[divan::bench(args = TOWER_SIZES)]
-fn arbi_tower_reused(bencher: divan::Bencher, len: usize) {
+fn mp_tower_reused(bencher: divan::Bencher, len: usize) {
     let (left, right, mut destination) = operands(len);
     let mut scratch = MulBenchScratch::default();
     bencher.bench_local(|| {
@@ -153,7 +153,7 @@ fn arbi_tower_reused(bencher: divan::Bencher, len: usize) {
 }
 
 #[divan::bench(args = TOWER_SIZES)]
-fn arbi_tower_pooled(bencher: divan::Bencher, len: usize) {
+fn mp_tower_pooled(bencher: divan::Bencher, len: usize) {
     let (left, right, mut destination) = operands(len);
     bencher.bench_local(|| {
         bench_mul_tower_pooled(

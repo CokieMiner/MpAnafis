@@ -2,8 +2,8 @@
 
 use core::mem::swap;
 
-use super::{ArbiUint, DebugVerbose};
-impl ArbiUint {
+use super::{DebugVerbose, MpUint};
+impl MpUint {
     /// Validates internal invariants. Panics if invariants are violated.
     #[inline]
     #[track_caller]
@@ -13,7 +13,7 @@ impl ArbiUint {
         {
             assert!(
                 self.value.required_unsigned_bits_for_bounded_storage() <= bits,
-                "ArbiUint magnitude exceeds its bounded precision of {bits} bits"
+                "MpUint magnitude exceeds its bounded precision of {bits} bits"
             );
         }
     }

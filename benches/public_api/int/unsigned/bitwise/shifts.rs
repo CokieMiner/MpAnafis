@@ -19,7 +19,7 @@ use rug::Integer;
 use crate::int::support::rug_uint;
 use crate::int::{
     ladders::NARROW,
-    support::{SAMPLE_SIZE_FAST, arbi_uint},
+    support::{SAMPLE_SIZE_FAST, mp_uint},
 };
 
 /// Sub-limb, near-limb and cross-limb shift counts.
@@ -29,8 +29,8 @@ mod shl {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             for shift in SHIFTS {
                 let _output = black_box(Shl::shl(black_box(&value), black_box(shift)));
@@ -56,8 +56,8 @@ mod shr {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             for shift in SHIFTS {
                 let _output = black_box(Shr::shr(black_box(&value), black_box(shift)));
@@ -90,8 +90,8 @@ mod shl_policies {
     const SHIFT: usize = 137;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _checked = black_box(black_box(&value).checked_shl(SHIFT));
             let _wrapping = black_box(black_box(&value).wrapping_shl(SHIFT));

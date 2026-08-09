@@ -51,11 +51,11 @@ impl Clone for UintRepr {
 
 /// The core unsigned arbitrary precision integer engine.
 #[derive(Debug)]
-pub struct InternalArbiUint {
+pub struct InternalMpUint {
     pub repr: UintRepr,
 }
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Creates a new unsigned integer with the value 0.
     #[inline]
     #[must_use]

@@ -1,8 +1,7 @@
 //! `x86_64` baseline (non-ADX) subtraction kernels (inline assembly).
 //!
-//! Re-uses `sub_limbs_unchecked` from [`super::x86_64_shared`] and provides
-//! its own 3-operand path using `sbb` for borrow tracking and `adcq` for
-//! borrow extraction.
+//! Provides its own 3-operand path using `sbb` for borrow tracking and `adcq`
+//! for borrow extraction.
 //!
 //! ## Loop structure
 //!

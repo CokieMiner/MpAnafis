@@ -7,9 +7,9 @@
 
 use core::cmp::max;
 
-use super::{InternalArbiInt, InternalArbiUint, Limb};
+use super::{InternalMpInt, InternalMpUint, Limb};
 
-impl InternalArbiInt {
+impl InternalMpInt {
     /// Computes `self = a * b` while reusing this magnitude allocation.
     pub fn assign_mul(&mut self, a: &Self, b: &Self) {
         self.abs.assign_product(&a.abs, &b.abs);
@@ -111,7 +111,7 @@ impl InternalArbiInt {
     reason = "Signed underflow paths need post-normalization width recovery without a magnitude comparison"
 )]
 #[inline(always)]
-pub fn negate_normalized_inplace(value: &mut InternalArbiUint, subtraction_width: usize) {
+pub fn negate_normalized_inplace(value: &mut InternalMpUint, subtraction_width: usize) {
     let active_len = value.limbs().len();
     negate_inplace(value);
     if active_len < subtraction_width {
@@ -125,7 +125,7 @@ pub fn negate_normalized_inplace(value: &mut InternalArbiUint, subtraction_width
     reason = "Called only on the signed arithmetic underflow path and must remain inlined"
 )]
 #[inline(always)]
-fn negate_inplace(value: &mut InternalArbiUint) {
+fn negate_inplace(value: &mut InternalMpUint) {
     let (ptr, len) = {
         let limbs = value.limbs_mut();
         if limbs.is_empty() {
@@ -163,7 +163,7 @@ fn negate_inplace(value: &mut InternalArbiUint) {
 /// Restores high sign-extension limbs omitted by residue normalization.
 #[cold]
 #[inline(never)]
-fn restore_negated_width(value: &mut InternalArbiUint, low_width: usize, full_width: usize) {
+fn restore_negated_width(value: &mut InternalMpUint, low_width: usize, full_width: usize) {
     let result_len = value.limbs().len();
     debug_assert!(
         result_len <= low_width,
@@ -193,10 +193,10 @@ fn restore_negated_width(value: &mut InternalArbiUint, low_width: usize, full_wi
 )]
 #[inline(always)]
 fn normalize_sign_after_sub(
-    value: &mut InternalArbiInt,
+    value: &mut InternalMpInt,
     underflow: bool,
-    a: &InternalArbiUint,
-    b: &InternalArbiUint,
+    a: &InternalMpUint,
+    b: &InternalMpUint,
     positive_sign: bool,
     negative_sign: bool,
 ) {

@@ -11,7 +11,7 @@ use divan::black_box;
 use crate::int::support::rug_uint_pairs;
 use crate::int::{
     ladders::NARROW,
-    support::{SAMPLE_SIZE_FAST, arbi_uint_pairs},
+    support::{SAMPLE_SIZE_FAST, mp_uint_pairs},
 };
 
 /// `b | a` asked from the dividend.
@@ -19,8 +19,8 @@ mod is_divisible_by {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(left).is_divisible_by(black_box(right)));
@@ -45,8 +45,8 @@ mod is_divisor_of {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(right).is_divisor_of(black_box(left)));

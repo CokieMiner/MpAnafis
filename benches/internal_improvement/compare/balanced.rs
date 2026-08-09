@@ -1,10 +1,10 @@
-//! Equal-width products: Arbi against GMP and FLINT on a log-uniform ladder.
+//! Equal-width products: Mp against GMP and FLINT on a log-uniform ladder.
 //!
 //! Every arm takes identical operands from the shared generator and writes into
-//! a caller-owned destination, and the Arbi arm runs the full public dispatcher
+//! a caller-owned destination, and the Mp arm runs the full public dispatcher
 //! rather than a forced tier, so what is compared is three complete towers.
 //!
-//! Arbi's scratch pool is acquired once per width, outside the timed region.
+//! Mp's scratch pool is acquired once per width, outside the timed region.
 //! GMP and FLINT allocate their own workspace internally, so timing our pool
 //! acquisition per iteration would put an allocator on one side of the
 //! comparison and an algorithm on the other.
@@ -16,8 +16,8 @@
 
 use core::hint::black_box;
 
-use arbi_anafis::tune_api::tier::{Limb, state::MulBenchScratch};
 use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
+use mp_anafis::tune_api::tier::{Limb, state::MulBenchScratch};
 
 use crate::{
     compare::flint::{
@@ -36,7 +36,7 @@ const fn assert_one_limb_width() {
 }
 
 #[divan::bench(args = SCALING_SIZES)]
-fn arbi(bencher: divan::Bencher<'_, '_>, len: usize) {
+fn mp(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (left, right, mut destination) = operands(len);
     let mut reusable = MulBenchScratch::default();
     bencher.bench_local(|| {
@@ -122,7 +122,7 @@ fn flint(bencher: divan::Bencher<'_, '_>, len: usize) {
 // arms already establish agreement on the same code paths.
 
 #[divan::bench(args = HUGE_SIZES, sample_count = 3, sample_size = 1)]
-fn arbi_huge(bencher: divan::Bencher<'_, '_>, len: usize) {
+fn mp_huge(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (left, right, mut destination) = operands(len);
     let mut reusable = MulBenchScratch::default();
     bencher.bench_local(|| {

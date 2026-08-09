@@ -26,7 +26,7 @@ proptest! {
             prop_assert_eq!(unsigned_difference, &unsigned_left - &unsigned_right);
         } else {
             prop_assert!(underflow);
-            prop_assert_eq!(unsigned_difference, ArbiUint::zero());
+            prop_assert_eq!(unsigned_difference, MpUint::zero());
         }
 
         let mut signed_sum = signed_destination_seed.clone();
@@ -96,7 +96,7 @@ proptest! {
         signed_squared.assign_square(&signed_value);
         prop_assert_eq!(&signed_aliased, &signed_squared);
         // A square is never negative, including when the operand is.
-        prop_assert!(signed_squared >= ArbiInt::zero());
+        prop_assert!(signed_squared >= MpInt::zero());
     }
 }
 
@@ -108,10 +108,10 @@ proptest! {
 /// destination seed is deliberately longer than every result here.
 #[test]
 fn fused_product_short_circuits_leave_no_stale_limbs() {
-    let seed = ArbiUint::from(u128::MAX);
-    let zero = ArbiUint::zero();
-    let one = ArbiUint::one();
-    let value = ArbiUint::from(1_234_567_u32);
+    let seed = MpUint::from(u128::MAX);
+    let zero = MpUint::zero();
+    let one = MpUint::one();
+    let value = MpUint::from(1_234_567_u32);
 
     for (label, left, right, expected) in [
         ("zero * value", &zero, &value, &zero),
@@ -152,11 +152,11 @@ proptest! {
             .first_mut()
             .expect("the property always generates at least two limbs") =
             Limb::MAX.wrapping_sub(adjustment);
-        let magnitude = ArbiInt::from(ArbiUint {
-            value: InternalArbiUint::from_limbs(limbs),
+        let magnitude = MpInt::from(MpUint {
+            value: InternalMpUint::from_limbs(limbs),
             precision: Precision::Unlimited,
         });
-        let zero = ArbiInt::zero();
+        let zero = MpInt::zero();
         let expected_negative = -&magnitude;
 
         let ordinary_difference = &zero - &magnitude;
@@ -164,19 +164,19 @@ proptest! {
         let ordinary_sum = &zero + &expected_negative;
         prop_assert_eq!(&ordinary_sum, &expected_negative);
 
-        let mut fused_difference = ArbiInt::zero();
+        let mut fused_difference = MpInt::zero();
         fused_difference.assign_sub(&zero, &magnitude);
         prop_assert_eq!(&fused_difference, &expected_negative);
 
-        let mut fused_sum = ArbiInt::zero();
+        let mut fused_sum = MpInt::zero();
         fused_sum.assign_add(&zero, &expected_negative);
         prop_assert_eq!(&fused_sum, &expected_negative);
 
-        let mut in_place_difference = ArbiInt::zero();
+        let mut in_place_difference = MpInt::zero();
         in_place_difference -= &magnitude;
         prop_assert_eq!(&in_place_difference, &expected_negative);
 
-        let mut in_place_sum = ArbiInt::zero();
+        let mut in_place_sum = MpInt::zero();
         in_place_sum += &expected_negative;
         prop_assert_eq!(&in_place_sum, &expected_negative);
     }
@@ -191,15 +191,15 @@ proptest! {
         addend_seed in strategies::bounded_uint_wrapped(64),
     ) {
         let width = nz(bits);
-        let left = ArbiUint {
+        let left = MpUint {
             value: left_seed.value.apply_wrapping(bits),
             precision: Precision::Bounded(width),
         };
-        let right = ArbiUint {
+        let right = MpUint {
             value: right_seed.value.apply_wrapping(bits),
             precision: Precision::Bounded(width),
         };
-        let addend = ArbiUint {
+        let addend = MpUint {
             value: addend_seed.value.apply_wrapping(bits),
             precision: Precision::Bounded(width),
         };
@@ -261,15 +261,15 @@ proptest! {
         addend_seed in strategies::bounded_int_wrapped(64),
     ) {
         let width = nz(bits);
-        let left = ArbiInt {
+        let left = MpInt {
             value: left_seed.value.apply_wrapping(bits),
             precision: Precision::Bounded(width),
         };
-        let right = ArbiInt {
+        let right = MpInt {
             value: right_seed.value.apply_wrapping(bits),
             precision: Precision::Bounded(width),
         };
-        let addend = ArbiInt {
+        let addend = MpInt {
             value: addend_seed.value.apply_wrapping(bits),
             precision: Precision::Bounded(width),
         };
@@ -361,11 +361,11 @@ proptest! {
         let selected_offset = i128::from(selection_seed).rem_euclid(selection_span);
         let factor_value = overflow_floor.wrapping_add(selected_offset);
         let width = nz(bits);
-        let factor = ArbiInt::with_precision_checked(factor_value, width)
+        let factor = MpInt::with_precision_checked(factor_value, width)
             .expect("selected positive factor fits");
-        let multiplier = ArbiInt::with_precision_checked(2_i8, width)
+        let multiplier = MpInt::with_precision_checked(2_i8, width)
             .expect("two fits every tested width");
-        let addend = ArbiInt::with_precision_checked(factor_value.wrapping_neg(), width)
+        let addend = MpInt::with_precision_checked(factor_value.wrapping_neg(), width)
             .expect("negative factor fits");
 
         let product_outcome = catch_unwind(AssertUnwindSafe(|| &factor * &multiplier));

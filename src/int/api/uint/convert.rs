@@ -2,11 +2,11 @@
 
 use alloc::{string::String, vec::Vec};
 
-use crate::error::ParseArbiUintError;
+use crate::error::ParseMpUintError;
 
-use super::{ArbiUint, InternalArbiUint, Precision};
+use super::{InternalMpUint, MpUint, Precision};
 
-impl ArbiUint {
+impl MpUint {
     // Convert
     /// Converts the value to a `u64`, or `None` if it does not fit.
     #[must_use]
@@ -68,18 +68,18 @@ impl ArbiUint {
         self.to_usize().and_then(|v| isize::try_from(v).ok())
     }
 
-    /// Parses an `ArbiUint` from a string slice in the given radix.
+    /// Parses an `MpUint` from a string slice in the given radix.
     ///
     /// # Errors
     ///
-    /// Returns `ParseArbiUintError` if the string contains invalid digits for
+    /// Returns `ParseMpUintError` if the string contains invalid digits for
     /// the given radix, the radix is out of range, or the value is too large.
     #[allow(
         clippy::same_name_method,
         reason = "Provided as an inherent method for convenience without needing to import num_traits"
     )]
-    pub fn from_str_radix(s: &str, radix: u32) -> Result<Self, ParseArbiUintError> {
-        let internal = InternalArbiUint::from_str_radix(s, radix)?;
+    pub fn from_str_radix(s: &str, radix: u32) -> Result<Self, ParseMpUintError> {
+        let internal = InternalMpUint::from_str_radix(s, radix)?;
         let required = internal.required_unsigned_bits_for_bounded_storage();
         let precision = Precision::for_ambient_construction(required);
         let result = Self {
@@ -90,7 +90,7 @@ impl ArbiUint {
         Ok(result)
     }
 
-    /// Formats the `ArbiUint` into a string in radix `2..=36`.
+    /// Formats the `MpUint` into a string in radix `2..=36`.
     ///
     /// # Panics
     ///
@@ -141,10 +141,10 @@ impl ArbiUint {
         self.value.to_be_bytes()
     }
 
-    /// Constructs an `ArbiUint` from a little-endian byte slice.
+    /// Constructs an `MpUint` from a little-endian byte slice.
     #[must_use]
     pub fn from_le_bytes(bytes: &[u8]) -> Self {
-        let internal = InternalArbiUint::from_le_bytes(bytes);
+        let internal = InternalMpUint::from_le_bytes(bytes);
         let required = internal.required_unsigned_bits_for_bounded_storage();
         let precision = Precision::for_ambient_construction(required);
         let result = Self {
@@ -155,10 +155,10 @@ impl ArbiUint {
         result
     }
 
-    /// Constructs an `ArbiUint` from a big-endian byte slice.
+    /// Constructs an `MpUint` from a big-endian byte slice.
     #[must_use]
     pub fn from_be_bytes(bytes: &[u8]) -> Self {
-        let internal = InternalArbiUint::from_be_bytes(bytes);
+        let internal = InternalMpUint::from_be_bytes(bytes);
         let required = internal.required_unsigned_bits_for_bounded_storage();
         let precision = Precision::for_ambient_construction(required);
         let result = Self {

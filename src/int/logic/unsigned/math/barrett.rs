@@ -6,7 +6,7 @@ use core::{
 };
 
 use super::{
-    DivScratch, Division, InternalArbiUint, LIMB_BITS, Limb, LowProduct, MulScratch, ScratchBuffer,
+    DivScratch, Division, InternalMpUint, LIMB_BITS, Limb, LowProduct, MulScratch, ScratchBuffer,
 };
 
 /// Barrett reduction domain for modular arithmetic.
@@ -17,9 +17,9 @@ use super::{
 #[derive(Clone, Debug)]
 pub struct BarrettDomain {
     /// Modulus defining the reduction domain.
-    pub modulus: InternalArbiUint,
+    pub modulus: InternalMpUint,
     /// Precomputed `floor(b^(2k) / modulus)` reciprocal.
-    pub mu: InternalArbiUint,
+    pub mu: InternalMpUint,
     /// Limb length of the modulus.
     pub k: usize,
     /// Zero-extended modulus used by bounded correction steps.
@@ -28,22 +28,22 @@ pub struct BarrettDomain {
 
 #[derive(Debug, Clone)]
 pub struct BarrettScratch {
-    q1: InternalArbiUint,
-    q2: InternalArbiUint,
-    q3: InternalArbiUint,
-    r2_buf: InternalArbiUint,
-    r1: InternalArbiUint,
+    q1: InternalMpUint,
+    q2: InternalMpUint,
+    q3: InternalMpUint,
+    r2_buf: InternalMpUint,
+    r1: InternalMpUint,
     q3_pad: ScratchBuffer,
 }
 
 impl Default for BarrettScratch {
     fn default() -> Self {
         Self {
-            q1: InternalArbiUint::zero(),
-            q2: InternalArbiUint::zero(),
-            q3: InternalArbiUint::zero(),
-            r2_buf: InternalArbiUint::zero(),
-            r1: InternalArbiUint::zero(),
+            q1: InternalMpUint::zero(),
+            q2: InternalMpUint::zero(),
+            q3: InternalMpUint::zero(),
+            r2_buf: InternalMpUint::zero(),
+            r1: InternalMpUint::zero(),
             q3_pad: ScratchBuffer::acquire(0),
         }
     }
@@ -56,16 +56,16 @@ impl BarrettDomain {
         unsafe_code,
         reason = "The modulus pad is resized to k + 1 immediately before taking its first k elements."
     )]
-    pub fn new(modulus: &InternalArbiUint) -> Self {
+    pub fn new(modulus: &InternalMpUint) -> Self {
         debug_assert!(!modulus.is_zero(), "Barrett modulus must be non-zero");
         let k = modulus.limbs().len();
 
         // Calculate b^{2k}
-        let mut b2k = InternalArbiUint::one();
+        let mut b2k = InternalMpUint::one();
         b2k.shl_assign(k.wrapping_mul(2).wrapping_mul(LIMB_BITS));
 
-        let mut mu = InternalArbiUint::zero();
-        let mut rem = InternalArbiUint::zero();
+        let mut mu = InternalMpUint::zero();
+        let mut rem = InternalMpUint::zero();
         let mut scratch = DivScratch::default();
         Division::div_rem_into(&b2k, modulus, &mut mu, &mut rem, &mut scratch);
         let mut modulus_pad = ScratchBuffer::acquire(k.wrapping_add(1));
@@ -89,8 +89,8 @@ impl BarrettDomain {
     )]
     pub fn reduce_into_with_barrett_scratch(
         &self,
-        t: &InternalArbiUint,
-        out: &mut InternalArbiUint,
+        t: &InternalMpUint,
+        out: &mut InternalMpUint,
         mul_scratch: &mut MulScratch,
         barrett_scratch: &mut BarrettScratch,
     ) {
@@ -147,9 +147,9 @@ impl BarrettDomain {
     )]
     pub fn div_rem_into_with_barrett_scratch(
         &self,
-        t: &InternalArbiUint,
-        q_out: &mut InternalArbiUint,
-        r_out: &mut InternalArbiUint,
+        t: &InternalMpUint,
+        q_out: &mut InternalMpUint,
+        r_out: &mut InternalMpUint,
         mul_scratch: &mut MulScratch,
         barrett_scratch: &mut BarrettScratch,
     ) {
@@ -202,10 +202,10 @@ impl BarrettDomain {
     /// Performs `(a * b) mod M` into `out` with reusable Barrett scratch.
     pub fn mul_into_with_barrett_scratch(
         &self,
-        a: &InternalArbiUint,
-        b: &InternalArbiUint,
-        out: &mut InternalArbiUint,
-        temp_prod: &mut InternalArbiUint,
+        a: &InternalMpUint,
+        b: &InternalMpUint,
+        out: &mut InternalMpUint,
+        temp_prod: &mut InternalMpUint,
         mul_scratch: &mut MulScratch,
         barrett_scratch: &mut BarrettScratch,
     ) {
@@ -220,9 +220,9 @@ impl BarrettDomain {
     /// Performs `(a * a) mod M` into `out` with reusable Barrett scratch.
     pub fn square_into_with_barrett_scratch(
         &self,
-        a: &InternalArbiUint,
-        out: &mut InternalArbiUint,
-        temp_prod: &mut InternalArbiUint,
+        a: &InternalMpUint,
+        out: &mut InternalMpUint,
+        temp_prod: &mut InternalMpUint,
         mul_scratch: &mut MulScratch,
         barrett_scratch: &mut BarrettScratch,
     ) {

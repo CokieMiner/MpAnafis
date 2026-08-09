@@ -1,13 +1,13 @@
 # Hardware autotuner
 
-`arbi-tune` generates one complete machine-local integer tuning profile. The
+`mp-tune` generates one complete machine-local integer tuning profile. The
 tuner and build script consume the schema and architecture defaults from
 `build_support/tuning.rs`.
 
 Run it on an idle pinned core:
 
 ```sh
-taskset -c 2 cargo run --release --bin arbi-tune \
+taskset -c 2 cargo run --release --bin mp-tune \
   --features _internal-tune
 ```
 
@@ -24,7 +24,7 @@ inspect the classes first and run separately if both profiles are useful:
 
 ```sh
 lscpu -e=CPU,CORE,MAXMHZ,MINMHZ
-taskset -c <cpu> cargo run --release --bin arbi-tune \
+taskset -c <cpu> cargo run --release --bin mp-tune \
   --features _internal-tune
 ```
 
@@ -131,7 +131,7 @@ The default tuner handles each constant according to the code path it controls:
 
 `build.rs` uses the first complete source available:
 
-1. the path in `ARBI_TUNING_PROFILE`;
+1. the path in `MP_TUNING_PROFILE`;
 2. the ignored local `src/int/tuned_thresholds.rs`;
 3. the conservative architecture profile in `build_support/tuning.rs`.
 
@@ -139,11 +139,11 @@ Partial profiles are rejected. This makes adding a new hardware-sensitive
 constant fail loudly until the schema, defaults, rendering, and tuner are
 updated together.
 
-`ARBI_TUNING_PROFILE` is primarily an internal candidate mechanism, but it is
+`MP_TUNING_PROFILE` is primarily an internal candidate mechanism, but it is
 also useful for reproducible A/B builds:
 
 ```sh
-ARBI_TUNING_PROFILE=/absolute/path/profile.rs cargo build --release
+MP_TUNING_PROFILE=/absolute/path/profile.rs cargo build --release
 ```
 
 Do not commit a generated local profile as a portable default. Promote a value
@@ -155,16 +155,16 @@ machines in that architecture family.
 The phases can be rerun separately:
 
 ```sh
-taskset -c 2 cargo run --release --bin arbi-tune \
+taskset -c 2 cargo run --release --bin mp-tune \
   --features _internal-tune -- --tiers-only
 
-taskset -c 2 cargo run --release --bin arbi-tune \
+taskset -c 2 cargo run --release --bin mp-tune \
   --features _internal-tune -- --compiled-only
 
-taskset -c 2 cargo run --release --bin arbi-tune \
+taskset -c 2 cargo run --release --bin mp-tune \
   --features _internal-tune -- --toom-only
 
-taskset -c 2 cargo run --release --bin arbi-tune \
+taskset -c 2 cargo run --release --bin mp-tune \
   --features _internal-tune -- --division-only
 ```
 

@@ -12,8 +12,8 @@ use core::{
 };
 
 use super::{
-    Addition, ArchKernels, DivScratch, Division, InternalArbiUint, Limb, LowProduct,
-    Multiplication, ScratchBuffer,
+    Addition, ArchKernels, DivScratch, Division, InternalMpUint, Limb, LowProduct, Multiplication,
+    ScratchBuffer,
 };
 
 impl Division {
@@ -31,10 +31,10 @@ impl Division {
 
     /// Main entry point for Newton-Raphson division with remainder.
     pub fn newton(
-        num_a: &InternalArbiUint,
-        den_b: &InternalArbiUint,
-        quotient_out: &mut InternalArbiUint,
-        rem_out: &mut InternalArbiUint,
+        num_a: &InternalMpUint,
+        den_b: &InternalMpUint,
+        quotient_out: &mut InternalMpUint,
+        rem_out: &mut InternalMpUint,
         scratch: &mut DivScratch,
     ) {
         let v_limbs = Self::significant_limbs(den_b.limbs());
@@ -43,7 +43,7 @@ impl Division {
 
         if u_limbs.len() < v_limbs.len()
             || (u_limbs.len() == v_limbs.len()
-                && InternalArbiUint::cmp_limbs(u_limbs, v_limbs) == Ordering::Less)
+                && InternalMpUint::cmp_limbs(u_limbs, v_limbs) == Ordering::Less)
         {
             quotient_out.clear();
             rem_out.clone_from(num_a);
@@ -171,7 +171,7 @@ impl Division {
 fn newton_div_2n1n_with_reciprocal(
     num: &[Limb],
     den: &[Limb],
-    v_recip: &InternalArbiUint,
+    v_recip: &InternalMpUint,
     quo: &mut [Limb],
     rem: &mut [Limb],
     scratch: &mut DivScratch,
@@ -279,7 +279,7 @@ fn newton_div_2n1n_with_reciprocal(
     // estimate is off by at most 1-2. If that invariant is violated, use
     // exact Algorithm D rather than allowing an unbounded subtraction loop.
     for _ in 0..2 {
-        if InternalArbiUint::cmp_limbs(&scratch.u_norm, den) == Ordering::Less {
+        if InternalMpUint::cmp_limbs(&scratch.u_norm, den) == Ordering::Less {
             break;
         }
         // Increment q0 in dummy_quot
@@ -308,7 +308,7 @@ fn newton_div_2n1n_with_reciprocal(
         }
     }
 
-    if InternalArbiUint::cmp_limbs(&scratch.u_norm, den) != Ordering::Less {
+    if InternalMpUint::cmp_limbs(&scratch.u_norm, den) != Ordering::Less {
         fallback_algorithm_d(num, den, quo, rem, scratch);
         return;
     }
@@ -347,10 +347,10 @@ fn fallback_algorithm_d(
     rem: &mut [Limb],
     scratch: &mut DivScratch,
 ) {
-    let numerator = InternalArbiUint::from_limbs(num.to_vec());
-    let denominator = InternalArbiUint::from_limbs(den.to_vec());
-    let mut quotient = InternalArbiUint::zero();
-    let mut remainder = InternalArbiUint::zero();
+    let numerator = InternalMpUint::from_limbs(num.to_vec());
+    let denominator = InternalMpUint::from_limbs(den.to_vec());
+    let mut quotient = InternalMpUint::zero();
+    let mut remainder = InternalMpUint::zero();
     Division::algorithm_d(
         &numerator,
         &denominator,
@@ -379,8 +379,8 @@ fn write_newton_outputs(
     shift: u32,
     total_quo: &[Limb],
     r_cur: &mut ScratchBuffer,
-    quotient_out: &mut InternalArbiUint,
-    rem_out: &mut InternalArbiUint,
+    quotient_out: &mut InternalMpUint,
+    rem_out: &mut InternalMpUint,
 ) {
     let quotient_len = active_len(total_quo);
     // SAFETY: `active_len` starts at `total_quo.len()` and only decreases.

@@ -1,6 +1,6 @@
 //! Math operations — add, sub, mul, div, pow, wrapping, shift, modular.
 
-use super::{DoubleLimb, INLINE_LIMBS, InternalArbiUint, LIMB_BITS, Limb, ScratchBuffer, UintRepr};
+use super::{DoubleLimb, INLINE_LIMBS, InternalMpUint, LIMB_BITS, Limb, ScratchBuffer, UintRepr};
 
 use add::Addition;
 use gcd::Gcd;

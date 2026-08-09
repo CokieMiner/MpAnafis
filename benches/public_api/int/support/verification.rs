@@ -5,7 +5,7 @@
     reason = "The untimed checks intentionally exercise the public arithmetic operators to verify division identities."
 )]
 
-use arbi_anafis::{ArbiInt, ArbiUint};
+use mp_anafis::{MpInt, MpUint};
 
 #[cfg(all(
     feature = "_internal-tune",
@@ -20,7 +20,7 @@ use super::FlintInt;
 /// This runs while constructing a benchmark cell, outside its timed closure.
 /// The checks cover the quotient/remainder identity, the quotient-only and
 /// remainder-only paths, and the unsigned rounding aliases.
-pub fn verify_arbi_uint_division_pairs(inputs: &[(ArbiUint, ArbiUint)]) {
+pub fn verify_mp_uint_division_pairs(inputs: &[(MpUint, MpUint)]) {
     for (left, right) in inputs {
         let (quotient, remainder) = left
             .div_rem(right)
@@ -68,7 +68,7 @@ pub fn verify_arbi_uint_division_pairs(inputs: &[(ArbiUint, ArbiUint)]) {
 /// The batch uses a negative dividend, so the checks exercise distinct
 /// truncating, Euclidean, floor, and ceiling semantics rather than only the
 /// common positive-input case.
-pub fn verify_arbi_int_division_pairs(inputs: &[(ArbiInt, ArbiInt)]) {
+pub fn verify_mp_int_division_pairs(inputs: &[(MpInt, MpInt)]) {
     for (left, right) in inputs {
         let (quotient, remainder) = left
             .div_rem(right)
@@ -133,7 +133,7 @@ pub fn verify_arbi_int_division_pairs(inputs: &[(ArbiInt, ArbiInt)]) {
     }
 }
 
-/// Verifies that a FLINT input or result is numerically equal to an `ArbiUint`.
+/// Verifies that a FLINT input or result is numerically equal to an `MpUint`.
 ///
 /// The conversion and comparison run while constructing a benchmark cell, so
 /// neither the reference conversion nor this assertion is timed.
@@ -143,10 +143,10 @@ pub fn verify_arbi_int_division_pairs(inputs: &[(ArbiInt, ArbiInt)]) {
     target_os = "linux",
     target_pointer_width = "64"
 ))]
-pub fn verify_flint_matches_arbi(expected: &ArbiUint, actual: &FlintInt) {
+pub fn verify_flint_matches_mp(expected: &MpUint, actual: &FlintInt) {
     let expected_flint = FlintInt::from_str_radix(&format!("{expected:x}"), 16);
     assert!(
         actual == &expected_flint,
-        "FLINT benchmark value differs from the ArbiUint reference"
+        "FLINT benchmark value differs from the MpUint reference"
     );
 }

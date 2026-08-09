@@ -12,4 +12,4 @@ mod dispatch;
 mod newton;
 mod quotient;
 
-use super::{BURNIKEL_ZIEGLER_THRESHOLD, DivScratch, Division, InternalArbiUint, LIMB_BITS, Limb};
+use super::{BURNIKEL_ZIEGLER_THRESHOLD, DivScratch, Division, InternalMpUint, LIMB_BITS, Limb};

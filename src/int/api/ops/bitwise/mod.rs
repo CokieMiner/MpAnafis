@@ -1,6 +1,6 @@
 //! Bitwise operator trait implementation routing.
 
-use super::{ArbiInt, ArbiUint};
+use super::{MpInt, MpUint};
 
 mod signed;
 mod unsigned;

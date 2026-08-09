@@ -1,7 +1,7 @@
 //! Educational textbook-RSA arithmetic demonstration.
 //!
 //! Demonstrates primality testing, large multiplication, modular inversion,
-//! modular exponentiation, and signed extended GCD using `arbi-anafis`.
+//! modular exponentiation, and signed extended GCD using `mp-anafis`.
 //!
 //! **This example is not suitable for production cryptography.** It uses
 //! deterministic primes, textbook RSA without padding, and APIs that do not
@@ -21,16 +21,16 @@
 use core::time::Duration;
 use std::time::Instant;
 
-use arbi_anafis::{ArbiInt, ArbiUint};
+use mp_anafis::{MpInt, MpUint};
 
 fn main() {
     // Generate two 512-bit primes once and measure their generation time.
     let t_prime = Instant::now();
-    let base = ArbiUint::from(1_u64).wrapping_shl(511);
-    let p = (&base + ArbiUint::from(1_u64))
+    let base = MpUint::from(1_u64).wrapping_shl(511);
+    let p = (&base + MpUint::from(1_u64))
         .next_prime()
         .expect("prime not found");
-    let q_seed = &base + ArbiUint::from(1_000_003_u64);
+    let q_seed = &base + MpUint::from(1_000_003_u64);
     let q = q_seed.next_prime().expect("prime not found");
     let prime_gen_time = t_prime.elapsed();
 
@@ -53,14 +53,14 @@ fn format_duration(d: Duration) -> String {
     }
 }
 
-fn textbook_rsa_demo(p: &ArbiUint, q: &ArbiUint, prime_gen_time: Duration) {
+fn textbook_rsa_demo(p: &MpUint, q: &MpUint, prime_gen_time: Duration) {
     println!("=== Textbook RSA Demo ===\n");
 
     let t0 = Instant::now();
     let n = p * q;
-    let one = ArbiUint::from(1_u64);
+    let one = MpUint::from(1_u64);
     let phi = (p - &one) * (q - &one);
-    let e = ArbiUint::from(65537_u64);
+    let e = MpUint::from(65537_u64);
     let d = e.invert(&phi).expect("e must be coprime to phi(n)");
     let derive_time = t0.elapsed();
 
@@ -81,7 +81,7 @@ fn textbook_rsa_demo(p: &ArbiUint, q: &ArbiUint, prime_gen_time: Duration) {
         format_duration(prime_gen_time + derive_time)
     );
 
-    let msg = ArbiUint::from(42_u64);
+    let msg = MpUint::from(42_u64);
 
     let t1 = Instant::now();
     let c = msg.pow_mod(&e, &n).expect("encryption failed");
@@ -97,12 +97,12 @@ fn textbook_rsa_demo(p: &ArbiUint, q: &ArbiUint, prime_gen_time: Duration) {
     println!("result:  [OK] round-trip verified\n");
 }
 
-fn number_theory_demo(p: &ArbiUint, q: &ArbiUint) {
+fn number_theory_demo(p: &MpUint, q: &MpUint) {
     println!("=== Arithmetic & Number Theory ===\n");
 
     // -- Extended GCD with the actual RSA primes (coprime by construction) --
-    let pi = ArbiInt::from(p.clone());
-    let qi = ArbiInt::from(q.clone());
+    let pi = MpInt::from(p.clone());
+    let qi = MpInt::from(q.clone());
     if let Some((g, x, y)) = pi.extended_gcd(&qi) {
         let lhs = &pi * &x + &qi * &y;
         assert_eq!(lhs, g, "Bezout identity: p*x + q*y = gcd(p,q)");
@@ -111,7 +111,7 @@ fn number_theory_demo(p: &ArbiUint, q: &ArbiUint) {
 
     // -- Factorials --
     for n in [50_u32, 100, 200] {
-        let fact = ArbiUint::factorial(n, arbi_anafis::Precision::Unlimited);
+        let fact = MpUint::factorial(n, mp_anafis::Precision::Unlimited);
         let bits = fact.significant_bits();
         let dec = fact.to_string_radix(10);
         println!(
@@ -123,29 +123,26 @@ fn number_theory_demo(p: &ArbiUint, q: &ArbiUint) {
     }
 
     // -- Modular exponentiation with large exponent --
-    let result = ArbiUint::from(2_u64)
+    let result = MpUint::from(2_u64)
         .pow_mod(
-            &ArbiUint::from(1_u64).wrapping_shl(100),
-            &ArbiUint::from(1_000_000_007_u64),
+            &MpUint::from(1_u64).wrapping_shl(100),
+            &MpUint::from(1_000_000_007_u64),
         )
         .expect("modular exponentiation failed");
     println!("\npow_mod:            [OK] 2^(2^100) mod 1e9+7 = {result}");
 
     // -- Primality testing --
     for &prime in &[2_u64, 3, 5, 7, 11, 97, 7919, 104_729, 982_451_653] {
-        assert!(ArbiUint::from(prime).is_prime(), "{prime} should be prime");
+        assert!(MpUint::from(prime).is_prime(), "{prime} should be prime");
     }
     for &comp in &[4_u64, 6, 8, 9, 10, 100, 1_001, 104_730] {
-        assert!(
-            !ArbiUint::from(comp).is_prime(),
-            "{comp} should be composite"
-        );
+        assert!(!MpUint::from(comp).is_prime(), "{comp} should be composite");
     }
     println!("primality:          [OK] all 9 primes, 8 composites");
 
     // -- GCD / LCM --
-    let a = ArbiUint::from(123_456_789_u64);
-    let b = ArbiUint::from(987_654_321_u64);
+    let a = MpUint::from(123_456_789_u64);
+    let b = MpUint::from(987_654_321_u64);
     let g = a.gcd(&b);
     let l = a.lcm(&b).expect("lcm failed");
     assert_eq!(

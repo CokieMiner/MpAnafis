@@ -9,7 +9,7 @@
 //! - [`divide`]: applies that reciprocal, block by block, and corrects the
 //!   estimate into an exact quotient and remainder.
 //!
-//! Both contribute their entry points to [`Division`](super::Division);
+//! Both contribute their entry points to [`Division`];
 //! everything else here is private to the file that defines it.
 
 #![allow(
@@ -23,6 +23,6 @@ mod reciprocal;
 // The Newton submodules reach the rest of the division tree only through the
 // bindings below, which keeps every relative path here one level deep.
 use super::{
-    Addition, ArchKernels, DivScratch, Division, InternalArbiUint, Limb, LowProduct,
-    Multiplication, NEWTON_RAPHSON_BASECASE_LIMBS, ScratchBuffer,
+    Addition, ArchKernels, DivScratch, Division, InternalMpUint, Limb, LowProduct, Multiplication,
+    NEWTON_RAPHSON_BASECASE_LIMBS, ScratchBuffer,
 };

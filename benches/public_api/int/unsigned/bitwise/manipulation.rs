@@ -18,7 +18,7 @@ use rug::{Integer, integer::Order};
 use crate::int::support::rug_uint;
 use crate::int::{
     ladders::NARROW,
-    support::{SAMPLE_SIZE_FAST, arbi_uint},
+    support::{SAMPLE_SIZE_FAST, mp_uint},
 };
 
 /// Rotation distance, chosen to straddle a limb boundary.
@@ -33,8 +33,8 @@ mod reverse_bits {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).reverse_bits(bits));
         });
@@ -49,8 +49,8 @@ mod rotate_left {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).rotate_left(ROTATION, bits));
         });
@@ -76,8 +76,8 @@ mod rotate_right {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).rotate_right(ROTATION, bits));
         });
@@ -106,8 +106,8 @@ mod swap_bytes {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).swap_bytes());
         });

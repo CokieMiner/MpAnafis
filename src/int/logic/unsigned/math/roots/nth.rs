@@ -7,11 +7,11 @@
 
 use core::{cmp::Ordering, mem::swap};
 
-use super::{Division, InternalArbiUint, LIMB_BITS, Limb, NthRootScratch};
+use super::{Division, InternalMpUint, LIMB_BITS, Limb, NthRootScratch};
 
 impl NthRootScratch {
     /// Computes a single-limb root with native integer arithmetic.
-    pub fn nth_root_single_limb(a: &InternalArbiUint, n: u32) -> InternalArbiUint {
+    pub fn nth_root_single_limb(a: &InternalMpUint, n: u32) -> InternalMpUint {
         let limbs = a.limbs();
         // SAFETY: caller guarantees limbs.len() == 1
         let val = unsafe { *limbs.get_unchecked(0) };
@@ -53,7 +53,7 @@ impl NthRootScratch {
             if next >= estimate {
                 let estimate_limb =
                     Limb::try_from(estimate).expect("the root of a limb fits in one limb");
-                return InternalArbiUint::from_limb(estimate_limb);
+                return InternalMpUint::from_limb(estimate_limb);
             }
             estimate = next;
         }
@@ -62,9 +62,9 @@ impl NthRootScratch {
     /// Computes a general multi-limb `n`th root.
     ///
     /// Callers must pass `n >= 2` and a value that is neither zero nor one.
-    pub fn nth_root_multi_limb(&mut self, a: &InternalArbiUint, n: u32) -> InternalArbiUint {
-        let one = InternalArbiUint::one();
-        let n_uint = InternalArbiUint::from_u64(u64::from(n));
+    pub fn nth_root_multi_limb(&mut self, a: &InternalMpUint, n: u32) -> InternalMpUint {
+        let one = InternalMpUint::one();
+        let n_uint = InternalMpUint::from_u64(u64::from(n));
         let n_minus_1 = n_uint.sub(&one);
 
         let estimate = seed_estimate(a, n, self);
@@ -124,7 +124,7 @@ impl NthRootScratch {
 /// half of the operand instead and scaling the answer back gives a seed already
 /// correct to nearly the full width, at the price of one recursion whose work
 /// halves at every level.
-fn seed_estimate(a: &InternalArbiUint, n: u32, scratch: &mut NthRootScratch) -> InternalArbiUint {
+fn seed_estimate(a: &InternalMpUint, n: u32, scratch: &mut NthRootScratch) -> InternalMpUint {
     /// Below this the recursion costs more than the iterations it saves.
     const HALVING_FLOOR_BITS: usize = 4 * LIMB_BITS;
 
@@ -137,7 +137,7 @@ fn seed_estimate(a: &InternalArbiUint, n: u32, scratch: &mut NthRootScratch) -> 
     let half_bits = bits >> 1;
     let shift = half_bits.saturating_sub(half_bits.checked_rem(n_usize).unwrap_or(half_bits));
     if bits < HALVING_FLOOR_BITS || shift == 0 {
-        let mut estimate = InternalArbiUint::one();
+        let mut estimate = InternalMpUint::one();
         estimate.shl_assign(initial_shift(bits, n));
         return estimate;
     }
@@ -145,7 +145,7 @@ fn seed_estimate(a: &InternalArbiUint, n: u32, scratch: &mut NthRootScratch) -> 
     let mut head = a.clone();
     head.shr_assign(shift);
     if head.is_zero() || head.is_one() {
-        let mut estimate = InternalArbiUint::one();
+        let mut estimate = InternalMpUint::one();
         estimate.shl_assign(initial_shift(bits, n));
         return estimate;
     }
@@ -159,7 +159,7 @@ fn seed_estimate(a: &InternalArbiUint, n: u32, scratch: &mut NthRootScratch) -> 
     // With `t` the root of the head, `a < (t + 1)^n * 2^shift`, so
     // `(t + 1) << (shift / n)` strictly exceeds the true root. Newton descends,
     // so it needs that overestimate to terminate on the floor root.
-    seed.add_assign(&InternalArbiUint::one());
+    seed.add_assign(&InternalMpUint::one());
     seed.shl_assign(shift.checked_div(n_usize).unwrap_or(0));
     seed
 }
@@ -167,12 +167,12 @@ fn seed_estimate(a: &InternalArbiUint, n: u32, scratch: &mut NthRootScratch) -> 
 /// Raises `base` to `exponent` into `scratch.x_pow_n_minus_1`, bailing out as
 /// soon as the running value exceeds `limit`.
 fn bounded_pow_into(
-    base: &InternalArbiUint,
+    base: &InternalMpUint,
     mut exponent: u32,
-    limit: &InternalArbiUint,
+    limit: &InternalMpUint,
     scratch: &mut NthRootScratch,
 ) -> bool {
-    scratch.x_pow_n_minus_1.clone_from(&InternalArbiUint::one());
+    scratch.x_pow_n_minus_1.clone_from(&InternalMpUint::one());
     scratch.base_pow.clone_from(base);
     while exponent > 0 {
         if exponent & 1 == 1 {

@@ -2,7 +2,7 @@
 
 use core::fmt::{Debug, Formatter, Result as FmtResult};
 
-use super::{DivScratch, Division, InternalArbiUint, Limb};
+use super::{DivScratch, Division, InternalMpUint, Limb};
 
 /// Algorithms for multi-precision division.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -20,10 +20,10 @@ pub enum Algorithm {
 
 /// Pre-allocated state for comparing division algorithms.
 pub struct Tuner {
-    num: InternalArbiUint,
-    den: InternalArbiUint,
-    q: InternalArbiUint,
-    r: InternalArbiUint,
+    num: InternalMpUint,
+    den: InternalMpUint,
+    q: InternalMpUint,
+    r: InternalMpUint,
     scratch: DivScratch,
 }
 
@@ -45,8 +45,8 @@ impl Tuner {
             den.iter().any(|&limb| limb != 0),
             "division tuner denominator is zero"
         );
-        let numerator = InternalArbiUint::from_limbs(num.to_vec());
-        let denominator = InternalArbiUint::from_limbs(den.to_vec());
+        let numerator = InternalMpUint::from_limbs(num.to_vec());
+        let denominator = InternalMpUint::from_limbs(den.to_vec());
         assert!(
             numerator >= denominator,
             "division tuner numerator is smaller than its denominator"
@@ -54,8 +54,8 @@ impl Tuner {
         Self {
             num: numerator,
             den: denominator,
-            q: InternalArbiUint::zero(),
-            r: InternalArbiUint::zero(),
+            q: InternalMpUint::zero(),
+            r: InternalMpUint::zero(),
             scratch: DivScratch::default(),
         }
     }

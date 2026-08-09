@@ -25,7 +25,8 @@
 
 use core::hint::black_box;
 
-use arbi_anafis::tune_api::tier::{
+use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
+use mp_anafis::tune_api::tier::{
     Limb,
     algorithms::{
         bench_karatsuba_sqr_scratch_len, bench_karatsuba_sqr_with_scratch,
@@ -35,7 +36,6 @@ use arbi_anafis::tune_api::tier::{
     },
     state::SquareBenchScratch,
 };
-use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
 
 use crate::shared::operand;
 

@@ -1,8 +1,8 @@
 //! Native primitive conversions for the unsigned integer engine.
 
-use super::{INLINE_LIMBS, InternalArbiUint, LIMB_BITS, Limb, UintRepr};
+use super::{INLINE_LIMBS, InternalMpUint, LIMB_BITS, Limb, UintRepr};
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Constructs a value from one native limb.
     #[must_use]
     pub const fn from_limb(value: Limb) -> Self {
@@ -17,7 +17,7 @@ impl InternalArbiUint {
         }
     }
 
-    /// Creates an `InternalArbiUint` from a `u64`.
+    /// Creates an `InternalMpUint` from a `u64`.
     ///
     /// Returns `zero()` when `value` is zero, otherwise an `Inline` representation.
     /// Constructs limbs directly from the value without allocating a `Vec`.
@@ -64,7 +64,7 @@ impl InternalArbiUint {
         }
     }
 
-    /// Creates an `InternalArbiUint` from a `u128`.
+    /// Creates an `InternalMpUint` from a `u128`.
     ///
     /// Returns `zero()` when `value` is zero.
     /// Constructs limbs directly from the value without allocating a `Vec`.

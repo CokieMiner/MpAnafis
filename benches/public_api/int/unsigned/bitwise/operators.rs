@@ -20,15 +20,15 @@ use rug::Integer;
 use crate::int::support::{rug_uint, rug_uint_pairs};
 use crate::int::{
     ladders::NARROW,
-    support::{SAMPLE_SIZE_FAST, arbi_uint, arbi_uint_pairs, bounded_arbi_uint},
+    support::{SAMPLE_SIZE_FAST, bounded_mp_uint, mp_uint, mp_uint_pairs},
 };
 
 mod bitand {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(BitAnd::bitand(black_box(left), black_box(right)));
@@ -55,8 +55,8 @@ mod bitor {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(BitOr::bitor(black_box(left), black_box(right)));
@@ -83,8 +83,8 @@ mod bitxor {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(BitXor::bitxor(black_box(left), black_box(right)));
@@ -118,8 +118,8 @@ mod not_with_width {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).not_with_width(bits));
         });
@@ -147,8 +147,8 @@ mod try_not {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = bounded_arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = bounded_mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).try_not());
         });

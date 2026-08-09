@@ -18,7 +18,7 @@ fn normalized_limb_vec(max_len: usize) -> impl Strategy<Value = Vec<Limb>> {
 proptest! {
     #[test]
     fn prop_from_limbs_trims_trailing_zero_limbs(input_limbs in limb_vec(12)) {
-        let value = InternalArbiUint::from_limbs(input_limbs.clone());
+        let value = InternalMpUint::from_limbs(input_limbs.clone());
         let mut expected_limbs = input_limbs;
         while expected_limbs.last() == Some(&0) {
             expected_limbs.truncate(expected_limbs.len().wrapping_sub(1));
@@ -42,23 +42,23 @@ proptest! {
         input_limbs in normalized_limb_vec(12).prop_filter("non-empty", |limbs| !limbs.is_empty())
     ) {
         // SAFETY: the generator removes empty inputs and high zero limbs.
-        let value = unsafe { InternalArbiUint::from_limbs_normalized(input_limbs.clone()) };
+        let value = unsafe { InternalMpUint::from_limbs_normalized(input_limbs.clone()) };
         prop_assert_eq!(value.limbs(), input_limbs.as_slice());
         prop_assert_eq!(value.limbs().last().copied(), input_limbs.last().copied());
     }
 
     #[test]
     fn prop_clone_from_slice_matches_from_limbs(input_limbs in limb_vec(12)) {
-        let mut cloned_value = InternalArbiUint::one();
+        let mut cloned_value = InternalMpUint::one();
         cloned_value.clone_from_slice(&input_limbs);
-        let expected_value = InternalArbiUint::from_limbs(input_limbs);
+        let expected_value = InternalMpUint::from_limbs(input_limbs);
         prop_assert_eq!(cloned_value.limbs(), expected_value.limbs());
         prop_assert_eq!(cloned_value.limbs().len(), expected_value.limbs().len());
     }
 
     #[test]
     fn prop_increment_then_decrement_roundtrip(input_limbs in normalized_limb_vec(8)) {
-        let mut value = InternalArbiUint::from_limbs(input_limbs);
+        let mut value = InternalMpUint::from_limbs(input_limbs);
         let original_value = value.clone();
         value.increment();
         value.decrement();
@@ -71,7 +71,7 @@ proptest! {
         input_limbs in normalized_limb_vec(8),
         extra_len in 0_usize..=6,
     ) {
-        let mut value = InternalArbiUint::from_limbs(input_limbs);
+        let mut value = InternalMpUint::from_limbs(input_limbs);
         let target_len = value.limbs().len().wrapping_add(extra_len);
         let original_prefix = value.limbs().to_vec();
 

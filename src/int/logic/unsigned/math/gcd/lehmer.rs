@@ -4,7 +4,7 @@ use core::cmp::max;
 
 use alloc::vec::Vec;
 
-use super::{ArchKernels, DoubleLimb, Gcd, InternalArbiUint, LIMB_BITS, Limb};
+use super::{ArchKernels, DoubleLimb, Gcd, InternalMpUint, LIMB_BITS, Limb};
 
 impl Gcd {
     pub fn extract_top_limb(u_limbs: &[Limb], v_limbs: &[Limb]) -> (Limb, Limb) {
@@ -464,8 +464,8 @@ fn lehmer_update_slice(
 )]
 impl Gcd {
     pub fn lehmer_update(
-        u: &mut InternalArbiUint,
-        v: &mut InternalArbiUint,
+        u: &mut InternalMpUint,
+        v: &mut InternalMpUint,
         u_backup: &mut Vec<Limb>,
         v_backup: &mut Vec<Limb>,
         u0: Limb,

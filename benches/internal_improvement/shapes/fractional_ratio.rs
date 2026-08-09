@@ -17,7 +17,7 @@
 
 use core::hint::black_box;
 
-use arbi_anafis::tune_api::tier::{
+use mp_anafis::tune_api::tier::{
     Limb,
     algorithms::{
         bench_toom_cook_32_mul_with_scratch, bench_toom_cook_32_scratch_len,

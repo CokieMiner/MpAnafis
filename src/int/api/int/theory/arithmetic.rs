@@ -1,8 +1,8 @@
 //! Signed arithmetic-function APIs.
 
-use super::{ArbiInt, InternalArbiInt, InternalArbiUint, Precision};
+use super::{InternalMpInt, InternalMpUint, MpInt, Precision};
 
-impl ArbiInt {
+impl MpInt {
     /// Returns the Euler totient of this positive integer.
     ///
     /// Returns `None` when the value is zero or negative.
@@ -13,7 +13,7 @@ impl ArbiInt {
         }
         self.value.abs.euler_phi().map(|v| {
             let result = Self {
-                value: InternalArbiInt {
+                value: InternalMpInt {
                     abs: v,
                     is_positive: true,
                 },
@@ -44,8 +44,8 @@ impl ArbiInt {
     #[track_caller]
     pub fn factorial(n: u32, precision: Precision) -> Self {
         let result = Self {
-            value: InternalArbiInt {
-                abs: InternalArbiUint::factorial(n),
+            value: InternalMpInt {
+                abs: InternalMpUint::factorial(n),
                 is_positive: true,
             },
             precision,

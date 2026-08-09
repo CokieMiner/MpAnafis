@@ -1,7 +1,7 @@
-# ArbiInt / ArbiUint — Exact API Inventory & Gap Analysis
+# MpInt / MpUint — Exact API Inventory & Gap Analysis
 
 This document inventories the public API implemented in `src/int/api/` for
-`ArbiUint` and `ArbiInt`. The normative target
+`MpUint` and `MpInt`. The normative target
 specification lives in [spec.md](spec.md), and future gaps
 are listed separately below.
 
@@ -9,11 +9,11 @@ are listed separately below.
 
 ## 1. Executive Summary & Resolutions
 
-This inventory reflects the comprehensive implementation of core number theory, bitwise parity, and division APIs across both `ArbiUint` and `ArbiInt`. Previously noted architectural parity gaps have been resolved:
-1. **Number Theory & Modular Math Parity:** `ArbiInt` now wraps and delegates all major number theory operations (`gcd`, `lcm`, `is_prime`, `pow_mod`, `invert`, `checked_isqrt`, `factorial`, `square`, `montgomery_mul`, `barrett_reduce`, etc.) while correctly managing sign and domain invariants.
-2. **Bitwise & Byte Serialization Parity:** `ArbiInt` now implements the complete suite of bitwise inspection and manipulation methods (`leading_zeros`, `trailing_zeros`, `count_ones`, `trailing_ones`, `get_bit`, `set_bit`, `clear_bit`, `toggle_bit`, `test_bit`, `set_bit_to`, `rotate_left`, `rotate_right`, `swap_bytes`, `reverse_bits`), along with endian byte serialization (`to_le_bytes`, `to_be_bytes`, `from_le_bytes`, `from_be_bytes`).
+This inventory reflects the comprehensive implementation of core number theory, bitwise parity, and division APIs across both `MpUint` and `MpInt`. Previously noted architectural parity gaps have been resolved:
+1. **Number Theory & Modular Math Parity:** `MpInt` now wraps and delegates all major number theory operations (`gcd`, `lcm`, `is_prime`, `pow_mod`, `invert`, `checked_isqrt`, `factorial`, `square`, `montgomery_mul`, `barrett_reduce`, etc.) while correctly managing sign and domain invariants.
+2. **Bitwise & Byte Serialization Parity:** `MpInt` now implements the complete suite of bitwise inspection and manipulation methods (`leading_zeros`, `trailing_zeros`, `count_ones`, `trailing_ones`, `get_bit`, `set_bit`, `clear_bit`, `toggle_bit`, `test_bit`, `set_bit_to`, `rotate_left`, `rotate_right`, `swap_bytes`, `reverse_bits`), along with endian byte serialization (`to_le_bytes`, `to_be_bytes`, `from_le_bytes`, `from_be_bytes`).
 3. **Euclidean & Rounding Division:** Both types now natively implement Euclidean division (`div_euclid`, `rem_euclid`), truncation/floor/ceiling rounding division (`div_trunc`, `rem_trunc`, `div_floor`, `mod_floor`, `div_ceil`), `div_rem`, `mul_add`, `midpoint`, divisibility predicates (`is_divisor_of`, `is_divisible_by`), `try_pow`, and `significant_bits`.
-4. **`ArbiInt` Arithmetic Parity:** `ArbiInt` now has full arithmetic family parity with `ArbiUint`: `wrapping_div`, `wrapping_rem`, `saturating_div`, `saturating_rem`, `assign_add`, and `checked_next_power_of_two` are all implemented.
+4. **`MpInt` Arithmetic Parity:** `MpInt` now has full arithmetic family parity with `MpUint`: `wrapping_div`, `wrapping_rem`, `saturating_div`, `saturating_rem`, `assign_add`, and `checked_next_power_of_two` are all implemented.
 
 ### Spec Alignment Pass
 
@@ -34,9 +34,9 @@ spec's §10 algorithm ladder calls for.
 
 ---
 
-## 2. Exact Implemented API — `ArbiUint` (Unsigned Native-Width Limbs)
+## 2. Exact Implemented API — `MpUint` (Unsigned Native-Width Limbs)
 
-The following public inherent methods are currently implemented for `ArbiUint`:
+The following public inherent methods are currently implemented for `MpUint`:
 
 ### Precision Metadata
 - `pub const fn BoundedPrecision::new(bits: usize) -> Option<BoundedPrecision>`
@@ -54,9 +54,9 @@ Bounded widths use the canonical range `1..usize::MAX`; zero and the top
 - `pub fn zero() -> Self`
 - `pub const fn zero_with_precision(bits: BoundedPrecision) -> Self`
 - `pub fn one() -> Self`
-- `pub fn new<T>(value: T) -> Self` *(where `T: Into<ArbiUint>`)*
+- `pub fn new<T>(value: T) -> Self` *(where `T: Into<MpUint>`)*
 - `pub fn with_capacity(capacity: usize) -> Self`
-- `pub fn with_precision_checked<T>(value: T, bits: BoundedPrecision) -> Result<Self, ArbiError>`
+- `pub fn with_precision_checked<T>(value: T, bits: BoundedPrecision) -> Result<Self, MpError>`
 - `pub fn with_precision_wrapping<T>(value: T, bits: BoundedPrecision) -> Self`
 - `pub fn with_precision_saturating<T>(value: T, bits: BoundedPrecision) -> Self`
 - `pub fn max_for_precision(bits: usize) -> Self`
@@ -92,11 +92,11 @@ Bounded widths use the canonical range `1..usize::MAX`; zero and the top
 - `pub fn saturating_mul(&self, rhs: &Self) -> Self`
 - `pub fn saturating_div(&self, rhs: &Self) -> Self`
 - `pub fn saturating_rem(&self, rhs: &Self) -> Self`
-- `pub fn try_add(&self, rhs: &Self) -> Result<Self, ArbiError>`
-- `pub fn try_sub(&self, rhs: &Self) -> Result<Self, ArbiError>`
-- `pub fn try_mul(&self, rhs: &Self) -> Result<Self, ArbiError>`
-- `pub fn try_div(&self, rhs: &Self) -> Result<Self, ArbiError>`
-- `pub fn try_rem(&self, rhs: &Self) -> Result<Self, ArbiError>`
+- `pub fn try_add(&self, rhs: &Self) -> Result<Self, MpError>`
+- `pub fn try_sub(&self, rhs: &Self) -> Result<Self, MpError>`
+- `pub fn try_mul(&self, rhs: &Self) -> Result<Self, MpError>`
+- `pub fn try_div(&self, rhs: &Self) -> Result<Self, MpError>`
+- `pub fn try_rem(&self, rhs: &Self) -> Result<Self, MpError>`
 - `pub fn strict_add(&self, rhs: &Self) -> Self`
 - `pub fn strict_sub(&self, rhs: &Self) -> Self`
 - `pub fn strict_mul(&self, rhs: &Self) -> Self`
@@ -128,7 +128,7 @@ Bounded widths use the canonical range `1..usize::MAX`; zero and the top
 - `pub fn checked_div_ceil(&self, rhs: &Self) -> Option<Self>`
 - `pub fn pow(&self, exp: u32) -> Self`
 - `pub fn checked_pow(&self, exp: u32) -> Option<Self>`
-- `pub fn try_pow(&self, exp: u32) -> Result<Self, ArbiError>`
+- `pub fn try_pow(&self, exp: u32) -> Result<Self, MpError>`
 - `pub fn square(&self) -> Self`
 
 ### Bitwise Operations & Shifts
@@ -136,13 +136,13 @@ Bounded widths use the canonical range `1..usize::MAX`; zero and the top
 - `pub fn wrapping_shl(&self, shift: usize) -> Self`
 - `pub fn overflowing_shl(&self, shift: usize) -> (Self, bool)`
 - `pub fn saturating_shl(&self, shift: usize) -> Self`
-- `pub fn try_shl(&self, shift: usize) -> Result<Self, ArbiError>`
+- `pub fn try_shl(&self, shift: usize) -> Result<Self, MpError>`
 - `pub fn rotate_left(&self, n: u32, width: usize) -> Option<Self>`
 - `pub fn rotate_right(&self, n: u32, width: usize) -> Option<Self>`
 - `pub fn reverse_bits(&self, width: usize) -> Option<Self>`
 - `pub fn swap_bytes(&self) -> Self`
 - `pub fn not_with_width(&self, width: usize) -> Option<Self>`
-- `pub fn try_not(&self) -> Result<Self, ArbiError>`
+- `pub fn try_not(&self) -> Result<Self, MpError>`
 - `pub fn leading_zeros(&self) -> Option<usize>`
 - `pub fn leading_ones(&self) -> Option<usize>`
 - `pub fn trailing_zeros(&self) -> usize`
@@ -204,7 +204,7 @@ Bounded widths use the canonical range `1..usize::MAX`; zero and the top
 - `pub fn to_i64(&self) -> Option<i64>`
 - `pub fn to_i128(&self) -> Option<i128>`
 - `pub fn to_isize(&self) -> Option<isize>`
-- `pub fn from_str_radix(s: &str, radix: u32) -> Result<Self, ParseArbiUintError>`
+- `pub fn from_str_radix(s: &str, radix: u32) -> Result<Self, ParseMpUintError>`
 - `pub fn to_string_radix(&self, radix: u32) -> String`
 - `pub fn to_f64(&self) -> Option<f64>` / `to_f32(&self) -> Option<f32>`
 - `pub fn to_le_bytes(&self) -> Vec<u8>` / `from_le_bytes(bytes: &[u8]) -> Self`
@@ -215,18 +215,18 @@ Primitive construction uses the standard `From`/`TryFrom` traits. The optional
 
 ---
 
-## 3. Exact Implemented API — `ArbiInt` (Signed Magnitude / Two's Complement Boundary)
+## 3. Exact Implemented API — `MpInt` (Signed Magnitude / Two's Complement Boundary)
 
-The following public inherent methods are currently implemented for `ArbiInt`:
+The following public inherent methods are currently implemented for `MpInt`:
 
 ### Constructors & Capacity
 - `pub fn zero() -> Self`
 - `pub const fn zero_with_precision(bits: BoundedPrecision) -> Self`
 - `pub fn one() -> Self`
 - `pub fn minus_one() -> Self`
-- `pub fn new<T>(value: T) -> Self` *(where `T: Into<ArbiInt>`)*
+- `pub fn new<T>(value: T) -> Self` *(where `T: Into<MpInt>`)*
 - `pub fn with_capacity(capacity: usize) -> Self`
-- `pub fn with_precision_checked<T>(value: T, bits: BoundedPrecision) -> Result<Self, ArbiError>`
+- `pub fn with_precision_checked<T>(value: T, bits: BoundedPrecision) -> Result<Self, MpError>`
 - `pub fn with_precision_wrapping<T>(value: T, bits: BoundedPrecision) -> Self`
 - `pub fn with_precision_saturating<T>(value: T, bits: BoundedPrecision) -> Self`
 - `pub fn max_for_precision(bits: usize) -> Self`
@@ -263,15 +263,15 @@ The following public inherent methods are currently implemented for `ArbiInt`:
 - `pub fn overflowing_rem(&self, rhs: &Self) -> (Self, bool)`
 - `pub fn saturating_add(&self, rhs: &Self) -> Self`
 - `pub fn saturating_sub(&self, rhs: &Self) -> Self`
-- `pub fn abs_diff(&self, other: &Self) -> ArbiUint`
+- `pub fn abs_diff(&self, other: &Self) -> MpUint`
 - `pub fn saturating_mul(&self, rhs: &Self) -> Self`
 - `pub fn saturating_div(&self, rhs: &Self) -> Self`
 - `pub fn saturating_rem(&self, rhs: &Self) -> Self`
-- `pub fn try_add(&self, rhs: &Self) -> Result<Self, ArbiError>`
-- `pub fn try_sub(&self, rhs: &Self) -> Result<Self, ArbiError>`
-- `pub fn try_mul(&self, rhs: &Self) -> Result<Self, ArbiError>`
-- `pub fn try_div(&self, rhs: &Self) -> Result<Self, ArbiError>`
-- `pub fn try_rem(&self, rhs: &Self) -> Result<Self, ArbiError>`
+- `pub fn try_add(&self, rhs: &Self) -> Result<Self, MpError>`
+- `pub fn try_sub(&self, rhs: &Self) -> Result<Self, MpError>`
+- `pub fn try_mul(&self, rhs: &Self) -> Result<Self, MpError>`
+- `pub fn try_div(&self, rhs: &Self) -> Result<Self, MpError>`
+- `pub fn try_rem(&self, rhs: &Self) -> Result<Self, MpError>`
 - `pub fn strict_add(&self, rhs: &Self) -> Self`
 - `pub fn strict_sub(&self, rhs: &Self) -> Self`
 - `pub fn strict_mul(&self, rhs: &Self) -> Self`
@@ -303,7 +303,7 @@ The following public inherent methods are currently implemented for `ArbiInt`:
 - `pub fn checked_div_ceil(&self, rhs: &Self) -> Option<Self>`
 - `pub fn pow(&self, exp: u32) -> Self`
 - `pub fn checked_pow(&self, exp: u32) -> Option<Self>`
-- `pub fn try_pow(&self, exp: u32) -> Result<Self, ArbiError>`
+- `pub fn try_pow(&self, exp: u32) -> Result<Self, MpError>`
 - `pub fn square(&self) -> Self`
 
 ### Bitwise Operations & Shifts
@@ -311,7 +311,7 @@ The following public inherent methods are currently implemented for `ArbiInt`:
 - `pub fn wrapping_shl(&self, shift: usize) -> Self`
 - `pub fn overflowing_shl(&self, shift: usize) -> (Self, bool)`
 - `pub fn saturating_shl(&self, shift: usize) -> Self`
-- `pub fn try_shl(&self, shift: usize) -> Result<Self, ArbiError>`
+- `pub fn try_shl(&self, shift: usize) -> Result<Self, MpError>`
 - `pub fn count_ones(&self) -> Option<usize>`
 - `pub fn count_zeros(&self) -> Option<usize>`
 - `pub fn leading_zeros(&self) -> Option<usize>`
@@ -321,7 +321,7 @@ The following public inherent methods are currently implemented for `ArbiInt`:
 - `pub fn swap_bytes(&self) -> Option<Self>`
 - `pub fn reverse_bits(&self, width: usize) -> Option<Self>`
 - `pub fn not_with_width(&self, width: usize) -> Option<Self>`
-- `pub fn try_not(&self) -> Result<Self, ArbiError>`
+- `pub fn try_not(&self) -> Result<Self, MpError>`
 - `pub fn rotate_left(&self, n: u32, width: usize) -> Option<Self>`
 - `pub fn rotate_right(&self, n: u32, width: usize) -> Option<Self>`
 - `pub fn get_bit(&self, bit: usize) -> bool`
@@ -374,7 +374,7 @@ The following public inherent methods are currently implemented for `ArbiInt`:
 - `pub fn max(&self, other: &Self) -> Self`
 - `pub fn clamp(&self, min: &Self, max: &Self) -> Self`
 - `pub fn significant_bits(&self) -> usize`
-- `pub fn unsigned_abs(&self) -> ArbiUint`
+- `pub fn unsigned_abs(&self) -> MpUint`
 
 ### Conversions & Formatting
 - `pub fn to_u64(&self) -> Option<u64>`
@@ -383,7 +383,7 @@ The following public inherent methods are currently implemented for `ArbiInt`:
 - `pub fn to_i64(&self) -> Option<i64>`
 - `pub fn to_i128(&self) -> Option<i128>`
 - `pub fn to_isize(&self) -> Option<isize>`
-- `pub fn from_str_radix(str: &str, radix: u32) -> Result<Self, ParseArbiIntError>`
+- `pub fn from_str_radix(str: &str, radix: u32) -> Result<Self, ParseMpIntError>`
 - `pub fn to_string_radix(&self, radix: u32) -> String`
 - `pub fn to_f64(&self) -> Option<f64>` / `to_f32(&self) -> Option<f32>`
 - `pub fn to_le_bytes(&self) -> Vec<u8>` / `from_le_bytes(bytes: &[u8]) -> Self`
@@ -396,16 +396,16 @@ Primitive construction uses the standard `From`/`TryFrom` traits. The optional
 
 ## 4. Implemented Trait Implementations (Both Types)
 
-- **`core::ops` Operators:** `Add`, `Sub`, `Mul`, `Div`, `Rem`, `BitAnd`, `BitOr`, `BitXor` across all 4 ownership combinations (`T op T`, `&T op T`, `T op &T`, `&T op &T`). The corresponding assign variants are implemented for arithmetic/bitwise operators. `Shl`/`Shr` and `ShlAssign`/`ShrAssign` are implemented for primitive RHS types (`u32`, `u64`, `usize`). `Not` is implemented for both (`ArbiUint` panics on `Unlimited`). `Neg` is implemented for `ArbiInt`.
-- **Comparisons & Hashing:** `PartialEq`, `Eq`, `PartialOrd`, `Ord`, `Hash` (value-based equality ignoring precision metadata). Cross-type `PartialEq<ArbiInt>` and `PartialOrd<ArbiInt>` implemented for `ArbiUint` and reverse.
+- **`core::ops` Operators:** `Add`, `Sub`, `Mul`, `Div`, `Rem`, `BitAnd`, `BitOr`, `BitXor` across all 4 ownership combinations (`T op T`, `&T op T`, `T op &T`, `&T op &T`). The corresponding assign variants are implemented for arithmetic/bitwise operators. `Shl`/`Shr` and `ShlAssign`/`ShrAssign` are implemented for primitive RHS types (`u32`, `u64`, `usize`). `Not` is implemented for both (`MpUint` panics on `Unlimited`). `Neg` is implemented for `MpInt`.
+- **Comparisons & Hashing:** `PartialEq`, `Eq`, `PartialOrd`, `Ord`, `Hash` (value-based equality ignoring precision metadata). Cross-type `PartialEq<MpInt>` and `PartialOrd<MpInt>` implemented for `MpUint` and reverse.
 - **Conversions & Formatting:** `Default`, `FromStr`, `Display`, `Debug`, `Binary`, `Octal`, `LowerHex`, `UpperHex`.
-- **Iterators & `num-traits`:** `core::iter::Sum`, `core::iter::Product`, `num_traits::Zero`, `One`, `Num`, `Unsigned` (`ArbiUint`), `Signed` (`ArbiInt`), `ToPrimitive`, `FromPrimitive`.
+- **Iterators & `num-traits`:** `core::iter::Sum`, `core::iter::Product`, `num_traits::Zero`, `One`, `Num`, `Unsigned` (`MpUint`), `Signed` (`MpInt`), `ToPrimitive`, `FromPrimitive`.
 
 ---
 
 ## 5. Detailed List of Missing APIs & Gaps vs. `IMPLEMENTATION.md`
 
-### A. Completely Missing Methods on Both `ArbiUint` and `ArbiInt`
+### A. Completely Missing Methods on Both `MpUint` and `MpInt`
 The following methods and families specified in Section 7 of `IMPLEMENTATION.md` are **unimplemented on both types**:
 
 1. **Core & Advanced Arithmetic:**
@@ -445,7 +445,7 @@ The following methods and families specified in Section 7 of `IMPLEMENTATION.md`
 7. **Ecosystem Integrations:**
    - `serde` Serialize / Deserialize support.
    - `rand` Distribution / Uniform trait integrations and random constructors (`random_bits`, `random_below`, `random_range`).
-   - `pyo3` Python bindings (`arbi-int-pyo3`).
+   - `pyo3` Python bindings (`mp-int-pyo3`).
    
 
 ### Extra API

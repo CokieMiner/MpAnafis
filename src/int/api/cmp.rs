@@ -5,68 +5,68 @@ use core::{
     hash::{Hash, Hasher},
 };
 
-use super::{ArbiInt, ArbiUint};
+use super::{MpInt, MpUint};
 
-impl PartialEq for ArbiInt {
+impl PartialEq for MpInt {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.value == other.value
     }
 }
 
-impl Eq for ArbiInt {}
+impl Eq for MpInt {}
 
-impl Hash for ArbiInt {
+impl Hash for MpInt {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.value.hash(state);
     }
 }
 
-impl PartialOrd for ArbiInt {
+impl PartialOrd for MpInt {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for ArbiInt {
+impl Ord for MpInt {
     #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
         self.value.cmp(&other.value)
     }
 }
 
-impl PartialEq for ArbiUint {
+impl PartialEq for MpUint {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.value == other.value
     }
 }
 
-impl Eq for ArbiUint {}
+impl Eq for MpUint {}
 
-impl Hash for ArbiUint {
+impl Hash for MpUint {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.value.hash(state);
     }
 }
 
-impl PartialOrd for ArbiUint {
+impl PartialOrd for MpUint {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for ArbiUint {
+impl Ord for MpUint {
     #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
         self.value.cmp(&other.value)
     }
 }
 
-impl PartialEq<ArbiInt> for ArbiUint {
-    fn eq(&self, other: &ArbiInt) -> bool {
+impl PartialEq<MpInt> for MpUint {
+    fn eq(&self, other: &MpInt) -> bool {
         if other.is_negative() {
             return false;
         }
@@ -74,8 +74,8 @@ impl PartialEq<ArbiInt> for ArbiUint {
     }
 }
 
-impl PartialEq<ArbiUint> for ArbiInt {
-    fn eq(&self, other: &ArbiUint) -> bool {
+impl PartialEq<MpUint> for MpInt {
+    fn eq(&self, other: &MpUint) -> bool {
         if self.is_negative() {
             return false;
         }
@@ -83,8 +83,8 @@ impl PartialEq<ArbiUint> for ArbiInt {
     }
 }
 
-impl PartialOrd<ArbiInt> for ArbiUint {
-    fn partial_cmp(&self, other: &ArbiInt) -> Option<Ordering> {
+impl PartialOrd<MpInt> for MpUint {
+    fn partial_cmp(&self, other: &MpInt) -> Option<Ordering> {
         if other.is_negative() {
             return Some(Ordering::Greater);
         }
@@ -92,8 +92,8 @@ impl PartialOrd<ArbiInt> for ArbiUint {
     }
 }
 
-impl PartialOrd<ArbiUint> for ArbiInt {
-    fn partial_cmp(&self, other: &ArbiUint) -> Option<Ordering> {
+impl PartialOrd<MpUint> for MpInt {
+    fn partial_cmp(&self, other: &MpUint) -> Option<Ordering> {
         if self.is_negative() {
             return Some(Ordering::Less);
         }

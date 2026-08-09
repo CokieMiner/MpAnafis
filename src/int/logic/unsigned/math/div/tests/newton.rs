@@ -12,7 +12,7 @@ use core::cmp::Ordering;
 
 use proptest::prelude::*;
 
-use super::{DivScratch, Division, InternalArbiUint, Limb};
+use super::{DivScratch, Division, InternalMpUint, Limb};
 
 proptest! {
     #[test]
@@ -31,7 +31,7 @@ proptest! {
         if let Some(last_limb) = den_limbs.last_mut() {
             *last_limb |= 1 << (Limb::BITS - 1);
         }
-        let den = InternalArbiUint::from_limbs(den_limbs);
+        let den = InternalMpUint::from_limbs(den_limbs);
 
         let num_limbs = num_seed
             .get(..n.wrapping_mul(2))
@@ -39,14 +39,14 @@ proptest! {
             .iter()
             .map(|limb| Limb::try_from(*limb).unwrap_or(0))
             .collect::<Vec<_>>();
-        let num = InternalArbiUint::from_limbs(num_limbs);
+        let num = InternalMpUint::from_limbs(num_limbs);
 
-        let mut q_newton = InternalArbiUint::zero();
-        let mut r_newton = InternalArbiUint::zero();
+        let mut q_newton = InternalMpUint::zero();
+        let mut r_newton = InternalMpUint::zero();
         Division::newton(&num, &den, &mut q_newton, &mut r_newton, &mut scratch);
 
-        let mut q_expected = InternalArbiUint::zero();
-        let mut r_expected = InternalArbiUint::zero();
+        let mut q_expected = InternalMpUint::zero();
+        let mut r_expected = InternalMpUint::zero();
         Division::algorithm_d(
             &num,
             &den,
@@ -74,7 +74,7 @@ proptest! {
         if let Some(last_limb) = den_limbs.last_mut() {
             *last_limb |= 1 << (Limb::BITS - 1);
         }
-        let den = InternalArbiUint::from_limbs(den_limbs);
+        let den = InternalMpUint::from_limbs(den_limbs);
 
         let num_limbs = num_seed
             .get(..n.wrapping_mul(2))
@@ -82,14 +82,14 @@ proptest! {
             .iter()
             .map(|limb| Limb::try_from(*limb).unwrap_or(0))
             .collect::<Vec<_>>();
-        let num = InternalArbiUint::from_limbs(num_limbs);
+        let num = InternalMpUint::from_limbs(num_limbs);
 
-        let mut q_newton = InternalArbiUint::zero();
-        let mut r_newton = InternalArbiUint::zero();
+        let mut q_newton = InternalMpUint::zero();
+        let mut r_newton = InternalMpUint::zero();
         Division::newton(&num, &den, &mut q_newton, &mut r_newton, &mut scratch);
 
-        let mut q_expected = InternalArbiUint::zero();
-        let mut r_expected = InternalArbiUint::zero();
+        let mut q_expected = InternalMpUint::zero();
+        let mut r_expected = InternalMpUint::zero();
         Division::algorithm_d(
             &num,
             &den,
@@ -120,16 +120,16 @@ proptest! {
         if let Some(last_limb) = den_limbs.last_mut() {
             *last_limb |= 1 << (Limb::BITS - 1);
         }
-        let den = InternalArbiUint::from_limbs(den_limbs);
+        let den = InternalMpUint::from_limbs(den_limbs);
 
         let num_limbs = num_seed
             .get(..n.wrapping_mul(2))
             .expect("2n is bounded by the num_seed vector length")
             .to_vec();
-        let num = InternalArbiUint::from_limbs(num_limbs);
+        let num = InternalMpUint::from_limbs(num_limbs);
 
-        let mut quotient = InternalArbiUint::zero();
-        let mut remainder = InternalArbiUint::zero();
+        let mut quotient = InternalMpUint::zero();
+        let mut remainder = InternalMpUint::zero();
         Division::newton(&num, &den, &mut quotient, &mut remainder, &mut scratch);
         prop_assert!(
             remainder.cmp(&den) == Ordering::Less,

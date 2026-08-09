@@ -8,10 +8,10 @@ proptest! {
         fn assert_send<T: Send>() {}
         fn assert_sync<T: Sync>() {}
 
-        assert_send::<ArbiUint>();
-        assert_sync::<ArbiUint>();
-        assert_send::<ArbiInt>();
-        assert_sync::<ArbiInt>();
+        assert_send::<MpUint>();
+        assert_sync::<MpUint>();
+        assert_send::<MpInt>();
+        assert_sync::<MpInt>();
 
         let mut u1 = a; let mut u2 = b;
         let u1_orig = u1.clone(); let u2_orig = u2.clone();

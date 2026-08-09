@@ -1,4 +1,4 @@
-//! Property-based integration tests for `ArbiUint` and `ArbiInt`.
+//! Property-based integration tests for `MpUint` and `MpInt`.
 //!
 //! Each module owns one behavioral category. Shared constructors and strategies
 //! remain here so individual property files stay focused on their contracts.
@@ -26,8 +26,8 @@ use support::hash_u64;
 use support::int_from_i64;
 use support::{exact_limb_vec, nz, uint};
 
-use super::{api::*, logic::InternalArbiUint};
-use crate::{error::ArbiError, int::types::Limb};
+use super::{api::*, logic::InternalMpUint};
+use crate::{error::MpError, int::types::Limb};
 
 mod add;
 mod api_surface;

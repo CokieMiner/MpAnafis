@@ -12,8 +12,8 @@ proptest! {
         a_limbs in proptest::collection::vec(any::<Limb>(), 0..=16),
         b_limbs in proptest::collection::vec(any::<Limb>(), 0..=16),
     ) {
-        let a = InternalArbiUint::from_limbs(a_limbs);
-        let b = InternalArbiUint::from_limbs(b_limbs);
+        let a = InternalMpUint::from_limbs(a_limbs);
+        let b = InternalMpUint::from_limbs(b_limbs);
         let expected = a.mul(&b);
         let raw_len = a.limbs().len().wrapping_add(b.limbs().len());
         let mut raw = vec![Limb::MAX; raw_len];

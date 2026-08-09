@@ -1,8 +1,8 @@
 //! Signed greatest-common-divisor APIs.
 
-use super::{ArbiInt, InternalArbiInt};
+use super::{InternalMpInt, MpInt};
 
-impl ArbiInt {
+impl MpInt {
     /// Returns the greatest common divisor of the absolute values of `self` and `other`.
     ///
     /// # Panics
@@ -15,7 +15,7 @@ impl ArbiInt {
         let g = self.value.abs.gcd(&other.value.abs);
         let p = self.precision.combine_for_binary_op(other.precision);
         let gcd = Self {
-            value: InternalArbiInt {
+            value: InternalMpInt {
                 abs: g,
                 is_positive: true,
             },
@@ -33,14 +33,14 @@ impl ArbiInt {
         let (g, l) = self.value.abs.gcd_lcm(&other.value.abs);
         let p = self.precision.combine_for_binary_op(other.precision);
         let gcd = Self {
-            value: InternalArbiInt {
+            value: InternalMpInt {
                 abs: g,
                 is_positive: true,
             },
             precision: p,
         };
         let lcm = Self {
-            value: InternalArbiInt {
+            value: InternalMpInt {
                 abs: l,
                 is_positive: true,
             },
@@ -64,7 +64,7 @@ impl ArbiInt {
     pub fn lcm(&self, other: &Self) -> Option<Self> {
         let p = self.precision.combine_for_binary_op(other.precision);
         let result = Self {
-            value: InternalArbiInt {
+            value: InternalMpInt {
                 abs: self.value.abs.lcm(&other.value.abs),
                 is_positive: true,
             },

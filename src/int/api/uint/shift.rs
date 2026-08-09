@@ -6,11 +6,11 @@
 //! [`Precision::Unlimited`](crate::Precision::Unlimited) never happens —
 //! the width check short-circuits and all five degenerate to the same shift.
 
-use crate::error::ArbiError;
+use crate::error::MpError;
 
-use super::{ArbiUint, InternalArbiUint};
+use super::{InternalMpUint, MpUint};
 
-impl ArbiUint {
+impl MpUint {
     /// Checked left shift. Returns `None` if the result overflows bounded precision.
     #[must_use]
     pub fn checked_shl(&self, shift: usize) -> Option<Self> {
@@ -34,7 +34,7 @@ impl ArbiUint {
             || self.value.shl(shift),
             |bits| {
                 if shift >= bits {
-                    InternalArbiUint::zero()
+                    InternalMpUint::zero()
                 } else {
                     self.value.shl(shift).apply_wrapping(bits)
                 }
@@ -57,7 +57,7 @@ impl ArbiUint {
             |bits| {
                 let overflow = self.value.bounded_shl_overflows(bits, shift);
                 let value = if shift >= bits {
-                    InternalArbiUint::zero()
+                    InternalMpUint::zero()
                 } else {
                     self.value.shl(shift).apply_wrapping(bits)
                 };
@@ -80,7 +80,7 @@ impl ArbiUint {
             || self.value.shl(shift),
             |bits| {
                 if self.value.bounded_shl_overflows(bits, shift) {
-                    InternalArbiUint::max_for_bits(bits)
+                    InternalMpUint::max_for_bits(bits)
                 } else {
                     self.value.shl(shift)
                 }
@@ -97,13 +97,13 @@ impl ArbiUint {
     /// Tries to left shift.
     ///
     /// # Errors
-    /// Returns `ArbiError::Overflow` if the shift exceeds bounded
+    /// Returns `MpError::Overflow` if the shift exceeds bounded
     /// precision.
-    pub fn try_shl(&self, shift: usize) -> Result<Self, ArbiError> {
+    pub fn try_shl(&self, shift: usize) -> Result<Self, MpError> {
         if let Some(bits) = self.precision.significant_bits()
             && self.value.bounded_shl_overflows(bits, shift)
         {
-            return Err(ArbiError::Overflow);
+            return Err(MpError::Overflow);
         }
         let result = Self {
             value: self.value.shl(shift),

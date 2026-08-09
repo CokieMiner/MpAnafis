@@ -12,8 +12,8 @@ proptest! {
         limbs_a in proptest::collection::vec(any::<Limb>(), 2..=5),
         limbs_b in proptest::collection::vec(any::<Limb>(), 2..=5),
     ) {
-        let a = InternalArbiUint::from_limbs(limbs_a);
-        let b = InternalArbiUint::from_limbs(limbs_b);
+        let a = InternalMpUint::from_limbs(limbs_a);
+        let b = InternalMpUint::from_limbs(limbs_b);
 
         let and = a.bitand(&b);
         let or = a.bitor(&b);
@@ -25,7 +25,7 @@ proptest! {
 
         prop_assert!(a.bitand(&a) == a);
         prop_assert!(a.bitor(&a) == a);
-        prop_assert!(a.bitxor(&a) == InternalArbiUint::zero());
+        prop_assert!(a.bitxor(&a) == InternalMpUint::zero());
 
         let width = a.significant_bits().max(b.significant_bits());
         if width > 0 {
@@ -33,14 +33,14 @@ proptest! {
             let b_not = b.not(width);
             let lhs = and.not(width);
             let rhs = a_not.bitor(&b_not);
-            let mask = InternalArbiUint::max_for_bits(width);
+            let mask = InternalMpUint::max_for_bits(width);
             prop_assert_eq!(lhs.bitand(&mask), rhs.bitand(&mask));
         }
     }
 
     #[test]
     fn partial_limb_masks_prop(bits in 1_usize..=(LIMB_BITS * 2)) {
-        let value = InternalArbiUint::zero();
+        let value = InternalMpUint::zero();
         let masked_not = value.not(bits);
         let expected_limbs = if bits <= LIMB_BITS {
             vec![low_bits_mask(bits)]
@@ -57,7 +57,7 @@ proptest! {
         };
         prop_assert_eq!(
             masked_not,
-            InternalArbiUint::from_limbs(expected_limbs),
+            InternalMpUint::from_limbs(expected_limbs),
         );
     }
 }

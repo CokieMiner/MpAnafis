@@ -1,8 +1,8 @@
 //! Unsigned division and divisibility APIs.
 
-use super::ArbiUint;
+use super::MpUint;
 
-impl ArbiUint {
+impl MpUint {
     /// Returns the quotient and remainder of division, or `None` when `rhs` is zero.
     #[must_use]
     pub fn div_rem(&self, rhs: &Self) -> Option<(Self, Self)> {

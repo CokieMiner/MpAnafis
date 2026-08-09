@@ -1,4 +1,4 @@
-//! Raw GMP multiplication-tower baselines at Arbi's exact limb widths.
+//! Raw GMP multiplication-tower baselines at Mp's exact limb widths.
 
 #![allow(
     unsafe_code,
@@ -7,8 +7,8 @@
 
 use core::hint::black_box;
 
-use arbi_anafis::tune_api::tier::Limb;
 use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
+use mp_anafis::tune_api::tier::Limb;
 
 use crate::shared::{
     HALF_SIZES, KARATSUBA_SIZES, SCHOOLBOOK_SIZES, SSA_SCORECARD_SIZES, TOOM3_SIZES, TOOM4_SIZES,
@@ -152,14 +152,14 @@ fn toom6h_half(bencher: divan::Bencher, lengths: (usize, usize)) {
         left_len >= right_len,
         "GMP Toom-6.5 requires the longer operand first"
     );
-    let (arbi_left, arbi_right, _) = operands_pair(left_len, right_len);
-    let left: Vec<limb_t> = arbi_left
+    let (mp_left, mp_right, _) = operands_pair(left_len, right_len);
+    let left: Vec<limb_t> = mp_left
         .into_iter()
-        .map(|value| limb_t::try_from(value).expect("Arbi limb fits GMP limb"))
+        .map(|value| limb_t::try_from(value).expect("Mp limb fits GMP limb"))
         .collect();
-    let right: Vec<limb_t> = arbi_right
+    let right: Vec<limb_t> = mp_right
         .into_iter()
-        .map(|value| limb_t::try_from(value).expect("Arbi limb fits GMP limb"))
+        .map(|value| limb_t::try_from(value).expect("Mp limb fits GMP limb"))
         .collect();
     let result_len = left_len.saturating_add(right_len);
     let mut destination = vec![limb_t::MIN; result_len];
@@ -270,10 +270,10 @@ fn nussbaumer_scorecard(bencher: divan::Bencher, len: usize) {
 #[divan::bench(args = TOWER_SIZES)]
 fn square_tower(bencher: divan::Bencher, len: usize) {
     assert_compatible_limb_width();
-    let arbi_value = operand(len, Limb::MAX.wrapping_sub(0x1234));
-    let value: Vec<limb_t> = arbi_value
+    let mp_value = operand(len, Limb::MAX.wrapping_sub(0x1234));
+    let value: Vec<limb_t> = mp_value
         .into_iter()
-        .map(|limb| limb_t::try_from(limb).expect("Arbi limb fits GMP limb"))
+        .map(|limb| limb_t::try_from(limb).expect("Mp limb fits GMP limb"))
         .collect();
     let mut destination = vec![limb_t::MIN; len.saturating_mul(2)];
     let gmp_len = size_t::try_from(len).expect("benchmark length fits GMP mp_size_t");
@@ -343,14 +343,14 @@ fn bench_toom_mul(bencher: divan::Bencher, len: usize, multiply: GmpToomMul) {
 
 fn gmp_operands(len: usize) -> (Vec<limb_t>, Vec<limb_t>, Vec<limb_t>, size_t) {
     assert_compatible_limb_width();
-    let (arbi_left, arbi_right, _) = operands(len);
-    let left = arbi_left
+    let (mp_left, mp_right, _) = operands(len);
+    let left = mp_left
         .into_iter()
-        .map(|value| limb_t::try_from(value).expect("Arbi limb fits GMP limb"))
+        .map(|value| limb_t::try_from(value).expect("Mp limb fits GMP limb"))
         .collect();
-    let right = arbi_right
+    let right = mp_right
         .into_iter()
-        .map(|value| limb_t::try_from(value).expect("Arbi limb fits GMP limb"))
+        .map(|value| limb_t::try_from(value).expect("Mp limb fits GMP limb"))
         .collect();
     let destination = vec![limb_t::MIN; len.saturating_mul(2)];
     let gmp_len = size_t::try_from(len).expect("benchmark length fits GMP mp_size_t");
@@ -362,6 +362,6 @@ fn assert_compatible_limb_width() {
     assert_eq!(
         Limb::BITS,
         gmp_numb_bits,
-        "raw tier comparisons require equal Arbi and GMP limb widths"
+        "raw tier comparisons require equal Mp and GMP limb widths"
     );
 }

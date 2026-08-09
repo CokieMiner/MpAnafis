@@ -14,11 +14,10 @@ extern crate alloc;
 mod error;
 mod int;
 
-pub use error::{ArbiError, ParseArbiIntError, ParseArbiUintError};
+pub use error::{MpError, ParseMpIntError, ParseMpUintError};
 
 pub use int::{
-    AmbientPrecision, ArbiInt, ArbiUint, BoundedPrecision, DebugVerbose, Precision,
-    PrecisionContext,
+    AmbientPrecision, BoundedPrecision, DebugVerbose, MpInt, MpUint, Precision, PrecisionContext,
 };
 
 #[cfg(feature = "_internal-tune")]

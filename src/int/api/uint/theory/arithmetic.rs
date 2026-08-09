@@ -1,8 +1,8 @@
 //! Unsigned arithmetic-function APIs.
 
-use super::{ArbiUint, InternalArbiUint, Precision};
+use super::{InternalMpUint, MpUint, Precision};
 
-impl ArbiUint {
+impl MpUint {
     /// Returns the Euler totient function value of this number, or `None` if it cannot be computed.
     #[must_use]
     pub fn euler_phi(&self) -> Option<Self> {
@@ -34,7 +34,7 @@ impl ArbiUint {
     #[track_caller]
     pub fn factorial(n: u32, precision: Precision) -> Self {
         let result = Self {
-            value: InternalArbiUint::factorial(n),
+            value: InternalMpUint::factorial(n),
             precision,
         };
         result.assert_fits("factorial");

@@ -2,7 +2,7 @@
 
 use core::hint::black_box;
 
-use arbi_anafis::tune_api::{Limb, formatting, multiplication, squaring};
+use mp_anafis::tune_api::{Limb, formatting, multiplication, squaring};
 
 use crate::{
     harness::{CandidateHarness, TierPairSpec},

@@ -35,8 +35,8 @@ pub enum LargePlan {
 ///
 /// One variant names one algorithm. A plan is a decision, not a hint: the
 /// selector only names a tier it has already established can compute the
-/// product, so [`execute_mul_plan`] runs exactly the named algorithm and
-/// [`mul_plan_scratch_len`](super::super::mul_plan_scratch_len) sizes exactly its
+/// product, so [`Multiplication::execute_plan`] runs exactly the named algorithm and
+/// [`Multiplication::required_scratch`] sizes exactly its
 /// workspace. This value is `Copy` and contains no allocation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MulPlan {
@@ -104,7 +104,7 @@ pub enum MulShape {
 
 /// Two operand widths in ascending order.
 ///
-/// Every ratio test in [`shape`] is a comparison between the two, so the pair is
+/// Every ratio test in [`shape`](super::shape) is a comparison between the two, so the pair is
 /// ordered once here and carried, rather than each predicate recomputing its own
 /// `min`/`max`.
 ///

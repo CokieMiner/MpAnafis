@@ -1,4 +1,4 @@
-//! Division on `ArbiUint`.
+//! Division on `MpUint`.
 //!
 //! - [`quotient`]: `div_rem`, `div_trunc`, `rem_trunc` on equal-width operands.
 //! - [`shapes`]: the same three methods on the operand shapes that actually

@@ -1,7 +1,7 @@
-//! Number-theoretic operations for [`InternalArbiUint`].
+//! Number-theoretic operations for [`InternalMpUint`].
 
 use super::{
-    ArchKernels, BarrettDomain, BarrettScratch, DivScratch, Division, Gcd, InternalArbiUint, Limb,
+    ArchKernels, BarrettDomain, BarrettScratch, DivScratch, Division, Gcd, InternalMpUint, Limb,
     MontgomeryDomain, MulScratch,
 };
 

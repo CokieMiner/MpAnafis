@@ -8,17 +8,17 @@
 
 use core::fmt::{Debug, Formatter, Result as FmtResult};
 
-use super::{InternalArbiInt, InternalArbiUint, Precision};
+use super::{InternalMpInt, InternalMpUint, Precision};
 
 /// Arbitrary precision signed integer.
-pub struct ArbiInt {
+pub struct MpInt {
     /// The internal signed representation.
-    pub(crate) value: InternalArbiInt,
+    pub(crate) value: InternalMpInt,
     /// The precision metadata of the value.
     pub(crate) precision: Precision,
 }
 
-impl Clone for ArbiInt {
+impl Clone for MpInt {
     fn clone(&self) -> Self {
         Self {
             value: self.value.clone(),
@@ -33,14 +33,14 @@ impl Clone for ArbiInt {
 }
 
 /// Arbitrary precision unsigned integer.
-pub struct ArbiUint {
+pub struct MpUint {
     /// The internal unsigned representation.
-    pub(crate) value: InternalArbiUint,
+    pub(crate) value: InternalMpUint,
     /// The precision metadata of the value.
     pub(crate) precision: Precision,
 }
 
-impl Clone for ArbiUint {
+impl Clone for MpUint {
     fn clone(&self) -> Self {
         Self {
             value: self.value.clone(),
@@ -58,8 +58,8 @@ impl Clone for ArbiUint {
 #[non_exhaustive]
 pub struct DebugVerbose<'data, T>(pub &'data T);
 
-impl Debug for DebugVerbose<'_, ArbiUint> {
+impl Debug for DebugVerbose<'_, MpUint> {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "ArbiUint({}, precision: {:?})", self.0, self.0.precision)
+        write!(f, "MpUint({}, precision: {:?})", self.0, self.0.precision)
     }
 }

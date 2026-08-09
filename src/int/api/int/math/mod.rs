@@ -1,6 +1,6 @@
 //! Signed integer arithmetic APIs organized by operation contract.
 
-use super::{ArbiInt, ArbiUint, InternalArbiInt, Precision};
+use super::{InternalMpInt, MpInt, MpUint, Precision};
 
 mod assignment;
 mod bounded;

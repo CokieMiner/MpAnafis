@@ -1,4 +1,4 @@
-//! Primality and next-prime operations owned by [`InternalArbiUint`].
+//! Primality and next-prime operations owned by [`InternalMpUint`].
 
 #![allow(
     unsafe_code,
@@ -7,7 +7,7 @@
 
 use core::cmp::Ordering;
 
-use super::{InternalArbiUint, Limb, MontgomeryDomain, MulScratch};
+use super::{InternalMpUint, Limb, MontgomeryDomain, MulScratch};
 
 const SIEVE_WORDS: usize = 32;
 
@@ -20,7 +20,7 @@ pub const SIEVE_PRIMES: [Limb; 53] = [
     101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173, 179, 181, 191, 193,
     197, 199, 211, 223, 227, 229, 233, 239, 241, 251,
 ];
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Deterministic primality test for inputs <= 2^64.
     ///
     /// For numbers <= 2^64 this uses a deterministic Miller-Rabin test with

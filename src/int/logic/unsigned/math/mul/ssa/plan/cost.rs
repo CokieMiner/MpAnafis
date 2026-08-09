@@ -43,7 +43,7 @@ impl SsaPlan {
     /// Geometries whose pointwise products nest another transform are priced
     /// against those that keep them in the multiplication tower, and the cheaper
     /// wins. Neither class is preferred a priori: since
-    /// [`nested_ring_bits`](super::planner::nested_ring_bits) rounds a nested inner ring to a
+    /// `nested_ring_bits` rounds a nested inner ring to a
     /// multiple of the nested transform length rather than to a power of two,
     /// nesting costs what it actually costs, and preferring the tower
     /// unconditionally selects exponents two to three above the measured optimum at
@@ -84,7 +84,7 @@ impl SsaPlan {
     /// of `sqrt(N)` bits, so the transform exponent tracks `log2(N) / 2`. The
     /// measured optima follow that: against `log2/2` they deviate by at most three
     /// exponents and the deviation does *not* grow with the ring, so
-    /// [`TOP_LEVEL_SEARCH_RADIUS`](super::TOP_LEVEL_SEARCH_RADIUS) keeps the
+    /// [`TOP_LEVEL_SEARCH_RADIUS`] keeps the
     /// optimum inside the window at every width.
     ///
     /// The nested search used to anchor to the basecase width instead, at
@@ -99,7 +99,7 @@ impl SsaPlan {
     /// `SSA_NESTED_COST_PENALTY_16THS` that pays for the correction, and the two
     /// only work together.
     ///
-    /// [`nested_ring_bits`](super::planner::nested_ring_bits) rounds an inner ring
+    /// `nested_ring_bits` rounds an inner ring
     /// to a multiple of whatever transform length the nested planner will choose,
     /// so it must use this same centre and no other.
     pub fn search_centre(modulus_bits: usize) -> u32 {

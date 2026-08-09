@@ -42,7 +42,7 @@ fn next_prime_usize(mut n: usize) -> usize {
 proptest! {
     #[test]
     fn prop_is_prime_matches_bruteforce_for_small_inputs(value in 0_usize..=50_000_usize) {
-        let internal_value = InternalArbiUint::from_limb(value);
+        let internal_value = InternalMpUint::from_limb(value);
         prop_assert_eq!(internal_value.is_prime(), is_prime_usize(value));
     }
 
@@ -58,7 +58,7 @@ proptest! {
         Just(241), Just(251), Just(257), Just(263), Just(269), Just(271), Just(277),
         Just(281), Just(283), Just(293), Just(307), Just(311)
     ]) {
-        let internal_value = InternalArbiUint::from_limb(value);
+        let internal_value = InternalMpUint::from_limb(value);
         prop_assert!(internal_value.is_probably_prime(24));
     }
 
@@ -73,8 +73,8 @@ proptest! {
         prime_index in 0_usize..SIEVE_PRIMES.len(),
     ) {
         let prime = SIEVE_PRIMES.get(prime_index).copied().unwrap_or(3);
-        let cofactor = InternalArbiUint::from_limbs(cofactor_limbs);
-        let composite = cofactor.mul(&InternalArbiUint::from_limb(prime));
+        let cofactor = InternalMpUint::from_limbs(cofactor_limbs);
+        let composite = cofactor.mul(&InternalMpUint::from_limb(prime));
 
         // A cofactor of 0 or 1 leaves the product prime or zero, and the
         // product must exceed u64 for the wide path to run at all.
@@ -93,7 +93,7 @@ proptest! {
         } else {
             "340282366920938463463374607431768211507"
         };
-        let prime = InternalArbiUint::from_str_radix(decimal, 10)
+        let prime = InternalMpUint::from_str_radix(decimal, 10)
             .expect("literal is a valid decimal string");
         prop_assert!(prime.is_probably_prime(24));
         prop_assert!(prime.is_prime());
@@ -101,10 +101,10 @@ proptest! {
 
     #[test]
     fn prop_next_prime_matches_bruteforce_small_inputs(value in 0_usize..=20_000_usize) {
-        let internal_value = InternalArbiUint::from_limb(value);
+        let internal_value = InternalMpUint::from_limb(value);
         let next_prime = internal_value.next_prime();
         let expected_prime = next_prime_usize(value);
-        prop_assert_eq!(&next_prime, &InternalArbiUint::from_limb(expected_prime));
+        prop_assert_eq!(&next_prime, &InternalMpUint::from_limb(expected_prime));
         prop_assert!(next_prime.is_prime());
         prop_assert!(next_prime.cmp(&internal_value) != Ordering::Less);
     }
@@ -114,8 +114,8 @@ proptest! {
         left_value in 0_usize..=10_000_usize,
         right_value in 0_usize..=10_000_usize,
     ) {
-        let left_internal = InternalArbiUint::from_limb(left_value);
-        let right_internal = InternalArbiUint::from_limb(right_value);
+        let left_internal = InternalMpUint::from_limb(left_value);
+        let right_internal = InternalMpUint::from_limb(right_value);
         let left_prime = left_internal.next_prime();
         let right_prime = right_internal.next_prime();
 

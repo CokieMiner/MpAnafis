@@ -49,7 +49,7 @@ impl Toom6 {
         )
     }
 
-    /// The reciprocal-point counterpart of [`evaluate_mul_pair`], at
+    /// The reciprocal-point counterpart of [`Self::evaluate_mul_pair`], at
     /// `2^-denominator_shift`.
     pub fn evaluate_reciprocal_mul_pair(
         packed: &mut [Limb],
@@ -108,7 +108,7 @@ impl Toom6 {
         Self::couple_reciprocal(values.quarter, temporary, sign_quarter, zero, split_len, 2);
     }
 
-    /// The squaring counterpart of [`evaluate_mul_points`].
+    /// The squaring counterpart of [`Self::evaluate_mul_points`].
     ///
     /// A square's negative-point value is never negative, so every coupling here is
     /// given a `false` sign.

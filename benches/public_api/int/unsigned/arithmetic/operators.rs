@@ -7,8 +7,8 @@
 
 use core::ops::{Add, Mul, Sub};
 
-use arbi_anafis::ArbiUint;
 use divan::black_box;
+use mp_anafis::MpUint;
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 use rug::{Assign, Integer};
 
@@ -16,7 +16,7 @@ use rug::{Assign, Integer};
 use crate::int::support::rug_uint_pairs;
 use crate::int::{
     ladders::{ADDITIVE, MULTIPLICATIVE},
-    support::{SAMPLE_COUNT_WIDE, SAMPLE_SIZE_WIDE, arbi_uint_pairs},
+    support::{SAMPLE_COUNT_WIDE, SAMPLE_SIZE_WIDE, mp_uint_pairs},
 };
 
 /// `a + b`, allocating a fresh result.
@@ -24,8 +24,8 @@ mod add {
     use super::*;
 
     #[divan::bench(args = ADDITIVE, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(Add::add(black_box(left), black_box(right)));
@@ -50,8 +50,8 @@ mod sub {
     use super::*;
 
     #[divan::bench(args = ADDITIVE, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let (large, small) = if left >= right {
@@ -87,8 +87,8 @@ mod mul {
     use super::*;
 
     #[divan::bench(args = MULTIPLICATIVE, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(Mul::mul(black_box(left), black_box(right)));
@@ -117,9 +117,9 @@ mod assign_add {
     use super::*;
 
     #[divan::bench(args = ADDITIVE, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
-        let mut result = ArbiUint::zero();
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
+        let mut result = MpUint::zero();
         result.reserve(bits.div_ceil(64).saturating_add(1));
         bencher.bench_local(|| {
             for (left, right) in &inputs {
@@ -148,9 +148,9 @@ mod assign_sub {
     use super::*;
 
     #[divan::bench(args = ADDITIVE, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
-        let mut result = ArbiUint::zero();
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
+        let mut result = MpUint::zero();
         result.reserve(bits.div_ceil(64).saturating_add(1));
         bencher.bench_local(|| {
             for (left, right) in &inputs {
@@ -189,9 +189,9 @@ mod assign_mul {
     use super::*;
 
     #[divan::bench(args = MULTIPLICATIVE, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
-        let mut result = ArbiUint::zero();
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
+        let mut result = MpUint::zero();
         result.reserve(bits.div_ceil(64).saturating_mul(2).saturating_add(1));
         bencher.bench_local(|| {
             for (left, right) in &inputs {
@@ -220,9 +220,9 @@ mod assign_square {
     use super::*;
 
     #[divan::bench(args = MULTIPLICATIVE, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
-        let mut result = ArbiUint::zero();
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
+        let mut result = MpUint::zero();
         result.reserve(bits.div_ceil(64).saturating_mul(2).saturating_add(1));
         bencher.bench_local(|| {
             for (value, _unused) in &inputs {

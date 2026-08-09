@@ -12,8 +12,8 @@
     reason = "the rug counterpart negates a decoded magnitude, which is the sign restoration a caller must write by hand because GMP exports magnitudes only"
 )]
 
-use arbi_anafis::ArbiInt;
 use divan::black_box;
+use mp_anafis::MpInt;
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 use rug::Integer;
 
@@ -21,15 +21,15 @@ use rug::Integer;
 use crate::int::support::rug_int;
 use crate::int::{
     ladders::NARROW,
-    support::{SAMPLE_SIZE_FAST, arbi_int},
+    support::{SAMPLE_SIZE_FAST, mp_int},
 };
 
 mod to_string_radix_10 {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_int(bits, 42, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_int(bits, 42, true);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).to_string_radix(10));
         });
@@ -49,10 +49,10 @@ mod from_string_radix_10 {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let text = arbi_int(bits, 42, true).to_string_radix(10);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let text = mp_int(bits, 42, true).to_string_radix(10);
         bencher.bench_local(|| {
-            let _output = black_box(ArbiInt::from_str_radix(black_box(&text), 10));
+            let _output = black_box(MpInt::from_str_radix(black_box(&text), 10));
         });
     }
 
@@ -70,8 +70,8 @@ mod to_string_radix_16 {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_int(bits, 42, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_int(bits, 42, true);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).to_string_radix(16));
         });
@@ -91,8 +91,8 @@ mod to_be_bytes {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_int(bits, 42, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_int(bits, 42, true);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).to_be_bytes());
         });
@@ -119,10 +119,10 @@ mod from_be_bytes {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let bytes = arbi_int(bits, 42, true).to_be_bytes();
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let bytes = mp_int(bits, 42, true).to_be_bytes();
         bencher.bench_local(|| {
-            let _output = black_box(ArbiInt::from_be_bytes(black_box(&bytes)));
+            let _output = black_box(MpInt::from_be_bytes(black_box(&bytes)));
         });
     }
 
@@ -145,8 +145,8 @@ mod to_i64 {
     use super::*;
 
     #[divan::bench(args = [64, 256], sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_int(bits, 42, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_int(bits, 42, true);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).to_i64());
         });
@@ -166,8 +166,8 @@ mod to_f64 {
     use super::*;
 
     #[divan::bench(args = [256, 1_024], sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_int(bits, 42, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_int(bits, 42, true);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).to_f64());
         });

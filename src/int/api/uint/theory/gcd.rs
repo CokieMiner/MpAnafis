@@ -1,8 +1,8 @@
 //! Unsigned greatest-common-divisor APIs.
 
-use super::ArbiUint;
+use super::MpUint;
 
-impl ArbiUint {
+impl MpUint {
     /// Returns the greatest common divisor of `self` and `other`.
     #[must_use]
     pub fn gcd(&self, other: &Self) -> Self {

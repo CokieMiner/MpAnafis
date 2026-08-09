@@ -21,10 +21,10 @@ proptest! {
             remaining_exponent >>= 1;
         }
 
-        let actual = ArbiUint::from(base)
-            .pow_mod(&ArbiUint::from(exponent), &ArbiUint::from(modulus))
+        let actual = MpUint::from(base)
+            .pow_mod(&MpUint::from(exponent), &MpUint::from(modulus))
             .expect("non-zero modulus");
-        prop_assert_eq!(actual, ArbiUint::from(expected));
+        prop_assert_eq!(actual, MpUint::from(expected));
     }
 }
 
@@ -36,7 +36,7 @@ proptest! {
         modulus_seed in strategies::uint(4),
     ) {
         let modulus = if modulus_seed.is_odd() {
-            &modulus_seed - &ArbiUint::one()
+            &modulus_seed - &MpUint::one()
         } else {
             modulus_seed
         };
@@ -52,8 +52,8 @@ proptest! {
     #[test]
     fn prop_mod_add_commutative(m in strategies::uint_nonzero(8), a in strategies::uint(8), b in strategies::uint(8)) {
         if m.value.is_one() { return Ok(()); }
-        let ab = ArbiUint::add_mod(&a, &b, &m);
-        let ba = ArbiUint::add_mod(&b, &a, &m);
+        let ab = MpUint::add_mod(&a, &b, &m);
+        let ba = MpUint::add_mod(&b, &a, &m);
         prop_assert_eq!(ab, ba, "add_mod not commutative");
     }
 }
@@ -62,8 +62,8 @@ proptest! {
     #[test]
     fn prop_mod_mul_commutative(m in strategies::uint_nonzero(6), a in strategies::uint(6), b in strategies::uint(6)) {
         if m.value.is_one() { return Ok(()); }
-        let ab = ArbiUint::mul_mod(&a, &b, &m);
-        let ba = ArbiUint::mul_mod(&b, &a, &m);
+        let ab = MpUint::mul_mod(&a, &b, &m);
+        let ba = MpUint::mul_mod(&b, &a, &m);
         prop_assert_eq!(ab, ba, "mul_mod not commutative");
     }
 }
@@ -73,9 +73,9 @@ proptest! {
     fn prop_modular_inverse(m in strategies::uint_nonzero(4), a in strategies::uint(4)) {
         if m.value.is_zero() || m.value.is_one() { return Ok(()); }
         if a.value.is_zero() || a.value.gcd(&m.value).is_one() { return Ok(()); }
-        if let Some(inv) = ArbiUint::invert(&a, &m) {
-            let product = ArbiUint::mul_mod(&a, &inv, &m).expect("valid modulus");
-            prop_assert_eq!(product, ArbiUint::one(), "a * invert(a, m) != 1 (mod m)");
+        if let Some(inv) = MpUint::invert(&a, &m) {
+            let product = MpUint::mul_mod(&a, &inv, &m).expect("valid modulus");
+            prop_assert_eq!(product, MpUint::one(), "a * invert(a, m) != 1 (mod m)");
         }
     }
 }

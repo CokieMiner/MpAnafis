@@ -1,12 +1,12 @@
 //! Deterministic bounded operands shared by the policy benchmarks.
 
-use arbi_anafis::{ArbiUint, BoundedPrecision};
+use mp_anafis::{BoundedPrecision, MpUint};
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 use rug::Integer;
 
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 use crate::int::support::rug_uint;
-use crate::int::support::{SAMPLES, arbi_uint};
+use crate::int::support::{SAMPLES, mp_uint};
 
 /// One representative width for exceptional policy branches.
 pub const EDGE_WIDTH: [usize; 1] = [1_024];
@@ -35,30 +35,26 @@ pub enum Scenario {
     Edge,
 }
 
-/// Generates bounded Arbi operands for one policy operation and scenario.
+/// Generates bounded Mp operands for one policy operation and scenario.
 #[must_use]
-pub fn arbi_pairs(
-    bits: usize,
-    operation: Operation,
-    scenario: Scenario,
-) -> Vec<(ArbiUint, ArbiUint)> {
+pub fn mp_pairs(bits: usize, operation: Operation, scenario: Scenario) -> Vec<(MpUint, MpUint)> {
     let (left_bits, right_bits) = operand_widths(bits, operation, scenario);
     let width = BoundedPrecision::new(bits).expect("policy benchmark widths are valid");
 
     (0..SAMPLES)
         .map(|index| {
-            let left = ArbiUint::with_precision_checked(
-                arbi_uint(left_bits, 42_u32.wrapping_add(index)),
+            let left = MpUint::with_precision_checked(
+                mp_uint(left_bits, 42_u32.wrapping_add(index)),
                 width,
             )
             .expect("the generated left operand fits the policy width");
             let right = if matches!(scenario, Scenario::Edge)
                 && matches!(operation, Operation::Div | Operation::Rem)
             {
-                ArbiUint::zero_with_precision(width)
+                MpUint::zero_with_precision(width)
             } else {
-                ArbiUint::with_precision_checked(
-                    arbi_uint(right_bits, 1_337_u32.wrapping_add(index)),
+                MpUint::with_precision_checked(
+                    mp_uint(right_bits, 1_337_u32.wrapping_add(index)),
                     width,
                 )
                 .expect("the generated right operand fits the policy width")
@@ -103,23 +99,23 @@ pub fn rug_max(bits: usize) -> Integer {
     Integer::from(-1).keep_bits(rug_width(bits))
 }
 
-/// Asserts that an Arbi result and a Rug policy result have the same value.
+/// Asserts that an Mp result and a Rug policy result have the same value.
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
-pub fn verify_value(actual: &ArbiUint, expected: &Integer) {
+pub fn verify_value(actual: &MpUint, expected: &Integer) {
     assert_eq!(
         actual.to_string_radix(16),
         expected.to_string_radix(16),
-        "Arbi and Rug policy results differ"
+        "Mp and Rug policy results differ"
     );
 }
 
 /// Asserts equal optional outcomes and values.
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
-pub fn verify_option(actual_result: Option<ArbiUint>, expected_result: Option<Integer>) {
+pub fn verify_option(actual_result: Option<MpUint>, expected_result: Option<Integer>) {
     assert_eq!(
         actual_result.is_some(),
         expected_result.is_some(),
-        "Arbi and Rug policy availability differs"
+        "Mp and Rug policy availability differs"
     );
     if let (Some(actual_value), Some(expected_value)) = (actual_result, expected_result) {
         verify_value(&actual_value, &expected_value);
@@ -129,13 +125,13 @@ pub fn verify_option(actual_result: Option<ArbiUint>, expected_result: Option<In
 /// Asserts equal result status and successful values.
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 pub fn verify_result<E: core::fmt::Debug + PartialEq>(
-    actual_result: Result<ArbiUint, E>,
+    actual_result: Result<MpUint, E>,
     expected_result: Result<Integer, E>,
 ) {
     assert_eq!(
         actual_result.is_ok(),
         expected_result.is_ok(),
-        "Arbi and Rug policy status differs"
+        "Mp and Rug policy status differs"
     );
     match (actual_result, expected_result) {
         (Ok(actual_value), Ok(expected_value)) => verify_value(&actual_value, &expected_value),
@@ -148,7 +144,7 @@ pub fn verify_result<E: core::fmt::Debug + PartialEq>(
 
 /// Asserts equal overflowing values and flags.
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
-pub fn verify_overflowing(actual: &(ArbiUint, bool), expected: &(Integer, bool)) {
+pub fn verify_overflowing(actual: &(MpUint, bool), expected: &(Integer, bool)) {
     verify_value(&actual.0, &expected.0);
     assert_eq!(actual.1, expected.1, "overflow flags differ");
 }

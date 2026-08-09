@@ -31,7 +31,7 @@ proptest! {
 proptest! {
     #[test]
     fn prop_eq_hash_consistency(a in strategies::uint(16)) {
-        let b = ArbiUint {
+        let b = MpUint {
             value: a.value.clone(),
             precision: Precision::Unlimited,
         };
@@ -59,23 +59,23 @@ proptest! {
         left_seed in strategies::bounded_uint_wrapped(64),
         right_seed in strategies::bounded_uint_wrapped(64),
     ) {
-        let max_val = (ArbiUint::one() << bits) - ArbiUint::one();
+        let max_val = (MpUint::one() << bits) - MpUint::one();
         let left_value = left_seed.value.apply_wrapping(bits);
         let right_value = right_seed.value.apply_wrapping(bits);
-        let mut left_operand = ArbiUint {
+        let mut left_operand = MpUint {
             value: left_value.clone(),
             precision: Precision::Bounded(nz(bits)),
         };
-        let right_operand = ArbiUint {
+        let right_operand = MpUint {
             value: right_value.clone(),
             precision: Precision::Unlimited,
         };
         let expected_precision = left_operand.precision;
-        let left_unlimited = ArbiUint {
+        let left_unlimited = MpUint {
             value: left_value,
             precision: Precision::Unlimited,
         };
-        let right_unlimited = ArbiUint {
+        let right_unlimited = MpUint {
             value: right_value,
             precision: Precision::Unlimited,
         };
@@ -97,11 +97,11 @@ proptest! {
         left_seed in strategies::bounded_uint_wrapped(64),
         right_seed in strategies::bounded_uint_wrapped(64),
     ) {
-        let left_operand = ArbiUint {
+        let left_operand = MpUint {
             value: left_seed.value.apply_wrapping(width_a),
             precision: Precision::Bounded(nz(width_a)),
         };
-        let right_operand = ArbiUint {
+        let right_operand = MpUint {
             value: right_seed.value.apply_wrapping(width_b),
             precision: Precision::Bounded(nz(width_b)),
         };
@@ -139,10 +139,10 @@ proptest! {
         small_value in any::<u8>(),
         medium_value in any::<u16>(),
     ) {
-        prop_assert_eq!(ArbiUint::from(value).precision, Precision::Unlimited);
-        prop_assert_eq!(ArbiUint::from(small_value).precision, Precision::Unlimited);
-        prop_assert_eq!(ArbiUint::from(medium_value).precision, Precision::Unlimited);
-        prop_assert_eq!(ArbiUint::default().precision, Precision::Unlimited);
+        prop_assert_eq!(MpUint::from(value).precision, Precision::Unlimited);
+        prop_assert_eq!(MpUint::from(small_value).precision, Precision::Unlimited);
+        prop_assert_eq!(MpUint::from(medium_value).precision, Precision::Unlimited);
+        prop_assert_eq!(MpUint::default().precision, Precision::Unlimited);
         let _ = &PrecisionContext;
     }
 }
@@ -156,7 +156,7 @@ proptest! {
         signed_value in any::<i128>(),
     ) {
         PrecisionContext::with_bounded(bits, || {
-            let unsigned = ArbiUint::from(unsigned_value);
+            let unsigned = MpUint::from(unsigned_value);
             let expected_unsigned_bits =
                 bits.max(unsigned.value.required_unsigned_bits_for_bounded_storage());
             prop_assert_eq!(
@@ -164,14 +164,14 @@ proptest! {
                 Precision::Bounded(nz(expected_unsigned_bits))
             );
 
-            let signed = ArbiInt::from(signed_value);
+            let signed = MpInt::from(signed_value);
             let expected_signed_bits =
                 bits.max(signed.value.required_signed_bits_for_bounded_storage());
             prop_assert_eq!(
                 signed.precision,
                 Precision::Bounded(nz(expected_signed_bits))
             );
-            prop_assert_eq!(ArbiUint::default().precision, Precision::Unlimited);
+            prop_assert_eq!(MpUint::default().precision, Precision::Unlimited);
             Ok(())
         })?;
     }
@@ -182,10 +182,10 @@ proptest! {
         input in any::<u128>(),
     ) {
         let encoded = input.to_string();
-        let required_bits = InternalArbiUint::from_u128(input)
+        let required_bits = InternalMpUint::from_u128(input)
             .required_unsigned_bits_for_bounded_storage();
         PrecisionContext::with_bounded(bits, || {
-            let parsed = encoded.parse::<ArbiUint>();
+            let parsed = encoded.parse::<MpUint>();
             prop_assert_eq!(parsed.is_ok(), required_bits <= bits);
             if let Ok(value) = parsed {
                 prop_assert_eq!(value.precision, Precision::Bounded(nz(bits)));
@@ -201,8 +201,8 @@ proptest! {
         lhs in 0_u8..=100,
         rhs in 0_u8..=100,
     ) {
-        let mut left_value = ArbiUint::with_precision_checked(lhs, nz(bits)).expect("fits");
-        let right_value = ArbiUint::from(rhs);
+        let mut left_value = MpUint::with_precision_checked(lhs, nz(bits)).expect("fits");
+        let right_value = MpUint::from(rhs);
         left_value += &right_value;
         prop_assert_eq!(left_value.precision, Precision::Bounded(nz(bits)));
         prop_assert_eq!(

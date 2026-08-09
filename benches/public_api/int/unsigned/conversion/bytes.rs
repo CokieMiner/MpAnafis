@@ -10,8 +10,8 @@
     reason = "benchmark submodules inherit parent scope"
 )]
 
-use arbi_anafis::ArbiUint;
 use divan::black_box;
+use mp_anafis::MpUint;
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 use rug::{Integer, integer::Order};
 
@@ -19,15 +19,15 @@ use rug::{Integer, integer::Order};
 use crate::int::support::rug_uint;
 use crate::int::{
     ladders::NARROW,
-    support::{SAMPLE_SIZE_FAST, arbi_uint},
+    support::{SAMPLE_SIZE_FAST, mp_uint},
 };
 
 mod to_be_bytes {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).to_be_bytes());
         });
@@ -50,10 +50,10 @@ mod from_be_bytes {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let bytes = arbi_uint(bits, 42).to_be_bytes();
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let bytes = mp_uint(bits, 42).to_be_bytes();
         bencher.bench_local(|| {
-            let _output = black_box(ArbiUint::from_be_bytes(black_box(&bytes)));
+            let _output = black_box(MpUint::from_be_bytes(black_box(&bytes)));
         });
     }
 
@@ -73,8 +73,8 @@ mod to_le_bytes {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).to_le_bytes());
         });
@@ -97,10 +97,10 @@ mod from_le_bytes {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let bytes = arbi_uint(bits, 42).to_le_bytes();
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let bytes = mp_uint(bits, 42).to_le_bytes();
         bencher.bench_local(|| {
-            let _output = black_box(ArbiUint::from_le_bytes(black_box(&bytes)));
+            let _output = black_box(MpUint::from_le_bytes(black_box(&bytes)));
         });
     }
 

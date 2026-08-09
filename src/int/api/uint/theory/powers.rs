@@ -1,10 +1,10 @@
 //! Exponentiation APIs for unsigned integers.
 
-use crate::error::ArbiError;
+use crate::error::MpError;
 
-use super::{ArbiUint, InternalArbiUint};
+use super::{InternalMpUint, MpUint};
 
-impl ArbiUint {
+impl MpUint {
     /// Returns `self` raised to the power of `exp`.
     ///
     /// # Panics
@@ -26,11 +26,11 @@ impl ArbiUint {
     /// Tries to raise `self` to the power of `exp`.
     ///
     /// # Errors
-    /// Returns `ArbiError::Overflow` if the result exceeds precision bounds.
-    pub fn try_pow(&self, exp: u32) -> Result<Self, ArbiError> {
+    /// Returns `MpError::Overflow` if the result exceeds precision bounds.
+    pub fn try_pow(&self, exp: u32) -> Result<Self, MpError> {
         if exp == 0 {
             let result = Self {
-                value: InternalArbiUint::one(),
+                value: InternalMpUint::one(),
                 precision: self.precision,
             };
             // `one()` needs a single bit and every bounded precision is at
@@ -54,7 +54,7 @@ impl ArbiUint {
         if let Some(bits) = result.precision.significant_bits()
             && result.value.significant_bits() > bits
         {
-            return Err(ArbiError::Overflow);
+            return Err(MpError::Overflow);
         }
         result.debug_assert_valid();
         Ok(result)
@@ -71,7 +71,7 @@ impl ArbiUint {
     pub fn checked_next_power_of_two(&self) -> Option<Self> {
         if self.value.is_zero() {
             let result = Self {
-                value: InternalArbiUint::one(),
+                value: InternalMpUint::one(),
                 precision: self.precision,
             };
             result.debug_assert_valid();
@@ -87,7 +87,7 @@ impl ArbiUint {
             return None;
         }
         let result = Self {
-            value: InternalArbiUint::one().shl(next_bit),
+            value: InternalMpUint::one().shl(next_bit),
             precision: self.precision,
         };
         result.debug_assert_valid();

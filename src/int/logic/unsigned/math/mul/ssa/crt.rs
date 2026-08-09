@@ -28,7 +28,7 @@ impl SsaCrt {
     /// Splits `n` in half at every level until it reaches
     /// [`SSA_BNM1_BASECASE_LIMBS`], so `n` must stay even the whole way down. `n` need
     /// not be a power of two — the planner's
-    /// [`crt_half_width`](super::plan::crt_half_width) guarantees the weaker
+    /// [`SsaPlan::crt_half_width`](super::plan::SsaPlan::crt_half_width) guarantees the weaker
     /// property that suffices, namely that the odd part of `n` already fits the
     /// basecase.
     #[allow(
@@ -381,7 +381,7 @@ impl SsaCrt {
         }
     }
 
-    /// Scratch required by one [`mul_mod_bnm1`] call on `n`-limb operands.
+    /// Scratch required by one [`Self::mul_mod_bnm1`] call on `n`-limb operands.
     pub fn mul_mod_bnm1_scratch_len(n: usize) -> usize {
         if n <= SSA_BNM1_BASECASE_LIMBS {
             // SAFETY: n <= SSA_BNM1_BASECASE_LIMBS is a small compile-time
@@ -427,7 +427,7 @@ impl SsaCrt {
     /// Total buffer a CRT split partitions, for a given half-width and a given cost
     /// of the `B^h + 1` ring product.
     ///
-    /// Both the top-level entry point and [`mul_mod_bnm1`] lay their scratch out
+    /// Both the top-level entry point and [`Self::mul_mod_bnm1`] lay their scratch out
     /// as `[xp: h+1] [xm: h]` followed by a region the two halves reuse in turn.
     /// The dead `xm` residue itself becomes the CRT `k` buffer, so no third residue
     /// span is retained. The shared tail only has to fit the larger of:

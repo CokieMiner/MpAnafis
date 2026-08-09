@@ -2,7 +2,7 @@
 
 use core::{hint::black_box, ops::BitOr};
 
-use arbi_anafis::tune_api::tier::{
+use mp_anafis::tune_api::tier::{
     Limb,
     algorithms::{bench_add_sub_limbs, bench_add_two_limbs, bench_add_two_sequential_limbs},
 };

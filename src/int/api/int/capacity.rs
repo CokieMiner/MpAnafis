@@ -2,9 +2,9 @@
 
 use core::mem::swap;
 
-use super::{ArbiInt, DebugVerbose};
+use super::{DebugVerbose, MpInt};
 
-impl ArbiInt {
+impl MpInt {
     /// Validates internal invariants. Panics if invariants are violated.
     #[inline]
     #[track_caller]
@@ -13,14 +13,14 @@ impl ArbiInt {
             if self.value.abs.is_zero() {
                 assert!(
                     self.value.is_positive,
-                    "ArbiInt canonical zero must have a positive sign"
+                    "MpInt canonical zero must have a positive sign"
                 );
             }
 
             if let Some(bits) = self.precision.significant_bits() {
                 assert!(
                     self.value.required_signed_bits_for_bounded_storage() <= bits,
-                    "ArbiInt magnitude exceeds its bounded precision of {bits} bits"
+                    "MpInt magnitude exceeds its bounded precision of {bits} bits"
                 );
             }
         }

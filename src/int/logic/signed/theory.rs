@@ -2,9 +2,9 @@
 
 use core::cmp::Ordering;
 
-use super::InternalArbiInt;
+use super::InternalMpInt;
 
-impl InternalArbiInt {
+impl InternalMpInt {
     /// Computes signed Bezout coefficients for a non-zero second operand.
     ///
     /// The unsigned kernel returns coefficient residues. Complementing one

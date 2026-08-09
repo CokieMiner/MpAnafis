@@ -10,7 +10,7 @@ use core::{ops::*, panic::AssertUnwindSafe};
 use proptest::prelude::*;
 
 use super::{std::panic::catch_unwind, strategies};
-use crate::int::api::{ArbiInt, ArbiUint, BoundedPrecision};
+use crate::int::api::{BoundedPrecision, MpInt, MpUint};
 
 proptest! {
     #[test]
@@ -292,26 +292,26 @@ proptest! {
     #[test]
     fn prop_int_reference_div_rem_zero_rhs_panics(a in strategies::int(32)) {
         let div_owned_rhs_panicked = catch_unwind(AssertUnwindSafe(|| {
-            drop(Div::div(&a, ArbiInt::zero()));
+            drop(Div::div(&a, MpInt::zero()));
         }))
         .is_err();
         prop_assert!(div_owned_rhs_panicked);
 
         let div_borrowed_rhs_panicked = catch_unwind(AssertUnwindSafe(|| {
-            let zero = ArbiInt::zero();
+            let zero = MpInt::zero();
             drop(Div::div(&a, &zero));
         }))
         .is_err();
         prop_assert!(div_borrowed_rhs_panicked);
 
         let rem_owned_rhs_panicked = catch_unwind(AssertUnwindSafe(|| {
-            drop(Rem::rem(&a, ArbiInt::zero()));
+            drop(Rem::rem(&a, MpInt::zero()));
         }))
         .is_err();
         prop_assert!(rem_owned_rhs_panicked);
 
         let rem_borrowed_rhs_panicked = catch_unwind(AssertUnwindSafe(|| {
-            let zero = ArbiInt::zero();
+            let zero = MpInt::zero();
             drop(Rem::rem(&a, &zero));
         }))
         .is_err();
@@ -321,8 +321,8 @@ proptest! {
 
 #[test]
 fn division_assignment_validation_preserves_receiver() {
-    let zero_unsigned = ArbiUint::zero();
-    let unsigned_original = ArbiUint::from(37_u8);
+    let zero_unsigned = MpUint::zero();
+    let unsigned_original = MpUint::from(37_u8);
 
     let mut unsigned_quotient = unsigned_original.clone();
     assert!(
@@ -344,8 +344,8 @@ fn division_assignment_validation_preserves_receiver() {
     assert_eq!(unsigned_remainder.value, unsigned_original.value);
     assert_eq!(unsigned_remainder.precision, unsigned_original.precision);
 
-    let zero_signed = ArbiInt::zero();
-    let signed_original = ArbiInt::from(-37_i8);
+    let zero_signed = MpInt::zero();
+    let signed_original = MpInt::from(-37_i8);
     let mut signed_zero_quotient = signed_original.clone();
     assert!(
         catch_unwind(AssertUnwindSafe(|| {
@@ -367,10 +367,9 @@ fn division_assignment_validation_preserves_receiver() {
     assert_eq!(signed_zero_remainder.precision, signed_original.precision);
 
     let width = BoundedPrecision::new(8).expect("eight is a valid bounded width");
-    let minimum = ArbiInt::with_precision_checked(-128_i16, width)
+    let minimum = MpInt::with_precision_checked(-128_i16, width)
         .expect("-128 is the signed eight-bit minimum");
-    let minus_one =
-        ArbiInt::with_precision_checked(-1_i8, width).expect("-1 fits eight signed bits");
+    let minus_one = MpInt::with_precision_checked(-1_i8, width).expect("-1 fits eight signed bits");
 
     let mut minimum_quotient = minimum.clone();
     assert!(

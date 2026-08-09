@@ -1,9 +1,9 @@
-//! Primality testing for [`InternalArbiUint`].
+//! Primality testing for [`InternalMpUint`].
 
 #[cfg(test)]
 use core::cmp::Ordering;
 
-use super::{InternalArbiUint, Limb, MontgomeryDomain, MulScratch};
+use super::{InternalMpUint, Limb, MontgomeryDomain, MulScratch};
 
 use self::operations::Primality;
 #[cfg(test)]

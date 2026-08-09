@@ -2,7 +2,7 @@
 //!
 //! Two layers, and they answer different needs.
 //!
-//! The inherent methods on [`InternalArbiUint`] are the whole everyday surface —
+//! The inherent methods on [`InternalMpUint`] are the whole everyday surface —
 //! five operations, no scratch to thread, no algorithm to pick. Importing the
 //! type is enough to divide with it.
 //!
@@ -18,7 +18,7 @@
 use core::{cmp::Ordering, mem::replace};
 
 use super::{
-    ArchKernels, BURNIKEL_ZIEGLER_THRESHOLD, DivScratch, InternalArbiUint, LIMB_BITS, Limb,
+    ArchKernels, BURNIKEL_ZIEGLER_THRESHOLD, DivScratch, InternalMpUint, LIMB_BITS, Limb,
     NEWTON_RAPHSON_THRESHOLD,
 };
 
@@ -29,7 +29,7 @@ use super::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Division;
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Computes quotient and remainder of `self / rhs`.
     ///
     /// `rhs` must be non-zero.
@@ -70,7 +70,7 @@ impl InternalArbiUint {
     /// Computes only the quotient of `self / rhs`.
     ///
     /// `rhs` must be non-zero. Prefer this over discarding the remainder of
-    /// [`InternalArbiUint::div_rem`]: producing a remainder costs the full
+    /// [`InternalMpUint::div_rem`]: producing a remainder costs the full
     /// divisor width on every quotient limb, and this path is free to skip it
     /// entirely.
     #[must_use]
@@ -265,10 +265,10 @@ impl Division {
     /// Computes both halves of `num_a / den_b` into caller-owned outputs,
     /// choosing the divider from the divisor length.
     pub fn div_rem_into(
-        num_a: &InternalArbiUint,
-        den_b: &InternalArbiUint,
-        quotient_out: &mut InternalArbiUint,
-        rem_out: &mut InternalArbiUint,
+        num_a: &InternalMpUint,
+        den_b: &InternalMpUint,
+        quotient_out: &mut InternalMpUint,
+        rem_out: &mut InternalMpUint,
         scratch: &mut DivScratch,
     ) {
         debug_assert!(
@@ -298,16 +298,16 @@ impl Division {
 
     /// Computes only `num_a % den_b` using reusable division scratch.
     pub fn rem_into(
-        num_a: &InternalArbiUint,
-        den_b: &InternalArbiUint,
-        rem_out: &mut InternalArbiUint,
+        num_a: &InternalMpUint,
+        den_b: &InternalMpUint,
+        rem_out: &mut InternalMpUint,
         scratch: &mut DivScratch,
     ) {
         debug_assert!(
             !den_b.is_zero(),
             "internal division requires a non-zero divisor"
         );
-        let mut dummy_quot = replace(&mut scratch.dummy_quot, InternalArbiUint::zero());
+        let mut dummy_quot = replace(&mut scratch.dummy_quot, InternalMpUint::zero());
         if !Self::trivial::<false, true>(num_a, den_b, &mut dummy_quot, rem_out) {
             let v_limbs = Self::significant_limbs(den_b.limbs());
             let u_limbs = Self::significant_limbs(num_a.limbs());
@@ -328,10 +328,10 @@ impl Division {
     ///
     /// Returns `false` when the operands need the tower.
     pub fn trivial<const WRITE_QUOTIENT: bool, const WRITE_REMAINDER: bool>(
-        num_a: &InternalArbiUint,
-        den_b: &InternalArbiUint,
-        quotient_out: &mut InternalArbiUint,
-        rem_out: &mut InternalArbiUint,
+        num_a: &InternalMpUint,
+        den_b: &InternalMpUint,
+        quotient_out: &mut InternalMpUint,
+        rem_out: &mut InternalMpUint,
     ) -> bool {
         let v_limbs = Self::significant_limbs(den_b.limbs());
         debug_assert!(!v_limbs.is_empty(), "division requires a non-zero divisor");
@@ -348,7 +348,7 @@ impl Division {
         }
 
         if u_limbs.len() == v_limbs.len() {
-            match InternalArbiUint::cmp_limbs(u_limbs, v_limbs) {
+            match InternalMpUint::cmp_limbs(u_limbs, v_limbs) {
                 Ordering::Less => {
                     if WRITE_QUOTIENT {
                         quotient_out.clear();
@@ -360,7 +360,7 @@ impl Division {
                 }
                 Ordering::Equal => {
                     if WRITE_QUOTIENT {
-                        *quotient_out = InternalArbiUint::one();
+                        *quotient_out = InternalMpUint::one();
                     }
                     if WRITE_REMAINDER {
                         rem_out.clear();
@@ -370,7 +370,7 @@ impl Division {
                 Ordering::Greater => {
                     if Self::less_than_double(u_limbs, v_limbs) {
                         if WRITE_QUOTIENT {
-                            *quotient_out = InternalArbiUint::one();
+                            *quotient_out = InternalMpUint::one();
                         }
                         if WRITE_REMAINDER {
                             *rem_out = num_a.sub(den_b);

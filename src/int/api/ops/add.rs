@@ -2,9 +2,9 @@
 
 use core::ops::{Add, AddAssign};
 
-use super::{ArbiInt, ArbiUint};
+use super::{MpInt, MpUint};
 
-impl Add<Self> for ArbiUint {
+impl Add<Self> for MpUint {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -31,7 +31,7 @@ impl Add<Self> for ArbiUint {
     }
 }
 
-impl Add<&Self> for ArbiUint {
+impl Add<&Self> for MpUint {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -45,11 +45,11 @@ impl Add<&Self> for ArbiUint {
     }
 }
 
-impl Add<ArbiUint> for &ArbiUint {
-    type Output = ArbiUint;
+impl Add<MpUint> for &MpUint {
+    type Output = MpUint;
     #[inline]
     #[track_caller]
-    fn add(self, mut rhs: ArbiUint) -> Self::Output {
+    fn add(self, mut rhs: MpUint) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
         rhs.value.add_assign(&self.value);
         rhs.precision = precision;
@@ -59,13 +59,13 @@ impl Add<ArbiUint> for &ArbiUint {
     }
 }
 
-impl Add<&ArbiUint> for &ArbiUint {
-    type Output = ArbiUint;
+impl Add<&MpUint> for &MpUint {
+    type Output = MpUint;
     #[inline]
     #[track_caller]
-    fn add(self, rhs: &ArbiUint) -> Self::Output {
+    fn add(self, rhs: &MpUint) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
-        let result = ArbiUint {
+        let result = MpUint {
             value: self.value.add(&rhs.value),
             precision,
         };
@@ -75,7 +75,7 @@ impl Add<&ArbiUint> for &ArbiUint {
     }
 }
 
-impl AddAssign<Self> for ArbiUint {
+impl AddAssign<Self> for MpUint {
     #[inline]
     #[track_caller]
     fn add_assign(&mut self, mut rhs: Self) {
@@ -116,7 +116,7 @@ impl AddAssign<Self> for ArbiUint {
     }
 }
 
-impl AddAssign<&Self> for ArbiUint {
+impl AddAssign<&Self> for MpUint {
     #[inline]
     #[track_caller]
     fn add_assign(&mut self, rhs: &Self) {
@@ -137,9 +137,9 @@ impl AddAssign<&Self> for ArbiUint {
     }
 }
 
-// ---- ArbiInt ----
+// ---- MpInt ----
 
-impl Add<Self> for ArbiInt {
+impl Add<Self> for MpInt {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -168,7 +168,7 @@ impl Add<Self> for ArbiInt {
     }
 }
 
-impl Add<&Self> for ArbiInt {
+impl Add<&Self> for MpInt {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -182,11 +182,11 @@ impl Add<&Self> for ArbiInt {
     }
 }
 
-impl Add<ArbiInt> for &ArbiInt {
-    type Output = ArbiInt;
+impl Add<MpInt> for &MpInt {
+    type Output = MpInt;
     #[inline]
     #[track_caller]
-    fn add(self, mut rhs: ArbiInt) -> Self::Output {
+    fn add(self, mut rhs: MpInt) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
         rhs.value.add_assign(&self.value);
         rhs.precision = precision;
@@ -196,13 +196,13 @@ impl Add<ArbiInt> for &ArbiInt {
     }
 }
 
-impl Add<&ArbiInt> for &ArbiInt {
-    type Output = ArbiInt;
+impl Add<&MpInt> for &MpInt {
+    type Output = MpInt;
     #[inline]
     #[track_caller]
-    fn add(self, rhs: &ArbiInt) -> Self::Output {
+    fn add(self, rhs: &MpInt) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
-        let result = ArbiInt {
+        let result = MpInt {
             value: self.value.add(&rhs.value),
             precision,
         };
@@ -212,7 +212,7 @@ impl Add<&ArbiInt> for &ArbiInt {
     }
 }
 
-impl AddAssign<Self> for ArbiInt {
+impl AddAssign<Self> for MpInt {
     #[inline]
     #[track_caller]
     fn add_assign(&mut self, mut rhs: Self) {
@@ -254,7 +254,7 @@ impl AddAssign<Self> for ArbiInt {
     }
 }
 
-impl AddAssign<&Self> for ArbiInt {
+impl AddAssign<&Self> for MpInt {
     #[inline]
     #[track_caller]
     fn add_assign(&mut self, rhs: &Self) {

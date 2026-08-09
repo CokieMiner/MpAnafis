@@ -1,9 +1,9 @@
-//! Where Arbi stands against the fastest available big-integer libraries.
+//! Where Mp stands against the fastest available big-integer libraries.
 //!
 //! These benchmarks answer one question — are we ahead, and where are we not —
 //! and unlike every other group here they tune nothing. Each library is called
 //! at its raw limb-slice entry point so no allocator or wrapper sits inside the
-//! timed region, and Arbi runs through the full public dispatcher rather than
+//! timed region, and Mp runs through the full public dispatcher rather than
 //! any forced tier, so what is compared is three complete towers.
 //!
 //! Two adversaries, for different reasons:

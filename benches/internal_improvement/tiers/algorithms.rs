@@ -2,7 +2,7 @@
 
 use core::hint::black_box;
 
-use arbi_anafis::tune_api::tier::{
+use mp_anafis::tune_api::tier::{
     Limb,
     algorithms::{
         bench_karatsuba_mul_scratch_len, bench_karatsuba_mul_with_scratch, bench_schoolbook_mul,
@@ -358,7 +358,7 @@ fn ssa_production_end_to_end(bencher: divan::Bencher, len: usize) {
     // The tower hands SSA a `set_len` buffer whose contents are arbitrary, so
     // this one is poisoned rather than zeroed to match. Measured identical to a
     // zeroed buffer, which rules scratch contents out as a source of the gap
-    // between this benchmark and `crossovers::arbi_tower_reused`.
+    // between this benchmark and `crossovers::mp_tower_reused`.
     let mut scratch = operand(
         bench_ssa_mul_scratch_len(len, len),
         Limb::MAX.wrapping_sub(0x5555),

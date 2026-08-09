@@ -1,13 +1,13 @@
-//! Validated signed division kernels implemented on `InternalArbiInt`.
+//! Validated signed division kernels implemented on `InternalMpInt`.
 
 #![allow(
     clippy::same_name_method,
-    reason = "InternalArbiInt inherent division deliberately mirrors the corresponding operator traits."
+    reason = "InternalMpInt inherent division deliberately mirrors the corresponding operator traits."
 )]
 
-use super::InternalArbiInt;
+use super::InternalMpInt;
 
-impl InternalArbiInt {
+impl InternalMpInt {
     /// Returns whether truncating division would overflow a signed `bits`-bit
     /// destination.
     ///

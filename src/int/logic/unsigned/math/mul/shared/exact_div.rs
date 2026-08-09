@@ -95,7 +95,7 @@ impl SharedEval {
 
     /// Replace `value` with the exact half of `(value + other) mod B^n`.
     ///
-    /// Unlike [`exact_half_sum_in_place`], the final carry is intentionally
+    /// Unlike [`Self::exact_half_sum_in_place`], the final carry is intentionally
     /// discarded before halving. This is the signed fixed-width operation needed
     /// when `value` is a two's-complement interpolation difference but the modular
     /// sum is a proven nonnegative even coefficient.
@@ -179,7 +179,7 @@ impl SharedEval {
     /// Nine does not divide `B-1`, so this uses the modular inverse. For
     /// `9*q = (q<<3)+q`, the high product limb is `q>>(w-3)` plus the carry from
     /// adding `q` to the shifted low limb, which replaces the second full-width
-    /// multiplication of [`exact_div_odd_in_place`] with two shifts.
+    /// multiplication of [`Self::exact_div_odd_in_place`] with two shifts.
     pub fn exact_div9_in_place(value: &mut [Limb]) {
         const INVERSE: Limb = SharedEval::invert_odd(9);
         const HIGH_SHIFT: u32 = Limb::BITS.wrapping_sub(3);

@@ -2,14 +2,14 @@
 
 use core::ops::{Div, DivAssign, Rem, RemAssign};
 
-use super::{ArbiInt, ArbiUint};
+use super::{MpInt, MpUint};
 
 // For unsigned `a` and non-zero `b`, `a / b <= a`; moreover, `a % b = a`
 // when `a < b`, and otherwise `a % b < b <= a`. Therefore quotient and
 // remainder fit the left operand's declared width. A non-assigning result uses
 // a combined precision no narrower than the left operand, while assignment
 // retains that left precision, so no post-result precision check is needed.
-impl Div<Self> for ArbiUint {
+impl Div<Self> for MpUint {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -23,7 +23,7 @@ impl Div<Self> for ArbiUint {
     }
 }
 
-impl Div<&Self> for ArbiUint {
+impl Div<&Self> for MpUint {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -37,14 +37,14 @@ impl Div<&Self> for ArbiUint {
     }
 }
 
-impl Div<ArbiUint> for &ArbiUint {
-    type Output = ArbiUint;
+impl Div<MpUint> for &MpUint {
+    type Output = MpUint;
     #[inline]
     #[track_caller]
-    fn div(self, rhs: ArbiUint) -> Self::Output {
+    fn div(self, rhs: MpUint) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
         assert!(!rhs.value.is_zero(), "Division by zero");
-        let result = ArbiUint {
+        let result = MpUint {
             value: self.value.div(&rhs.value),
             precision,
         };
@@ -53,14 +53,14 @@ impl Div<ArbiUint> for &ArbiUint {
     }
 }
 
-impl Div<&ArbiUint> for &ArbiUint {
-    type Output = ArbiUint;
+impl Div<&MpUint> for &MpUint {
+    type Output = MpUint;
     #[inline]
     #[track_caller]
-    fn div(self, rhs: &ArbiUint) -> Self::Output {
+    fn div(self, rhs: &MpUint) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
         assert!(!rhs.value.is_zero(), "Division by zero");
-        let result = ArbiUint {
+        let result = MpUint {
             value: self.value.div(&rhs.value),
             precision,
         };
@@ -69,7 +69,7 @@ impl Div<&ArbiUint> for &ArbiUint {
     }
 }
 
-impl DivAssign<Self> for ArbiUint {
+impl DivAssign<Self> for MpUint {
     #[inline]
     #[track_caller]
     fn div_assign(&mut self, rhs: Self) {
@@ -77,7 +77,7 @@ impl DivAssign<Self> for ArbiUint {
     }
 }
 
-impl DivAssign<&Self> for ArbiUint {
+impl DivAssign<&Self> for MpUint {
     #[inline]
     #[track_caller]
     fn div_assign(&mut self, rhs: &Self) {
@@ -87,7 +87,7 @@ impl DivAssign<&Self> for ArbiUint {
     }
 }
 
-impl Rem<Self> for ArbiUint {
+impl Rem<Self> for MpUint {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -101,7 +101,7 @@ impl Rem<Self> for ArbiUint {
     }
 }
 
-impl Rem<&Self> for ArbiUint {
+impl Rem<&Self> for MpUint {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -115,14 +115,14 @@ impl Rem<&Self> for ArbiUint {
     }
 }
 
-impl Rem<ArbiUint> for &ArbiUint {
-    type Output = ArbiUint;
+impl Rem<MpUint> for &MpUint {
+    type Output = MpUint;
     #[inline]
     #[track_caller]
-    fn rem(self, rhs: ArbiUint) -> Self::Output {
+    fn rem(self, rhs: MpUint) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
         assert!(!rhs.value.is_zero(), "Division by zero");
-        let result = ArbiUint {
+        let result = MpUint {
             value: self.value.rem(&rhs.value),
             precision,
         };
@@ -131,14 +131,14 @@ impl Rem<ArbiUint> for &ArbiUint {
     }
 }
 
-impl Rem<&ArbiUint> for &ArbiUint {
-    type Output = ArbiUint;
+impl Rem<&MpUint> for &MpUint {
+    type Output = MpUint;
     #[inline]
     #[track_caller]
-    fn rem(self, rhs: &ArbiUint) -> Self::Output {
+    fn rem(self, rhs: &MpUint) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
         assert!(!rhs.value.is_zero(), "Division by zero");
-        let result = ArbiUint {
+        let result = MpUint {
             value: self.value.rem(&rhs.value),
             precision,
         };
@@ -147,7 +147,7 @@ impl Rem<&ArbiUint> for &ArbiUint {
     }
 }
 
-impl RemAssign<Self> for ArbiUint {
+impl RemAssign<Self> for MpUint {
     #[inline]
     #[track_caller]
     fn rem_assign(&mut self, rhs: Self) {
@@ -155,7 +155,7 @@ impl RemAssign<Self> for ArbiUint {
     }
 }
 
-impl RemAssign<&Self> for ArbiUint {
+impl RemAssign<&Self> for MpUint {
     #[inline]
     #[track_caller]
     fn rem_assign(&mut self, rhs: &Self) {
@@ -170,7 +170,7 @@ impl RemAssign<&Self> for ArbiUint {
 // which `assert_int_division_defined` rejects before any in-place mutation.
 // Hence successful quotient and remainder results already fit the left (and
 // therefore the combined) precision.
-impl Div<Self> for ArbiInt {
+impl Div<Self> for MpInt {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -184,7 +184,7 @@ impl Div<Self> for ArbiInt {
     }
 }
 
-impl Div<&Self> for ArbiInt {
+impl Div<&Self> for MpInt {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -198,14 +198,14 @@ impl Div<&Self> for ArbiInt {
     }
 }
 
-impl Div<ArbiInt> for &ArbiInt {
-    type Output = ArbiInt;
+impl Div<MpInt> for &MpInt {
+    type Output = MpInt;
     #[inline]
     #[track_caller]
-    fn div(self, rhs: ArbiInt) -> Self::Output {
+    fn div(self, rhs: MpInt) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
         assert_int_division_defined(self, &rhs, precision.significant_bits(), "division");
-        let result = ArbiInt {
+        let result = MpInt {
             value: self.value.div(&rhs.value),
             precision,
         };
@@ -214,14 +214,14 @@ impl Div<ArbiInt> for &ArbiInt {
     }
 }
 
-impl Div<&ArbiInt> for &ArbiInt {
-    type Output = ArbiInt;
+impl Div<&MpInt> for &MpInt {
+    type Output = MpInt;
     #[inline]
     #[track_caller]
-    fn div(self, rhs: &ArbiInt) -> Self::Output {
+    fn div(self, rhs: &MpInt) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
         assert_int_division_defined(self, rhs, precision.significant_bits(), "division");
-        let result = ArbiInt {
+        let result = MpInt {
             value: self.value.div(&rhs.value),
             precision,
         };
@@ -230,7 +230,7 @@ impl Div<&ArbiInt> for &ArbiInt {
     }
 }
 
-impl DivAssign<Self> for ArbiInt {
+impl DivAssign<Self> for MpInt {
     #[inline]
     #[track_caller]
     fn div_assign(&mut self, rhs: Self) {
@@ -238,7 +238,7 @@ impl DivAssign<Self> for ArbiInt {
     }
 }
 
-impl DivAssign<&Self> for ArbiInt {
+impl DivAssign<&Self> for MpInt {
     #[inline]
     #[track_caller]
     fn div_assign(&mut self, rhs: &Self) {
@@ -248,7 +248,7 @@ impl DivAssign<&Self> for ArbiInt {
     }
 }
 
-impl Rem<Self> for ArbiInt {
+impl Rem<Self> for MpInt {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -262,7 +262,7 @@ impl Rem<Self> for ArbiInt {
     }
 }
 
-impl Rem<&Self> for ArbiInt {
+impl Rem<&Self> for MpInt {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -276,14 +276,14 @@ impl Rem<&Self> for ArbiInt {
     }
 }
 
-impl Rem<ArbiInt> for &ArbiInt {
-    type Output = ArbiInt;
+impl Rem<MpInt> for &MpInt {
+    type Output = MpInt;
     #[inline]
     #[track_caller]
-    fn rem(self, rhs: ArbiInt) -> Self::Output {
+    fn rem(self, rhs: MpInt) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
         assert_int_division_defined(self, &rhs, precision.significant_bits(), "remainder");
-        let result = ArbiInt {
+        let result = MpInt {
             value: self.value.rem(&rhs.value),
             precision,
         };
@@ -292,14 +292,14 @@ impl Rem<ArbiInt> for &ArbiInt {
     }
 }
 
-impl Rem<&ArbiInt> for &ArbiInt {
-    type Output = ArbiInt;
+impl Rem<&MpInt> for &MpInt {
+    type Output = MpInt;
     #[inline]
     #[track_caller]
-    fn rem(self, rhs: &ArbiInt) -> Self::Output {
+    fn rem(self, rhs: &MpInt) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
         assert_int_division_defined(self, rhs, precision.significant_bits(), "remainder");
-        let result = ArbiInt {
+        let result = MpInt {
             value: self.value.rem(&rhs.value),
             precision,
         };
@@ -308,7 +308,7 @@ impl Rem<&ArbiInt> for &ArbiInt {
     }
 }
 
-impl RemAssign<Self> for ArbiInt {
+impl RemAssign<Self> for MpInt {
     #[inline]
     #[track_caller]
     fn rem_assign(&mut self, rhs: Self) {
@@ -316,7 +316,7 @@ impl RemAssign<Self> for ArbiInt {
     }
 }
 
-impl RemAssign<&Self> for ArbiInt {
+impl RemAssign<&Self> for MpInt {
     #[inline]
     #[track_caller]
     fn rem_assign(&mut self, rhs: &Self) {
@@ -329,8 +329,8 @@ impl RemAssign<&Self> for ArbiInt {
 #[inline]
 #[track_caller]
 fn assert_int_division_defined(
-    lhs: &ArbiInt,
-    rhs: &ArbiInt,
+    lhs: &MpInt,
+    rhs: &MpInt,
     destination_bits: Option<usize>,
     operation: &str,
 ) {
@@ -338,7 +338,7 @@ fn assert_int_division_defined(
     if let Some(bits) = destination_bits {
         assert!(
             !lhs.value.bounded_division_overflows(&rhs.value, bits),
-            "ArbiInt {operation} overflow for Bounded({bits})"
+            "MpInt {operation} overflow for Bounded({bits})"
         );
     }
 }

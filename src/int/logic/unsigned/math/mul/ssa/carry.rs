@@ -4,7 +4,8 @@
 //! reconstruction sweep, and the CRT merge — needs to push a single carry or
 //! borrow through a limb slice and know whether it escaped off the end. These
 //! are the only implementations of that loop in the tier; nothing here is
-//! Fermat-specific, which is why it sits above [`super::ring`] rather than in
+//! Fermat-specific, which is why it sits above
+//! [`ring`](crate::int::logic::unsigned::math::mul::ssa::ring) rather than in
 //! it.
 //!
 //! The `_in_place` pair additionally propagates past the end of a shorter

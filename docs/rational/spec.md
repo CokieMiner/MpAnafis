@@ -1,22 +1,22 @@
-# ArbiRational Implementation Planning
+# MpRational Implementation Planning
 
 ## 0. The Precision System (Delegated)
 
-`ArbiRational` does **not** have its own independent precision metadata field or hierarchy. Instead, it relies entirely on the precision tracking of its constituent parts: `numer: ArbiInt` and `denom: ArbiUint`.
+`MpRational` does **not** have its own independent precision metadata field or hierarchy. Instead, it relies entirely on the precision tracking of its constituent parts: `numer: MpInt` and `denom: MpUint`.
 
-- **Component Precision**: A rational number's precision is simply the precision of its numerator and denominator. They will typically share the same bounds (e.g. if constructed via `ArbiRational::from(1)` in a 256-bit global context), but can technically have asymmetric bounds if explicitly constructed that way.
+- **Component Precision**: A rational number's precision is simply the precision of its numerator and denominator. They will typically share the same bounds (e.g. if constructed via `MpRational::from(1)` in a 256-bit global context), but can technically have asymmetric bounds if explicitly constructed that way.
 - **Rule Delegation**: All rules regarding `Context`, `Global`, `Bounded + Unlimited = Unlimited`, and `max(width_a, width_b)` are natively handled by the underlying integer operators when arithmetic is performed on the components.
 - **Intermediate Overflows**: See Section 0.1 for the intermediate overflow policy.
 
 ### 0.1 Intermediate Overflow Policy
-To satisfy the invariant that overflow checks apply only to the *final canonical result*, `ArbiRational` arithmetic algorithms (like addition and multiplication) must perform intermediate coefficient scaling in an unbounded or widening workspace. They then reduce by the final GCD, and only then attempt to fit the canonical result back into the target `max` precision bounds.
+To satisfy the invariant that overflow checks apply only to the *final canonical result*, `MpRational` arithmetic algorithms (like addition and multiplication) must perform intermediate coefficient scaling in an unbounded or widening workspace. They then reduce by the final GCD, and only then attempt to fit the canonical result back into the target `max` precision bounds.
 **Example**: If two `Bounded(256)` rationals are added, the intermediate unreduced numerator $a \cdot d' + c \cdot b'$ could briefly require 512 bits. The implementation will allocate this temporary 512-bit workspace and only return an overflow error if the *reduced* numerator or denominator still exceeds 256 bits.
-- **Mixed-Type Promotion**: `ArbiInt` / `ArbiUint` promote exactly into `ArbiRational` for mixed rational operations. Any operation between `ArbiRational` and `ArbiFloat` promotes to `ArbiFloat`, rounded using the active float target precision and rounding mode.
+- **Mixed-Type Promotion**: `MpInt` / `MpUint` promote exactly into `MpRational` for mixed rational operations. Any operation between `MpRational` and `MpFloat` promotes to `MpFloat`, rounded using the active float target precision and rounding mode.
 
 > **Note:** Bounded precision on rationals is a resource and representation bound over the coefficients. Unlike bounded integers, bounded rationals do not form a closed algebraic structure.
 
 ## Type Definition
-- **Type**: `InternalArbiRational`
+- **Type**: `InternalMpRational`
 - **Description**: The core data structure for arbitrary precision rational numbers.
 - **Invariants**: 
   1. **Strictly Positive Denominator**: `denom > 0`. The sign is exclusively carried by `numer`.
@@ -26,12 +26,12 @@ To satisfy the invariant that overflow checks apply only to the *final canonical
 ## Methods
 
 ### 1. Parts Management & Constructors
-- `new(numer: impl Into<ArbiInt>, denom: impl Into<ArbiUint>) -> Result<Self, RationalError>`: The primary canonical constructor. Generic over primitives. Will reduce by `gcd(n, d)`. Returns `RationalError::NegativeDenominator` if the denominator input would be negative (though signature enforces unsigned denom here, this applies generally).
-- `from_parts(numer: ArbiInt, denom: ArbiUint) -> Result<Self, RationalError>`: Accepts `Arbi` types directly. Will reduce by `gcd(n, d)`.
-- `new_raw(numer: ArbiInt, denom: ArbiUint) -> Result<Self, RationalError>`: Assumes the input is already reduced (no GCD). Returns `RationalError::NonCanonical` in debug mode if invariants are violated, or `RationalError::DenominatorZero` if `denom == 0`.
-- `new_unchecked(numer: ArbiInt, denom: ArbiUint) -> Self`: `unsafe fn`. Caller MUST guarantee: 1) `denom != 0`, 2) `gcd(|numer|, denom) == 1`, and 3) if `numer == 0`, then `denom == 1`.
-- `numer` / `denom`: Returns `&ArbiInt` and `&ArbiUint`.
-- `into_numer_denom`: Returns `(ArbiInt, ArbiUint)`.
+- `new(numer: impl Into<MpInt>, denom: impl Into<MpUint>) -> Result<Self, RationalError>`: The primary canonical constructor. Generic over primitives. Will reduce by `gcd(n, d)`. Returns `RationalError::NegativeDenominator` if the denominator input would be negative (though signature enforces unsigned denom here, this applies generally).
+- `from_parts(numer: MpInt, denom: MpUint) -> Result<Self, RationalError>`: Accepts `Mp` types directly. Will reduce by `gcd(n, d)`.
+- `new_raw(numer: MpInt, denom: MpUint) -> Result<Self, RationalError>`: Assumes the input is already reduced (no GCD). Returns `RationalError::NonCanonical` in debug mode if invariants are violated, or `RationalError::DenominatorZero` if `denom == 0`.
+- `new_unchecked(numer: MpInt, denom: MpUint) -> Self`: `unsafe fn`. Caller MUST guarantee: 1) `denom != 0`, 2) `gcd(|numer|, denom) == 1`, and 3) if `numer == 0`, then `denom == 1`.
+- `numer` / `denom`: Returns `&MpInt` and `&MpUint`.
+- `into_numer_denom`: Returns `(MpInt, MpUint)`.
 
 ### 2. Core Arithmetic
 - `add` / `sub` (Addition and Subtraction):
@@ -57,7 +57,7 @@ To satisfy the invariant that overflow checks apply only to the *final canonical
 - `try_*` (Precision variants):
   - *Implementation Details:* Returns `Result<Self, RationalError>` for precision boundary or allocation failures.
 - `checked_*` (Arithmetic variants):
-  - *Implementation Details:* Checked arithmetic. Returns `Option<Self>` ONLY for domain errors like division by zero (e.g. `checked_div`). Precision overflows still panic here just like plain operators, consistent with `ArbiInt`.
+  - *Implementation Details:* Checked arithmetic. Returns `Option<Self>` ONLY for domain errors like division by zero (e.g. `checked_div`). Precision overflows still panic here just like plain operators, consistent with `MpInt`.
 
 - `recip` / `checked_recip` (Reciprocal):
   - *Implementation Details:* Swap `numer` and `denom`. If `numer` was negative, transfer `-` to new `numer`. `recip` panics if `numer == 0` (like std integer division by zero). `checked_recip` returns `Option<Self>`.
@@ -68,7 +68,7 @@ To satisfy the invariant that overflow checks apply only to the *final canonical
 - `floor` / `ceil` / `trunc`: Delegate to division semantics.
 - `fract` (Fractional part): Uses truncating division semantics, not Euclidean semantics.
 - `continued_fraction`: Returns a finite iterator yielding coefficients. Uses floor-division semantics.
-- `from_continued_fraction(coeffs: &[ArbiInt])`: Inverse of `continued_fraction`. Coefficients after `coeffs[0]` must be strictly positive. If any $a_i \le 0$ for $i > 0$, returns `RationalError::InvalidFormat`.
+- `from_continued_fraction(coeffs: &[MpInt])`: Inverse of `continued_fraction`. Coefficients after `coeffs[0]` must be strictly positive. If any $a_i \le 0$ for $i > 0$, returns `RationalError::InvalidFormat`.
 
 ### 4. Approximations & Advanced Math
 - `best_approximation(max_denom)`
@@ -76,7 +76,7 @@ To satisfy the invariant that overflow checks apply only to the *final canonical
 - `lower_approximation(max_denom)`
 - `upper_approximation(max_denom)`
 - `limit_denominator(max_denom)`: Alias for best approximation within bounds.
-- `rational_reconstruction(residue: &ArbiUint, modulus: &ArbiUint, numer_bound: &ArbiUint, denom_bound: &ArbiUint) -> Result<Self, RationalError>`: Reconstructs a rational number from modular data. **Precondition:** `2 * numer_bound * denom_bound < modulus` must hold for a unique reconstruction.
+- `rational_reconstruction(residue: &MpUint, modulus: &MpUint, numer_bound: &MpUint, denom_bound: &MpUint) -> Result<Self, RationalError>`: Reconstructs a rational number from modular data. **Precondition:** `2 * numer_bound * denom_bound < modulus` must hold for a unique reconstruction.
 - `farey_neighbors(max_denom)`
 - `stern_brocot_path()` / `from_stern_brocot_path(path)`
 - `egyptian_fraction()` (Optional `cas` feature).
@@ -101,14 +101,14 @@ To satisfy the invariant that overflow checks apply only to the *final canonical
   from_f64_exact(value: f64) -> Result<Self, FloatConversionError>
   from_f32_exact(value: f32) -> Result<Self, FloatConversionError>
   from_f64_approx(value: f64, max_denom: u64) -> Result<Self, FloatConversionError>
-  from_f64_within_tolerance(value: f64, tol: ArbiRational) -> Result<Self, FloatConversionError>
+  from_f64_within_tolerance(value: f64, tol: MpRational) -> Result<Self, FloatConversionError>
   to_f64() -> Option<f64>
   to_f64_lossy() -> f64
   ```
-  *(Note: `from_f64_bits` is intentionally omitted to avoid semantic clashes with `ArbiInt::from_f64_bits` which interprets bits as a literal integer. To decode a float from bits, use `from_f64_exact(f64::from_bits(bits))`.)*
+  *(Note: `from_f64_bits` is intentionally omitted to avoid semantic clashes with `MpInt::from_f64_bits` which interprets bits as a literal integer. To decode a float from bits, use `from_f64_exact(f64::from_bits(bits))`.)*
   - `to_f64` follows `num_traits::ToPrimitive` expectations. Returns `None` if the exact value overflows `f64::MAX` to infinity.
 - **Cross-Type Conversions**:
-  - `From<ArbiInt>` and `From<ArbiUint>` to `ArbiRational` (infallible, `denom=1`).
+  - `From<MpInt>` and `From<MpUint>` to `MpRational` (infallible, `denom=1`).
   - `From<i32>`, `From<i64>`, etc. (infallible).
 - **Formatting (`core::fmt`)**:
   - `Display`: exact `a/b`, or `a` when denominator is 1.
@@ -122,7 +122,7 @@ To satisfy the invariant that overflow checks apply only to the *final canonical
 
 ### 8. Comparisons & Equality
 - `cmp` / `eq` / `cmp_abs` / `abs_diff` / `min` / `max` / `clamp`.
-- When cross-comparing with `f64`, converts `f64` strictly to exact `ArbiRational` via `from_f64_exact` to avoid false positives.
+- When cross-comparing with `f64`, converts `f64` strictly to exact `MpRational` via `from_f64_exact` to avoid false positives.
 
 ### 9. Memory Management
 - `clone_from` / `swap`.
@@ -132,7 +132,7 @@ To satisfy the invariant that overflow checks apply only to the *final canonical
 
 ### 10. Ecosystem & Randomness
 - **Hash Guarantees**: The sequence of fields fed into `Hash` is deterministic and canonical. Therefore, for the same `Hasher` implementation and seed, equal rationals hash identically across platforms.
-- **Cross-Type Contract**: `ArbiRational` is the exact middle layer of the numeric tower (`int -> rational -> float`). It must preserve exactness when receiving integers and must yield to `ArbiFloat` when mixed with approximate floating values.
+- **Cross-Type Contract**: `MpRational` is the exact middle layer of the numeric tower (`int -> rational -> float`). It must preserve exactness when receiving integers and must yield to `MpFloat` when mixed with approximate floating values.
 - **Serialization**: Binary serialization is deterministic only for the crate-defined canonical serialization format, not necessarily for arbitrary `serde` backends.
 - **Randomness (`rand`)**:
   - No `Standard` distribution is implemented.
@@ -155,7 +155,7 @@ pub enum RationalError {
     AllocationRequired,
     TooLarge,
     NonCanonical,
-    IntegerError(ArbiError),
+    IntegerError(MpError),
 }
 ```
 *Note: Operations that propagate integer domain/precision errors wrap them in `RationalError::IntegerError`.*
@@ -223,8 +223,8 @@ graph TD
         Float["from_f64, to_f64"]
         Str["to/from_str_radix, from_ascii"]
         Iter["digits_with_period"]
-        ExtGCD["ArbiUint::ExtGCD"]
-        Factor["ArbiUint::Factor"]
+        ExtGCD["MpUint::ExtGCD"]
+        Factor["MpUint::Factor"]
     end
     MulDiv --> Str
     Round --> Iter

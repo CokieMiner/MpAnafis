@@ -21,9 +21,7 @@ use rug::Integer;
 use crate::int::support::rug_uint_pairs;
 use crate::int::{
     ladders::DIVISION,
-    support::{
-        SAMPLE_COUNT_WIDE, SAMPLE_SIZE_WIDE, arbi_uint_pairs, verify_arbi_uint_division_pairs,
-    },
+    support::{SAMPLE_COUNT_WIDE, SAMPLE_SIZE_WIDE, mp_uint_pairs, verify_mp_uint_division_pairs},
 };
 
 /// Quotient and remainder in one call.
@@ -31,9 +29,9 @@ mod div_rem {
     use super::*;
 
     #[divan::bench(args = DIVISION, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
-        verify_arbi_uint_division_pairs(&inputs);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
+        verify_mp_uint_division_pairs(&inputs);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(left).div_rem(black_box(right)));
@@ -62,9 +60,9 @@ mod div_trunc {
     use super::*;
 
     #[divan::bench(args = DIVISION, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
-        verify_arbi_uint_division_pairs(&inputs);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
+        verify_mp_uint_division_pairs(&inputs);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(left).div_trunc(black_box(right)));
@@ -89,9 +87,9 @@ mod rem_trunc {
     use super::*;
 
     #[divan::bench(args = DIVISION, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let inputs = arbi_uint_pairs(bits);
-        verify_arbi_uint_division_pairs(&inputs);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let inputs = mp_uint_pairs(bits);
+        verify_mp_uint_division_pairs(&inputs);
         bencher.bench_local(|| {
             for (left, right) in &inputs {
                 let _output = black_box(black_box(left).rem_trunc(black_box(right)));

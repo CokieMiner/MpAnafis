@@ -17,7 +17,7 @@ fn isqrt_resolves_every_width_for_sparse_and_dense_operands() {
         if let Some(top) = sparse.last_mut() {
             *top = Limb::MAX ^ 0x5555;
         }
-        let sparse_value = InternalArbiUint::from_limbs(sparse);
+        let sparse_value = InternalMpUint::from_limbs(sparse);
         let sparse_root = sparse_value.isqrt();
         assert!(
             sparse_root.mul(&sparse_root) <= sparse_value,
@@ -25,7 +25,7 @@ fn isqrt_resolves_every_width_for_sparse_and_dense_operands() {
         );
 
         let dense: alloc::vec::Vec<Limb> = alloc::vec![Limb::MAX.wrapping_div(3); len];
-        let dense_value = InternalArbiUint::from_limbs(dense);
+        let dense_value = InternalMpUint::from_limbs(dense);
         let dense_root = dense_value.isqrt();
         assert!(
             dense_root.mul(&dense_root) <= dense_value,
@@ -41,7 +41,7 @@ proptest! {
     fn prop_screen_never_rejects_a_square(
         limbs in proptest::collection::vec(any::<Limb>(), 0..=3),
     ) {
-        let root = InternalArbiUint::from_limbs(limbs);
+        let root = InternalMpUint::from_limbs(limbs);
         let square = root.mul(&root);
         prop_assert!(may_be_square(&square));
     }
@@ -52,7 +52,7 @@ proptest! {
     fn prop_screen_agrees_with_is_perfect_square(
         limbs in proptest::collection::vec(any::<Limb>(), 0..=3),
     ) {
-        let value = InternalArbiUint::from_limbs(limbs);
+        let value = InternalMpUint::from_limbs(limbs);
         if !may_be_square(&value) {
             prop_assert!(!value.is_perfect_square());
         }
@@ -67,7 +67,7 @@ proptest! {
         limbs in proptest::collection::vec(any::<Limb>(), 0..=3),
         n in 2_u32..=5,
     ) {
-        let val = InternalArbiUint::from_limbs(limbs);
+        let val = InternalMpUint::from_limbs(limbs);
 
         // isqrt property: r^2 <= x < (r+1)^2
         let sqrt_r = val.isqrt();
@@ -75,7 +75,7 @@ proptest! {
         prop_assert!(r_sq <= val);
 
         let mut r_plus_1 = sqrt_r;
-        r_plus_1.add_assign(&InternalArbiUint::one());
+        r_plus_1.add_assign(&InternalMpUint::one());
         let r_plus_1_sq = r_plus_1.mul(&r_plus_1);
         if r_plus_1_sq.significant_bits() >= r_sq.significant_bits() {
             prop_assert!(val < r_plus_1_sq);
@@ -96,7 +96,7 @@ proptest! {
         let mut sum = root_sq;
         sum.add_assign(&rem);
         prop_assert_eq!(&sum, &val);
-        prop_assert!(rem < InternalArbiUint::from_u64(2).shl(root.significant_bits() + 1));
+        prop_assert!(rem < InternalMpUint::from_u64(2).shl(root.significant_bits() + 1));
 
         // nth_root property: r^n <= x < (r+1)^n
         let r_nth = val.nth_root(n);
@@ -104,7 +104,7 @@ proptest! {
         prop_assert!(r_nth_pow <= val);
 
         let mut r_nth_plus_1 = r_nth;
-        r_nth_plus_1.add_assign(&InternalArbiUint::one());
+        r_nth_plus_1.add_assign(&InternalMpUint::one());
         let r_nth_plus_1_pow = r_nth_plus_1.pow(n);
         if r_nth_plus_1_pow.significant_bits() >= r_nth_pow.significant_bits() {
             prop_assert!(val < r_nth_plus_1_pow);
@@ -123,18 +123,18 @@ proptest! {
         limbs in proptest::collection::vec(any::<Limb>(), 8..=24),
         n in 3_u32..=7,
     ) {
-        let val = InternalArbiUint::from_limbs(limbs);
+        let val = InternalMpUint::from_limbs(limbs);
 
         let root = val.isqrt();
         prop_assert!(root.mul(&root) <= val);
         let mut above = root;
-        above.add_assign(&InternalArbiUint::one());
+        above.add_assign(&InternalMpUint::one());
         prop_assert!(val < above.mul(&above));
 
         let nth = val.nth_root(n);
         prop_assert!(nth.pow(n) <= val);
         let mut nth_above = nth;
-        nth_above.add_assign(&InternalArbiUint::one());
+        nth_above.add_assign(&InternalMpUint::one());
         prop_assert!(val < nth_above.pow(n));
     }
 }

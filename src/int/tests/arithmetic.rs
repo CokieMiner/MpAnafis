@@ -74,7 +74,7 @@ proptest! {
             let expected_ceil = if rem.is_zero() {
                 &ua / &ub
             } else {
-                (&ua / &ub) + ArbiUint::one()
+                (&ua / &ub) + MpUint::one()
             };
             prop_assert_eq!(ceil_q, expected_ceil, "Uint div_ceil");
         }
@@ -86,27 +86,27 @@ fn bounded_ceiling_division_preserves_combined_precision() {
     let wide = nz(8);
     let narrow = nz(4);
     let unsigned_dividend =
-        ArbiUint::with_precision_checked(7_u8, wide).expect("seven fits eight bits");
+        MpUint::with_precision_checked(7_u8, wide).expect("seven fits eight bits");
     let unsigned_divisor =
-        ArbiUint::with_precision_checked(3_u8, narrow).expect("three fits four bits");
+        MpUint::with_precision_checked(3_u8, narrow).expect("three fits four bits");
     let expected_precision = Precision::Bounded(wide);
 
     let unsigned = unsigned_dividend.div_ceil(&unsigned_divisor);
     let unsigned_checked = unsigned_dividend
         .checked_div_ceil(&unsigned_divisor)
         .expect("the divisor is non-zero");
-    assert_eq!(unsigned.value, InternalArbiUint::from_limb(3));
+    assert_eq!(unsigned.value, InternalMpUint::from_limb(3));
     assert_eq!(unsigned.precision, expected_precision);
     assert_eq!(unsigned_checked.precision, expected_precision);
 
     let signed_dividend =
-        ArbiInt::with_precision_checked(7_i8, wide).expect("seven fits eight signed bits");
+        MpInt::with_precision_checked(7_i8, wide).expect("seven fits eight signed bits");
     let signed_divisor =
-        ArbiInt::with_precision_checked(3_i8, narrow).expect("three fits four signed bits");
+        MpInt::with_precision_checked(3_i8, narrow).expect("three fits four signed bits");
     let signed_checked = signed_dividend
         .checked_div_ceil(&signed_divisor)
         .expect("the divisor is non-zero and the quotient fits");
-    assert_eq!(signed_checked, ArbiInt::from(3_i8));
+    assert_eq!(signed_checked, MpInt::from(3_i8));
     assert_eq!(signed_checked.precision, expected_precision);
 }
 
@@ -120,10 +120,10 @@ proptest! {
     ) {
         let lhs_width = nz(lhs_bits);
         let rhs_width = nz(rhs_bits);
-        let lhs = ArbiUint::with_precision_wrapping(lhs_seed, lhs_width);
+        let lhs = MpUint::with_precision_wrapping(lhs_seed, lhs_width);
         // Setting the low bit before wrapping keeps the divisor non-zero for
         // every generated width, including one bit.
-        let rhs = ArbiUint::with_precision_wrapping(rhs_seed | 1, rhs_width);
+        let rhs = MpUint::with_precision_wrapping(rhs_seed | 1, rhs_width);
         let combined_precision = Precision::Bounded(nz(lhs_bits.max(rhs_bits)));
 
         let quotient = &lhs / &rhs;
@@ -182,7 +182,7 @@ proptest! {
             prop_assert_eq!(ib.is_divisor_of(&ia), rem.is_zero());
 
             let (euclid_q, euclid_r) = ia.div_rem_euclid(&ib).expect("non-zero div");
-            prop_assert!(euclid_r >= ArbiInt::zero(), "euclid_r must be non-negative");
+            prop_assert!(euclid_r >= MpInt::zero(), "euclid_r must be non-negative");
             prop_assert!(euclid_r < ib.abs(), "euclid_r must be less than |b|");
             let euclid_recon = (&ib * &euclid_q) + &euclid_r;
             prop_assert_eq!(&euclid_recon, &ia, "Euclid reconstruction");
@@ -211,7 +211,7 @@ proptest! {
 proptest! {
     #[test]
     fn prop_add_identity(a in strategies::uint(16)) {
-        let zero = ArbiUint::zero();
+        let zero = MpUint::zero();
         let a_plus_0 = &a + &zero;
         prop_assert!(a_plus_0 == a, "a + 0 != a");
         prop_assert!(&zero + &a == a, "0 + a != a");
@@ -249,11 +249,11 @@ proptest! {
 proptest! {
     #[test]
     fn prop_mul_identity(a in strategies::uint(12)) {
-        let one = ArbiUint::one();
-        let zero = ArbiUint::zero();
+        let one = MpUint::one();
+        let zero = MpUint::zero();
         prop_assert!(&a * &one == a, "a * 1 != a");
-        prop_assert_eq!(&a * &zero, ArbiUint::zero(), "a * 0 != 0");
-        prop_assert_eq!(&zero * &a, ArbiUint::zero(), "0 * a != 0");
+        prop_assert_eq!(&a * &zero, MpUint::zero(), "a * 0 != 0");
+        prop_assert_eq!(&zero * &a, MpUint::zero(), "0 * a != 0");
     }
 }
 
@@ -277,14 +277,14 @@ proptest! {
 proptest! {
     #[test]
     fn prop_div_self_is_one(a in strategies::uint_nonzero(12)) {
-        prop_assert_eq!(&a / &a, ArbiUint::one(), "a/a != 1");
+        prop_assert_eq!(&a / &a, MpUint::one(), "a/a != 1");
     }
 }
 
 proptest! {
     #[test]
     fn prop_div_one_is_self(a in strategies::uint(12)) {
-        let one = ArbiUint::one();
+        let one = MpUint::one();
         prop_assert_eq!(&a / &one, a, "a/1 != a");
     }
 }
@@ -334,11 +334,11 @@ proptest! {
 proptest! {
     #[test]
     fn prop_no_negative_zero_constructors(value in -1000_i32..=1000_i32) {
-        let integer = ArbiInt::from(value);
+        let integer = MpInt::from(value);
         if integer.value.abs.is_zero() {
             prop_assert!(
                 integer.value.is_positive,
-                "ArbiInt from {value}: zero must have is_positive=true"
+                "MpInt from {value}: zero must have is_positive=true"
             );
         }
     }
@@ -347,7 +347,7 @@ proptest! {
 proptest! {
     #[test]
     fn prop_div_trunc_sign_matches_rust(a in -1000_i64..=1000_i64, b in strategies::int_nonzero(4)) {
-        let ai = ArbiInt::from(a);
+        let ai = MpInt::from(a);
         let bi = b;
         let q = &ai / &bi;
         let r = &ai % &bi;
@@ -358,16 +358,16 @@ proptest! {
 proptest! {
     #[test]
     fn prop_div_trunc_sign_cases_rust_equivalent(a in -1000_i64..=1000_i64, b in (-1000_i64..=1000_i64).prop_filter("non-zero", |v| *v != 0)) {
-        let ai = ArbiInt::from(a);
-        let bi = ArbiInt::from(b);
+        let ai = MpInt::from(a);
+        let bi = MpInt::from(b);
         let q = &ai / &bi;
         let r = &ai % &bi;
         prop_assert_eq!(&(&q * &bi) + &r, ai, "a = q*b + r failed");
         let (expected_q, expected_r) = (a.checked_div(b).expect("non-zero"), a.checked_rem(b).expect("non-zero"));
         if a.checked_div(b) == Some(expected_q) && a.checked_rem(b) == Some(expected_r) {
             let _ = (a, b);
-            prop_assert_eq!(q, ArbiInt::from(expected_q), "{} / {}", a, b);
-            prop_assert_eq!(r, ArbiInt::from(expected_r), "{} % {}", a, b);
+            prop_assert_eq!(q, MpInt::from(expected_q), "{} / {}", a, b);
+            prop_assert_eq!(r, MpInt::from(expected_r), "{} % {}", a, b);
         }
     }
 }
@@ -375,14 +375,14 @@ proptest! {
 proptest! {
     #[test]
     fn prop_div_by_one_min(n in any::<i64>()) {
-        let a = ArbiInt::from(n);
+        let a = MpInt::from(n);
         let a_clone = a.clone();
-        let one = ArbiInt::from(1_i8);
-        let neg_one = ArbiInt::from(-1_i8);
+        let one = MpInt::from(1_i8);
+        let neg_one = MpInt::from(-1_i8);
         prop_assert_eq!(&a / &one, a_clone, "{} / 1", n);
         if n == i64::MIN {
             // i64::MIN / -1 = 2^63 (i64::MAX + 1)
-            let expected = ArbiInt::from(i64::MAX) + ArbiInt::from(1_i8);
+            let expected = MpInt::from(i64::MAX) + MpInt::from(1_i8);
             prop_assert_eq!(&a / &neg_one, expected, "i64::MIN / -1");
         } else {
             // a / -1 == -a (safe for all i64 values except i64::MIN)
@@ -401,9 +401,9 @@ proptest! {
             .checked_shl(shift)
             .expect("property width is at most 127")
             .wrapping_neg();
-        let min_value = ArbiInt::with_precision_checked(minimum, nz(bits))
+        let min_value = MpInt::with_precision_checked(minimum, nz(bits))
             .expect("signed minimum fits its width");
-        let neg_one = ArbiInt::with_precision_checked(-1_i8, nz(bits))
+        let neg_one = MpInt::with_precision_checked(-1_i8, nz(bits))
             .expect("negative one fits every signed width");
         drop(min_value / neg_one);
     }

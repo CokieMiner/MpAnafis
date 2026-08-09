@@ -2,16 +2,16 @@
 
 use core::ops::{Neg, Sub, SubAssign};
 
-use super::{ArbiInt, ArbiUint, InternalArbiInt};
+use super::{InternalMpInt, MpInt, MpUint};
 
-impl Sub<Self> for ArbiUint {
+impl Sub<Self> for MpUint {
     type Output = Self;
     #[inline]
     #[track_caller]
     fn sub(mut self, rhs: Self) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
         let underflowed = self.value.sub_assign_with_underflow(&rhs.value);
-        assert!(!underflowed, "ArbiUint underflow");
+        assert!(!underflowed, "MpUint underflow");
         self.precision = precision;
         // `self - rhs <= self`, and result precision is at least the original
         // left precision, so a successful unsigned subtraction always fits.
@@ -20,14 +20,14 @@ impl Sub<Self> for ArbiUint {
     }
 }
 
-impl Sub<&Self> for ArbiUint {
+impl Sub<&Self> for MpUint {
     type Output = Self;
     #[inline]
     #[track_caller]
     fn sub(mut self, rhs: &Self) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
         let underflowed = self.value.sub_assign_with_underflow(&rhs.value);
-        assert!(!underflowed, "ArbiUint underflow");
+        assert!(!underflowed, "MpUint underflow");
         self.precision = precision;
         // `self - rhs <= self`, and result precision is at least the original
         // left precision, so a successful unsigned subtraction always fits.
@@ -36,15 +36,15 @@ impl Sub<&Self> for ArbiUint {
     }
 }
 
-impl Sub<ArbiUint> for &ArbiUint {
-    type Output = ArbiUint;
+impl Sub<MpUint> for &MpUint {
+    type Output = MpUint;
     #[inline]
     #[track_caller]
-    fn sub(self, rhs: ArbiUint) -> Self::Output {
+    fn sub(self, rhs: MpUint) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
         let (value, underflowed) = self.value.sub_with_underflow(&rhs.value);
-        assert!(!underflowed, "ArbiUint underflow");
-        let result = ArbiUint { value, precision };
+        assert!(!underflowed, "MpUint underflow");
+        let result = MpUint { value, precision };
         // `self - rhs <= self`, and result precision is at least the original
         // left precision, so a successful unsigned subtraction always fits.
         result.debug_assert_valid();
@@ -52,15 +52,15 @@ impl Sub<ArbiUint> for &ArbiUint {
     }
 }
 
-impl Sub<&ArbiUint> for &ArbiUint {
-    type Output = ArbiUint;
+impl Sub<&MpUint> for &MpUint {
+    type Output = MpUint;
     #[inline]
     #[track_caller]
-    fn sub(self, rhs: &ArbiUint) -> Self::Output {
+    fn sub(self, rhs: &MpUint) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
         let (value, underflowed) = self.value.sub_with_underflow(&rhs.value);
-        assert!(!underflowed, "ArbiUint underflow");
-        let result = ArbiUint { value, precision };
+        assert!(!underflowed, "MpUint underflow");
+        let result = MpUint { value, precision };
         // `self - rhs <= self`, and result precision is at least the original
         // left precision, so a successful unsigned subtraction always fits.
         result.debug_assert_valid();
@@ -68,7 +68,7 @@ impl Sub<&ArbiUint> for &ArbiUint {
     }
 }
 
-impl SubAssign<Self> for ArbiUint {
+impl SubAssign<Self> for MpUint {
     #[inline]
     #[track_caller]
     fn sub_assign(&mut self, rhs: Self) {
@@ -76,14 +76,14 @@ impl SubAssign<Self> for ArbiUint {
     }
 }
 
-impl SubAssign<&Self> for ArbiUint {
+impl SubAssign<&Self> for MpUint {
     #[inline]
     #[track_caller]
     fn sub_assign(&mut self, rhs: &Self) {
         // The limb kernel writes a wrapping residue on underflow. Check the
         // mathematical precondition first so a caught panic leaves `self`
         // unchanged rather than exposing that internal residue.
-        assert!(self.value >= rhs.value, "ArbiUint underflow");
+        assert!(self.value >= rhs.value, "MpUint underflow");
         self.value.sub_assign(&rhs.value);
         // A successful unsigned subtraction cannot exceed the unchanged
         // receiver precision because its result is at most the old receiver.
@@ -91,7 +91,7 @@ impl SubAssign<&Self> for ArbiUint {
     }
 }
 
-impl Sub<Self> for ArbiInt {
+impl Sub<Self> for MpInt {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -114,7 +114,7 @@ impl Sub<Self> for ArbiInt {
     }
 }
 
-impl Sub<&Self> for ArbiInt {
+impl Sub<&Self> for MpInt {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -128,11 +128,11 @@ impl Sub<&Self> for ArbiInt {
     }
 }
 
-impl Sub<ArbiInt> for &ArbiInt {
-    type Output = ArbiInt;
+impl Sub<MpInt> for &MpInt {
+    type Output = MpInt;
     #[inline]
     #[track_caller]
-    fn sub(self, mut rhs: ArbiInt) -> Self::Output {
+    fn sub(self, mut rhs: MpInt) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
         rhs.value.sub_assign(&self.value);
         if !rhs.value.abs.is_zero() {
@@ -145,13 +145,13 @@ impl Sub<ArbiInt> for &ArbiInt {
     }
 }
 
-impl Sub<&ArbiInt> for &ArbiInt {
-    type Output = ArbiInt;
+impl Sub<&MpInt> for &MpInt {
+    type Output = MpInt;
     #[inline]
     #[track_caller]
-    fn sub(self, rhs: &ArbiInt) -> Self::Output {
+    fn sub(self, rhs: &MpInt) -> Self::Output {
         let precision = self.precision.combine_for_binary_op(rhs.precision);
-        let result = ArbiInt {
+        let result = MpInt {
             value: self.value.sub(&rhs.value),
             precision,
         };
@@ -161,7 +161,7 @@ impl Sub<&ArbiInt> for &ArbiInt {
     }
 }
 
-impl SubAssign<Self> for ArbiInt {
+impl SubAssign<Self> for MpInt {
     #[inline]
     #[track_caller]
     fn sub_assign(&mut self, mut rhs: Self) {
@@ -187,7 +187,7 @@ impl SubAssign<Self> for ArbiInt {
     }
 }
 
-impl SubAssign<&Self> for ArbiInt {
+impl SubAssign<&Self> for MpInt {
     #[inline]
     #[track_caller]
     fn sub_assign(&mut self, rhs: &Self) {
@@ -208,7 +208,7 @@ impl SubAssign<&Self> for ArbiInt {
     }
 }
 
-impl Neg for ArbiInt {
+impl Neg for MpInt {
     type Output = Self;
     #[inline]
     #[track_caller]
@@ -216,13 +216,13 @@ impl Neg for ArbiInt {
         if let Some(bits) = self.precision.significant_bits() {
             assert!(
                 !self.value.is_signed_min_for_width(bits),
-                "ArbiInt neg overflow for Bounded({bits})"
+                "MpInt neg overflow for Bounded({bits})"
             );
         }
         let value = if self.value.abs.is_zero() {
-            InternalArbiInt::zero()
+            InternalMpInt::zero()
         } else {
-            InternalArbiInt {
+            InternalMpInt {
                 abs: self.value.abs,
                 is_positive: !self.value.is_positive,
             }
@@ -236,26 +236,26 @@ impl Neg for ArbiInt {
     }
 }
 
-impl Neg for &ArbiInt {
-    type Output = ArbiInt;
+impl Neg for &MpInt {
+    type Output = MpInt;
     #[inline]
     #[track_caller]
     fn neg(self) -> Self::Output {
         if let Some(bits) = self.precision.significant_bits() {
             assert!(
                 !self.value.is_signed_min_for_width(bits),
-                "ArbiInt neg overflow for Bounded({bits})"
+                "MpInt neg overflow for Bounded({bits})"
             );
         }
         let value = if self.value.abs.is_zero() {
-            InternalArbiInt::zero()
+            InternalMpInt::zero()
         } else {
-            InternalArbiInt {
+            InternalMpInt {
                 abs: self.value.abs.clone(),
                 is_positive: !self.value.is_positive,
             }
         };
-        let result = ArbiInt {
+        let result = MpInt {
             value,
             precision: self.precision,
         };

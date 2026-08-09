@@ -1,4 +1,4 @@
-//! Sign manipulation and inspection: the part of `ArbiInt` with no unsigned
+//! Sign manipulation and inspection: the part of `MpInt` with no unsigned
 //! counterpart.
 //!
 //! Every operand is negative, because a positive one takes the branch that does
@@ -23,7 +23,7 @@ use rug::Integer;
 use crate::int::support::rug_int;
 use crate::int::{
     ladders::NARROW,
-    support::{SAMPLE_SIZE_FAST, arbi_int},
+    support::{SAMPLE_SIZE_FAST, mp_int},
 };
 
 /// `|a|`, allocating a fresh value.
@@ -31,8 +31,8 @@ mod abs {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_int(bits, 42, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_int(bits, 42, true);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).abs());
         });
@@ -53,8 +53,8 @@ mod abs_assign {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_int(bits, 42, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_int(bits, 42, true);
         bencher.bench_local(|| {
             let mut target = black_box(&value).clone();
             target.abs_assign();
@@ -80,8 +80,8 @@ mod checked_abs {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_int(bits, 42, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_int(bits, 42, true);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).checked_abs());
         });
@@ -102,8 +102,8 @@ mod neg {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_int(bits, 42, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_int(bits, 42, true);
         bencher.bench_local(|| {
             let _output = black_box(Neg::neg(black_box(&value)));
         });
@@ -124,8 +124,8 @@ mod signum {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_int(bits, 42, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_int(bits, 42, true);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).signum());
         });
@@ -141,13 +141,13 @@ mod signum {
     }
 }
 
-/// The magnitude as an `ArbiUint`, dropping the sign rather than clearing it.
+/// The magnitude as an `MpUint`, dropping the sign rather than clearing it.
 mod unsigned_abs {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_int(bits, 42, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_int(bits, 42, true);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).unsigned_abs());
         });
@@ -173,9 +173,9 @@ mod abs_sub {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let left = arbi_int(bits, 42, false);
-        let right = arbi_int(bits, 1_337, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let left = mp_int(bits, 42, false);
+        let right = mp_int(bits, 1_337, true);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&left).abs_sub(black_box(&right)));
         });
@@ -198,9 +198,9 @@ mod abs_diff {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let left = arbi_int(bits, 42, true);
-        let right = arbi_int(bits, 1_337, false);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let left = mp_int(bits, 42, true);
+        let right = mp_int(bits, 1_337, false);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&left).abs_diff(black_box(&right)));
         });
@@ -223,8 +223,8 @@ mod predicates {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_int(bits, 42, true);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_int(bits, 42, true);
         bencher.bench_local(|| {
             let _negative = black_box(black_box(&value).is_negative());
             let _positive = black_box(black_box(&value).is_positive());

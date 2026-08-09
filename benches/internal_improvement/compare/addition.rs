@@ -18,11 +18,11 @@
 
 use core::hint::black_box;
 
-use arbi_anafis::tune_api::tier::{
+use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
+use mp_anafis::tune_api::tier::{
     Limb,
     algorithms::{bench_add_limbs, bench_sub_limbs},
 };
-use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
 
 use crate::shared::{SCALING_SIZES, TOWER_SIZES, operands_pair};
 
@@ -35,7 +35,7 @@ const fn assert_one_limb_width() {
 }
 
 #[divan::bench(args = TOWER_SIZES)]
-fn arbi(bencher: divan::Bencher<'_, '_>, len: usize) {
+fn mp(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (mut dst, src, _unused) = operands_pair(len, len);
     bencher.bench_local(|| {
         let _carry = bench_add_limbs(black_box(&mut dst), black_box(&src));
@@ -68,8 +68,8 @@ fn gmp(bencher: divan::Bencher<'_, '_>, len: usize) {
 // otherwise settles on a low iteration count for the widest cells and reports a
 // median dominated by whatever interrupted the first sample.
 #[divan::bench(args = SCALING_SIZES, sample_count = 20)]
-fn arbi_wide(bencher: divan::Bencher<'_, '_>, len: usize) {
-    arbi(bencher, len);
+fn mp_wide(bencher: divan::Bencher<'_, '_>, len: usize) {
+    mp(bencher, len);
 }
 
 #[divan::bench(args = SCALING_SIZES, sample_count = 20)]
@@ -82,7 +82,7 @@ fn gmp_wide(bencher: divan::Bencher<'_, '_>, len: usize) {
 // comparison shows whether a fix applied to one was carried to the other.
 
 #[divan::bench(args = TOWER_SIZES)]
-fn arbi_sub(bencher: divan::Bencher<'_, '_>, len: usize) {
+fn mp_sub(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (mut dst, src, _unused) = operands_pair(len, len);
     bencher.bench_local(|| {
         let _borrow = bench_sub_limbs(black_box(&mut dst), black_box(&src));
@@ -111,19 +111,19 @@ fn gmp_sub(bencher: divan::Bencher<'_, '_>, len: usize) {
     });
 }
 
-/// The same kernel as `arbi`, measured again under a different name.
+/// The same kernel as `mp`, measured again under a different name.
 ///
 /// Divan runs a group's arms in name order and a later arm benefits from warm
 /// state, so two arms running identical code do not report identical times.
-/// The gap between this and `arbi` is that bias and nothing else, which makes
+/// The gap between this and `mp` is that bias and nothing else, which makes
 /// it the floor any kernel comparison in this group has to clear: a candidate
-/// beating `arbi` by less than `arbi_bias_control` does is not a win.
+/// beating `mp` by less than `mp_bias_control` does is not a win.
 ///
 /// It calls the same function rather than duplicating the kernel. A copied
 /// routine drifts the moment the original is edited, and a control that has
 /// silently stopped being a copy is worse than no control at all.
 #[divan::bench(args = TOWER_SIZES)]
-fn arbi_bias_control(bencher: divan::Bencher<'_, '_>, len: usize) {
+fn mp_bias_control(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (mut dst, src, _unused) = operands_pair(len, len);
     bencher.bench_local(|| {
         let _carry = bench_add_limbs(black_box(&mut dst), black_box(&src));

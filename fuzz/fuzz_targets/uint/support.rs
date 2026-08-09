@@ -1,6 +1,6 @@
-//! Helper utilities for `ArbiUint` operand parsing.
+//! Helper utilities for `MpUint` operand parsing.
 
-use arbi_anafis::ArbiUint;
+use mp_anafis::MpUint;
 use rug::Integer;
 
 pub fn parse_hex_pair(left: &[u8], right: &[u8]) -> (String, String) {
@@ -15,10 +15,10 @@ pub fn parse_hex_pair(left: &[u8], right: &[u8]) -> (String, String) {
     (left_hex, right_hex)
 }
 
-pub fn uint_operands(left_hex: &str, right_hex: &str) -> (ArbiUint, ArbiUint, Integer, Integer) {
+pub fn uint_operands(left_hex: &str, right_hex: &str) -> (MpUint, MpUint, Integer, Integer) {
     (
-        ArbiUint::from_str_radix(left_hex, 16).unwrap(),
-        ArbiUint::from_str_radix(right_hex, 16).unwrap(),
+        MpUint::from_str_radix(left_hex, 16).unwrap(),
+        MpUint::from_str_radix(right_hex, 16).unwrap(),
         Integer::from_str_radix(left_hex, 16).unwrap(),
         Integer::from_str_radix(right_hex, 16).unwrap(),
     )

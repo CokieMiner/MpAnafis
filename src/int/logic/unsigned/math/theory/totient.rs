@@ -10,11 +10,11 @@ use core::{cmp::Ordering, mem::swap};
 use alloc::vec::Vec;
 
 use super::{
-    ArchKernels, BarrettDomain, BarrettScratch, DivScratch, Division, InternalArbiUint, Limb,
+    ArchKernels, BarrettDomain, BarrettScratch, DivScratch, Division, InternalMpUint, Limb,
     MontgomeryDomain, MulScratch,
 };
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Euler's totient function `phi(self)`.
     ///
     /// For a prime `p`, `phi(p) = p - 1`.
@@ -58,37 +58,37 @@ impl InternalArbiUint {
     reason = "Standard notation for Pollard's Rho algorithm: n, c, x, y, d, t1, t2"
 )]
 fn pollards_rho(
-    n: &InternalArbiUint,
+    n: &InternalMpUint,
     c_val: Limb,
     domain: &MontgomeryDomain,
     mul_scratch: &mut MulScratch,
-) -> InternalArbiUint {
+) -> InternalMpUint {
     const BATCH: u32 = 128;
     const MAX_ITERS: u32 = 1_000_000;
 
-    let mut temp_prod = InternalArbiUint::zero();
-    let mut t1 = InternalArbiUint::zero();
-    let mut t2 = InternalArbiUint::zero();
+    let mut temp_prod = InternalMpUint::zero();
+    let mut t1 = InternalMpUint::zero();
+    let mut t2 = InternalMpUint::zero();
     // #20: Pre-allocated diff buffer avoids allocation on every |x-y| computation.
-    let mut diff = InternalArbiUint::zero();
+    let mut diff = InternalMpUint::zero();
     debug_assert!(!n.is_zero(), "Pollard rho requires n greater than one");
     // SAFETY: Pollard rho is entered only for a composite n greater than one.
     let barrett_domain = BarrettDomain::new(n);
     let mut barrett_scratch = BarrettScratch::default();
 
     let mut x = domain.transform_into_with_scratch(
-        &InternalArbiUint::from_limb(2),
+        &InternalMpUint::from_limb(2),
         &mut temp_prod,
         mul_scratch,
     );
     let mut y = x.clone();
     let c = domain.transform_into_with_scratch(
-        &InternalArbiUint::from_limb(c_val),
+        &InternalMpUint::from_limb(c_val),
         &mut temp_prod,
         mul_scratch,
     );
 
-    let mut product = InternalArbiUint::one();
+    let mut product = InternalMpUint::one();
     // These are iteration counters, not limb indices. `u32` represents the
     // proven one-million-step limit on every supported pointer width.
     let mut power: u32 = 1;
@@ -129,7 +129,7 @@ fn pollards_rho(
             if !d.is_one() {
                 return d;
             }
-            product.clone_from(&InternalArbiUint::one());
+            product.clone_from(&InternalMpUint::one());
             next_gcd = next_gcd.wrapping_add(BATCH);
         }
 
@@ -140,11 +140,11 @@ fn pollards_rho(
         }
     }
 }
-/// Computes `|a - b|` into `out` without allocating a new `InternalArbiUint`.
+/// Computes `|a - b|` into `out` without allocating a new `InternalMpUint`.
 ///
 /// #20: Uses `sub_limbs_unchecked` to compute the difference in-place,
 /// avoiding an allocated owned subtraction result.
-pub fn compute_abs_diff(a: &InternalArbiUint, b: &InternalArbiUint, out: &mut InternalArbiUint) {
+pub fn compute_abs_diff(a: &InternalMpUint, b: &InternalMpUint, out: &mut InternalMpUint) {
     let a_limbs = a.limbs();
     let b_limbs = b.limbs();
     let a_len = a_limbs.len();
@@ -225,9 +225,9 @@ pub fn compute_abs_diff(a: &InternalArbiUint, b: &InternalArbiUint, out: &mut In
 }
 
 fn apply_phi_factor(
-    result: &mut InternalArbiUint,
-    p: &InternalArbiUint,
-    seen: &mut Vec<InternalArbiUint>,
+    result: &mut InternalMpUint,
+    p: &InternalMpUint,
+    seen: &mut Vec<InternalMpUint>,
     div_scratch: &mut DivScratch,
     mul_scratch: &mut MulScratch,
 ) {
@@ -235,19 +235,19 @@ fn apply_phi_factor(
         return;
     }
     seen.push(p.clone());
-    let mut q = InternalArbiUint::zero();
-    let mut r = InternalArbiUint::zero();
+    let mut q = InternalMpUint::zero();
+    let mut r = InternalMpUint::zero();
     Division::div_rem_into(result, p, &mut q, &mut r, div_scratch);
     debug_assert!(r.is_zero(), "a discovered prime factor divides the input");
     // Every discovered prime factor is at least two.
-    let p_minus_1 = p.sub(&InternalArbiUint::one());
+    let p_minus_1 = p.sub(&InternalMpUint::one());
     result.assign_product_with_scratch(&q, &p_minus_1, mul_scratch);
 }
 
 fn get_prime_factors_phi(
-    mut n: InternalArbiUint,
-    result: &mut InternalArbiUint,
-    seen: &mut Vec<InternalArbiUint>,
+    mut n: InternalMpUint,
+    result: &mut InternalMpUint,
+    seen: &mut Vec<InternalMpUint>,
     div_scratch: &mut DivScratch,
     mul_scratch: &mut MulScratch,
 ) -> Option<()> {
@@ -268,7 +268,7 @@ fn get_prime_factors_phi(
         n.shr_assign(tz);
         apply_phi_factor(
             result,
-            &InternalArbiUint::from_limb(2),
+            &InternalMpUint::from_limb(2),
             seen,
             div_scratch,
             mul_scratch,
@@ -278,12 +278,12 @@ fn get_prime_factors_phi(
         }
     }
 
-    let mut q = InternalArbiUint::zero();
-    let mut r = InternalArbiUint::zero();
+    let mut q = InternalMpUint::zero();
+    let mut r = InternalMpUint::zero();
 
     let mut limit = n.isqrt();
     for &p_val in &[3_usize, 5_usize] {
-        let p = InternalArbiUint::from_limb(p_val);
+        let p = InternalMpUint::from_limb(p_val);
         if p.cmp(&limit) == Ordering::Greater {
             break;
         }
@@ -305,9 +305,9 @@ fn get_prime_factors_phi(
         }
     }
 
-    let mut p = InternalArbiUint::from_limb(7);
+    let mut p = InternalMpUint::from_limb(7);
     let mut wheel_idx: usize = 0;
-    let trial_bound = InternalArbiUint::from_limb(TRIAL_BOUND);
+    let trial_bound = InternalMpUint::from_limb(TRIAL_BOUND);
 
     while p.cmp(&trial_bound) == Ordering::Less {
         if n.is_one() {
@@ -336,7 +336,7 @@ fn get_prime_factors_phi(
 
         // SAFETY: `wheel_idx` starts at zero and every update masks it with
         // `& 7`, so it remains in `0..=7` for the eight-element table.
-        let step = InternalArbiUint::from_limb(unsafe { *WHEEL_30.get_unchecked(wheel_idx) });
+        let step = InternalMpUint::from_limb(unsafe { *WHEEL_30.get_unchecked(wheel_idx) });
         p.add_assign(&step);
         wheel_idx = wheel_idx.wrapping_add(1) & 7;
     }
@@ -349,9 +349,9 @@ fn get_prime_factors_phi(
 }
 
 fn factorize_recursive_phi(
-    n: &InternalArbiUint,
-    result: &mut InternalArbiUint,
-    seen: &mut Vec<InternalArbiUint>,
+    n: &InternalMpUint,
+    result: &mut InternalMpUint,
+    seen: &mut Vec<InternalMpUint>,
     div_scratch: &mut DivScratch,
     mul_scratch: &mut MulScratch,
 ) -> Option<()> {
@@ -380,8 +380,8 @@ fn factorize_recursive_phi(
         d = pollards_rho(n, c_val, &domain, mul_scratch);
     }
 
-    let mut q = InternalArbiUint::zero();
-    let mut r = InternalArbiUint::zero();
+    let mut q = InternalMpUint::zero();
+    let mut r = InternalMpUint::zero();
     Division::div_rem_into(n, &d, &mut q, &mut r, div_scratch);
     debug_assert!(r.is_zero(), "Pollard rho result divides n");
 

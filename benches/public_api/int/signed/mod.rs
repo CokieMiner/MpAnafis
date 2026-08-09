@@ -1,6 +1,6 @@
-//! `ArbiInt` benchmarks.
+//! `MpInt` benchmarks.
 //!
-//! `ArbiInt` holds an `ArbiUint` magnitude and a sign, and delegates every limb
+//! `MpInt` holds an `MpUint` magnitude and a sign, and delegates every limb
 //! algorithm to it. These modules therefore exist to measure the *delegation*,
 //! not the arithmetic: each one runs the same operation the corresponding
 //! [`unsigned`](super::unsigned) module runs, on the same widths, so the

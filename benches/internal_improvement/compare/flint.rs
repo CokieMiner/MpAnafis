@@ -18,7 +18,7 @@
     reason = "the benchmark calls FLINT's raw mpn routines with disjoint, exactly sized vectors"
 )]
 
-use arbi_anafis::tune_api::tier::Limb;
+use mp_anafis::tune_api::tier::Limb;
 
 /// FLINT's `mp_limb_t`. Checked against `Limb` at every call site's benchmark.
 pub type FlintLimb = u64;

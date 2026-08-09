@@ -11,15 +11,15 @@ fn bounded_wrapping_sub_restores_residue_width_before_sign_extension() {
     let residue_bits = LIMB_BITS.wrapping_mul(2);
     let bits = LIMB_BITS.wrapping_mul(3);
     let width = nz(bits);
-    let rhs_unlimited = (ArbiUint::one() << residue_bits) - ArbiUint::one();
-    let lhs = ArbiUint::zero_with_precision(width);
-    let rhs = ArbiUint::with_precision_checked(rhs_unlimited.clone(), width)
+    let rhs_unlimited = (MpUint::one() << residue_bits) - MpUint::one();
+    let lhs = MpUint::zero_with_precision(width);
+    let rhs = MpUint::with_precision_checked(rhs_unlimited.clone(), width)
         .expect("the two-limb operand fits the three-limb precision");
 
     // At two limbs, `0 - (B^2 - 1) mod B^2 = 1`. Extending that normalized
     // residue directly would incorrectly fill the discarded zero second limb
     // with ones. The correct three-limb residue is `B^3 - B^2 + 1`.
-    let expected = (ArbiUint::one() << bits) - rhs_unlimited;
+    let expected = (MpUint::one() << bits) - rhs_unlimited;
     let wrapped = lhs.wrapping_sub(&rhs);
     let (overflowing, underflowed) = lhs.overflowing_sub(&rhs);
 
@@ -33,10 +33,10 @@ fn bounded_wrapping_sub_restores_residue_width_before_sign_extension() {
 fn zero_result_branches_preserve_resolved_precision() {
     let expected = Precision::Bounded(nz(16));
 
-    let unsigned = ArbiUint::with_precision_checked(1_u8, nz(8)).expect("one fits in 8 bits");
+    let unsigned = MpUint::with_precision_checked(1_u8, nz(8)).expect("one fits in 8 bits");
     let unsigned_larger =
-        ArbiUint::with_precision_checked(2_u8, nz(16)).expect("two fits in 16 bits");
-    let unsigned_zero = ArbiUint::zero_with_precision(nz(16));
+        MpUint::with_precision_checked(2_u8, nz(16)).expect("two fits in 16 bits");
+    let unsigned_zero = MpUint::zero_with_precision(nz(16));
 
     let (unsigned_overflowing_quotient, unsigned_division_overflowed) =
         unsigned.overflowing_div(&unsigned_zero);
@@ -62,9 +62,9 @@ fn zero_result_branches_preserve_resolved_precision() {
     assert!(unsigned_saturating_remainder.is_zero());
     assert_eq!(unsigned_saturating_remainder.precision, expected);
 
-    let signed = ArbiInt::with_precision_checked(1_i8, nz(8)).expect("one fits in 8 bits");
-    let signed_larger = ArbiInt::with_precision_checked(2_i8, nz(16)).expect("two fits in 16 bits");
-    let signed_zero = ArbiInt::zero_with_precision(nz(16));
+    let signed = MpInt::with_precision_checked(1_i8, nz(8)).expect("one fits in 8 bits");
+    let signed_larger = MpInt::with_precision_checked(2_i8, nz(16)).expect("two fits in 16 bits");
+    let signed_zero = MpInt::zero_with_precision(nz(16));
 
     let (signed_overflowing_quotient, signed_division_overflowed) =
         signed.overflowing_div(&signed_zero);
@@ -94,10 +94,9 @@ fn zero_result_branches_preserve_resolved_precision() {
 #[test]
 fn bounded_shifts_reject_huge_counts_before_allocation() {
     let width = nz(8);
-    let unsigned_zero = ArbiUint::zero_with_precision(width);
-    let unsigned_one =
-        ArbiUint::with_precision_checked(1_u8, width).expect("one fits in eight bits");
-    let unsigned_expected_zero = ArbiUint::zero_with_precision(width);
+    let unsigned_zero = MpUint::zero_with_precision(width);
+    let unsigned_one = MpUint::with_precision_checked(1_u8, width).expect("one fits in eight bits");
+    let unsigned_expected_zero = MpUint::zero_with_precision(width);
 
     assert_eq!(
         unsigned_zero.checked_shl(usize::MAX),
@@ -109,24 +108,24 @@ fn bounded_shifts_reject_huge_counts_before_allocation() {
         (unsigned_zero, false)
     );
     assert_eq!(unsigned_one.checked_shl(usize::MAX), None);
-    assert_eq!(unsigned_one.try_shl(usize::MAX), Err(ArbiError::Overflow));
+    assert_eq!(unsigned_one.try_shl(usize::MAX), Err(MpError::Overflow));
     assert_eq!(
         unsigned_one.wrapping_shl(usize::MAX),
         unsigned_expected_zero
     );
     assert_eq!(
         unsigned_one.overflowing_shl(usize::MAX),
-        (ArbiUint::zero_with_precision(width), true)
+        (MpUint::zero_with_precision(width), true)
     );
     assert_eq!(
         unsigned_one.saturating_shl(usize::MAX),
-        ArbiUint::max_for_precision(8)
+        MpUint::max_for_precision(8)
     );
 
-    let signed_zero = ArbiInt::zero_with_precision(width);
-    let signed_one = ArbiInt::with_precision_checked(1_i8, width).expect("one fits in eight bits");
+    let signed_zero = MpInt::zero_with_precision(width);
+    let signed_one = MpInt::with_precision_checked(1_i8, width).expect("one fits in eight bits");
     let signed_minus_one =
-        ArbiInt::with_precision_checked(-1_i8, width).expect("minus one fits in eight bits");
+        MpInt::with_precision_checked(-1_i8, width).expect("minus one fits in eight bits");
 
     assert_eq!(
         signed_zero.checked_shl(usize::MAX),
@@ -138,35 +137,35 @@ fn bounded_shifts_reject_huge_counts_before_allocation() {
         (signed_zero, false)
     );
     assert_eq!(signed_one.checked_shl(usize::MAX), None);
-    assert_eq!(signed_one.try_shl(usize::MAX), Err(ArbiError::Overflow));
+    assert_eq!(signed_one.try_shl(usize::MAX), Err(MpError::Overflow));
     assert_eq!(
         signed_one.wrapping_shl(usize::MAX),
-        ArbiInt::zero_with_precision(width)
+        MpInt::zero_with_precision(width)
     );
     assert_eq!(
         signed_one.overflowing_shl(usize::MAX),
-        (ArbiInt::zero_with_precision(width), true)
+        (MpInt::zero_with_precision(width), true)
     );
     assert_eq!(
         signed_one.saturating_shl(usize::MAX),
-        ArbiInt::max_for_precision(8)
+        MpInt::max_for_precision(8)
     );
     assert_eq!(
         signed_minus_one.wrapping_shl(usize::MAX),
-        ArbiInt::zero_with_precision(width)
+        MpInt::zero_with_precision(width)
     );
     assert_eq!(
         signed_minus_one.saturating_shl(usize::MAX),
-        ArbiInt::min_for_precision(8)
+        MpInt::min_for_precision(8)
     );
     assert_eq!(
         signed_minus_one.checked_shl(7),
-        Some(ArbiInt::min_for_precision(8))
+        Some(MpInt::min_for_precision(8))
     );
     assert_eq!(
         signed_one.checked_shl(6),
         Some(
-            ArbiInt::with_precision_checked(64_i8, width)
+            MpInt::with_precision_checked(64_i8, width)
                 .expect("sixty-four fits in eight signed bits")
         )
     );
@@ -174,7 +173,7 @@ fn bounded_shifts_reject_huge_counts_before_allocation() {
 
 #[test]
 fn explicit_width_bitwise_validates_width_before_allocation() {
-    let unsigned = ArbiUint::from(1_u8);
+    let unsigned = MpUint::from(1_u8);
     let unsigned_rotated = unsigned
         .rotate_left(3, 16)
         .expect("sixteen is a valid explicit width");
@@ -184,7 +183,7 @@ fn explicit_width_bitwise_validates_width_before_allocation() {
     assert_eq!(unsigned.reverse_bits(usize::MAX), None);
     assert_eq!(unsigned.not_with_width(usize::MAX), None);
 
-    let signed = ArbiInt::from(-1_i8);
+    let signed = MpInt::from(-1_i8);
     let signed_rotated = signed
         .rotate_left(3, 16)
         .expect("sixteen is a valid explicit width");
@@ -197,12 +196,12 @@ fn explicit_width_bitwise_validates_width_before_allocation() {
 
 #[test]
 fn bounded_signed_min_remainder_by_minus_one_reports_overflow_consistently() {
-    let minimum = ArbiInt::min_for_precision(8);
+    let minimum = MpInt::min_for_precision(8);
     let minus_one =
-        ArbiInt::with_precision_checked(-1_i8, nz(8)).expect("minus one fits in eight bits");
+        MpInt::with_precision_checked(-1_i8, nz(8)).expect("minus one fits in eight bits");
 
     assert_eq!(minimum.checked_rem(&minus_one), None);
-    assert_eq!(minimum.try_rem(&minus_one), Err(ArbiError::Overflow));
+    assert_eq!(minimum.try_rem(&minus_one), Err(MpError::Overflow));
     assert_eq!(minimum.div_rem(&minus_one), None);
     assert_eq!(minimum.checked_rem_trunc(&minus_one), None);
     assert_eq!(minimum.checked_rem_euclid(&minus_one), None);
@@ -229,11 +228,11 @@ fn bounded_signed_min_remainder_by_minus_one_reports_overflow_consistently() {
 #[test]
 fn bounded_signed_min_division_policies_match_twos_complement() {
     let width = nz(8);
-    let minimum = ArbiInt::min_for_precision(8);
-    let maximum = ArbiInt::max_for_precision(8);
+    let minimum = MpInt::min_for_precision(8);
+    let maximum = MpInt::max_for_precision(8);
     let minus_one =
-        ArbiInt::with_precision_checked(-1_i8, width).expect("minus one fits in eight bits");
-    let zero = ArbiInt::zero_with_precision(width);
+        MpInt::with_precision_checked(-1_i8, width).expect("minus one fits in eight bits");
+    let zero = MpInt::zero_with_precision(width);
 
     assert_eq!(minimum.wrapping_div(&minus_one), minimum);
     assert_eq!(minimum.overflowing_div(&minus_one), (minimum.clone(), true));
@@ -269,11 +268,11 @@ proptest! {
         input_a in strategies::bounded_uint_wrapped(128),
         input_b in strategies::bounded_uint_wrapped(128),
     ) {
-        let bounded_a = ArbiUint {
+        let bounded_a = MpUint {
             value: input_a.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };
-        let bounded_b = ArbiUint {
+        let bounded_b = MpUint {
             value: input_b.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };
@@ -286,7 +285,7 @@ proptest! {
         a_unlimited.precision = Precision::Unlimited;
         let mut b_unlimited = bounded_b.clone();
         b_unlimited.precision = Precision::Unlimited;
-        let mod_mask = (ArbiUint::one() << bits) - ArbiUint::one();
+        let mod_mask = (MpUint::one() << bits) - MpUint::one();
 
         prop_assert_eq!(wrap_add, (&a_unlimited + &b_unlimited) & &mod_mask);
         prop_assert_eq!(wrap_mul, (&a_unlimited * &b_unlimited) & &mod_mask);
@@ -296,7 +295,7 @@ proptest! {
         } else {
             prop_assert_eq!(
                 wrap_sub,
-                ((&a_unlimited + &mod_mask + ArbiUint::one()) - &b_unlimited) & &mod_mask
+                ((&a_unlimited + &mod_mask + MpUint::one()) - &b_unlimited) & &mod_mask
             );
         }
     }
@@ -307,15 +306,15 @@ proptest! {
         input_a in strategies::bounded_uint_wrapped(64),
         input_b in strategies::bounded_uint_wrapped(64),
     ) {
-        let bounded_a = ArbiUint {
+        let bounded_a = MpUint {
             value: input_a.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };
-        let bounded_b = ArbiUint {
+        let bounded_b = MpUint {
             value: input_b.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };
-        let max_val = ArbiUint::max_for_precision(bits);
+        let max_val = MpUint::max_for_precision(bits);
 
         let sat_add = bounded_a.saturating_add(&bounded_b);
         let sat_sub = bounded_a.saturating_sub(&bounded_b);
@@ -335,7 +334,7 @@ proptest! {
         if bounded_a >= bounded_b {
             prop_assert_eq!(sat_sub, &a_unlimited - &b_unlimited);
         } else {
-            prop_assert_eq!(sat_sub, ArbiUint::zero_with_precision(nz(bits)));
+            prop_assert_eq!(sat_sub, MpUint::zero_with_precision(nz(bits)));
         }
     }
 
@@ -345,7 +344,7 @@ proptest! {
         input_a in strategies::bounded_uint_wrapped(64),
         shift in 0_u32..100,
     ) {
-        let bounded_a = ArbiUint {
+        let bounded_a = MpUint {
             value: input_a.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };
@@ -358,9 +357,9 @@ proptest! {
 
     #[test]
     fn prop_uint_swap_bytes(a in strategies::uint(4)) {
-        let byte_mask = ArbiUint::from(255_u64);
+        let byte_mask = MpUint::from(255_u64);
         let adjusted = if (&a & &byte_mask).value.is_zero() {
-            &a | &ArbiUint::one()
+            &a | &MpUint::one()
         } else {
             a
         };
@@ -371,7 +370,7 @@ proptest! {
 
     #[test]
     fn prop_uint_bit_counts(bits in 8_usize..=128, input_a in strategies::bounded_uint_wrapped(128)) {
-        let bounded_a = ArbiUint {
+        let bounded_a = MpUint {
             value: input_a.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };
@@ -419,18 +418,18 @@ proptest! {
         input_a in strategies::bounded_int_wrapped(64),
         input_b in strategies::bounded_int_wrapped(64),
     ) {
-        let bounded_a = ArbiInt {
+        let bounded_a = MpInt {
             value: input_a.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };
-        let bounded_b = ArbiInt {
+        let bounded_b = MpInt {
             value: input_b.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };
 
         let sat_add = bounded_a.saturating_add(&bounded_b);
-        prop_assert!(sat_add <= ArbiInt::max_for_precision(bits));
-        prop_assert!(sat_add >= ArbiInt::min_for_precision(bits));
+        prop_assert!(sat_add <= MpInt::max_for_precision(bits));
+        prop_assert!(sat_add >= MpInt::min_for_precision(bits));
     }
 
     #[test]
@@ -471,18 +470,18 @@ proptest! {
         input in strategies::bounded_uint_wrapped(128),
         width in 1_usize..=128,
     ) {
-        let bounded = ArbiUint {
+        let bounded = MpUint {
             value: input.value.apply_wrapping(width),
             precision: Precision::Bounded(nz(width)),
         };
 
         prop_assert_eq!(bounded.try_not().ok(), bounded.not_with_width(width));
 
-        let unlimited = ArbiUint {
+        let unlimited = MpUint {
             value: bounded.value,
             precision: Precision::Unlimited,
         };
-        prop_assert_eq!(unlimited.try_not(), Err(ArbiError::WidthRequired));
+        prop_assert_eq!(unlimited.try_not(), Err(MpError::WidthRequired));
     }
 }
 
@@ -493,7 +492,7 @@ proptest! {
         input_seed in strategies::bounded_uint_wrapped(64),
         shift in 0_usize..=64,
     ) {
-        let bounded_value = ArbiUint {
+        let bounded_value = MpUint {
             value: input_seed.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };
@@ -540,7 +539,7 @@ proptest! {
         bits in 1_usize..=64,
         bounded_seed in strategies::bounded_uint_wrapped(64),
     ) {
-        let bounded_value = ArbiUint {
+        let bounded_value = MpUint {
             value: bounded_seed.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };
@@ -561,7 +560,7 @@ proptest! {
         input_a in strategies::bounded_uint_wrapped(128),
         shift in 0_usize..128,
     ) {
-        let bounded_a = ArbiUint {
+        let bounded_a = MpUint {
             value: input_a.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };
@@ -584,7 +583,7 @@ proptest! {
         input_a in strategies::bounded_int_wrapped(128),
         shift in 0_usize..128,
     ) {
-        let bounded_a = ArbiInt {
+        let bounded_a = MpInt {
             value: input_a.value.apply_wrapping(bits),
             precision: Precision::Bounded(nz(bits)),
         };

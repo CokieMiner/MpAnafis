@@ -8,7 +8,7 @@ use core::ptr::{copy_nonoverlapping, write_bytes};
 
 use alloc::vec::Vec;
 
-use super::{Addition, ArchKernels, Division, InternalArbiUint, LIMB_BITS, Limb};
+use super::{Addition, ArchKernels, Division, InternalMpUint, LIMB_BITS, Limb};
 
 impl Division {
     /// Divides a multi-limb numerator by a single limb divisor.
@@ -22,7 +22,7 @@ impl Division {
     pub fn div_rem_1<const WRITE_QUOTIENT: bool>(
         num_limbs: &[Limb],
         den_v: Limb,
-        quotient_out: &mut InternalArbiUint,
+        quotient_out: &mut InternalMpUint,
     ) -> Limb {
         let len = num_limbs.len();
         if WRITE_QUOTIENT {

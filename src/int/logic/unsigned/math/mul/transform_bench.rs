@@ -174,7 +174,7 @@ impl TransformBench {
 
     /// The `B^n - 1` half of the top-level CRT split, on its own.
     ///
-    /// Production only ever reaches this from inside [`Ssa::try_mul`](super::entry::Ssa::try_mul), where its
+    /// Production only ever reaches this from inside [`Ssa::try_mul`](super::Ssa::try_mul), where its
     /// cost is entangled with the Fermat half beside it. Exposing it lets the tuner
     /// measure the Mersenne recursion's own crossover.
     pub fn ssa_mul_mod_bnm1(dst: &mut [Limb], a: &[Limb], b: &[Limb], scratch: &mut [Limb]) {

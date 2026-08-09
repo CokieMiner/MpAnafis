@@ -1,4 +1,4 @@
-//! Core arithmetic on `ArbiUint`.
+//! Core arithmetic on `MpUint`.
 //!
 //! - [`operators`]: the `core::ops` implementations and their in-place forms.
 //! - [`policies`]: the `checked` / `wrapping` / `saturating` / `overflowing` /

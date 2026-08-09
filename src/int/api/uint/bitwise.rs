@@ -2,11 +2,11 @@
 //!
 //! Shift policies live in [`shift`](super::shift), mirroring the signed side.
 
-use crate::error::ArbiError;
+use crate::error::MpError;
 
-use super::{ArbiUint, Precision};
+use super::{MpUint, Precision};
 
-impl ArbiUint {
+impl MpUint {
     // Bitwise
     /// Finds the index of the first zero bit.
     #[must_use]
@@ -73,7 +73,7 @@ impl ArbiUint {
     /// Computes the bitwise NOT within the given `width`.
     ///
     /// The complement of an unsigned value is only defined against a width, so
-    /// there is no unlimited form: `!self` panics on an unlimited `ArbiUint`
+    /// there is no unlimited form: `!self` panics on an unlimited `MpUint`
     /// and this method is what a caller reaches for instead.
     ///
     /// Returns `None` when `width` cannot be represented as bounded precision.
@@ -91,15 +91,15 @@ impl ArbiUint {
     /// Computes the bitwise NOT within this value's own bounded precision.
     ///
     /// # Errors
-    /// Returns `ArbiError::WidthRequired` when the precision is unlimited,
+    /// Returns `MpError::WidthRequired` when the precision is unlimited,
     /// because the complement has no meaning without a width. Use
-    /// [`ArbiUint::not_with_width`] to supply one explicitly.
-    pub fn try_not(&self) -> Result<Self, ArbiError> {
+    /// [`MpUint::not_with_width`] to supply one explicitly.
+    pub fn try_not(&self) -> Result<Self, MpError> {
         let width = self
             .precision
             .significant_bits()
-            .ok_or(ArbiError::WidthRequired)?;
-        self.not_with_width(width).ok_or(ArbiError::WidthRequired)
+            .ok_or(MpError::WidthRequired)?;
+        self.not_with_width(width).ok_or(MpError::WidthRequired)
     }
 
     /// Returns the number of leading zeros.

@@ -1,4 +1,4 @@
-//! Public API benchmarks comparing `arbi-anafis` against Rug/GMP across the
+//! Public API benchmarks comparing `mp-anafis` against Rug/GMP across the
 //! public method surface documented in `docs/int/api-inventory.md`.
 //!
 //! # Layout
@@ -8,20 +8,20 @@
 //!
 //! ```text
 //! public_api/
-//!   int/        ArbiUint and ArbiInt
-//!     unsigned/ ArbiUint
-//!     signed/   ArbiInt
+//!   int/        MpUint and MpInt
+//!     unsigned/ MpUint
+//!     signed/   MpInt
 //! ```
 //!
 //! # Pairing rule
 //!
-//! Every benchmarked method is its own module holding an `arbi` function and,
+//! Every benchmarked method is its own module holding an `mp` function and,
 //! wherever GMP expresses the same operation, a `rug` counterpart measured on
 //! identical operands. Divan then prints the pair adjacently:
 //!
 //! ```text
 //! int::unsigned::arithmetic::mul
-//! ├─ arbi   ...
+//! ├─ mp   ...
 //! ╰─ rug    ...
 //! ```
 //!
@@ -29,7 +29,7 @@
 //! `rug` function states in its documentation why GMP has no counterpart.
 //!
 //! Rug is a `gmp-mpfr-sys` dependency available on x86-64 Linux only; on every
-//! other target the `rug` halves compile out and the `arbi` halves still run.
+//! other target the `rug` halves compile out and the `mp` halves still run.
 
 mod int;
 

@@ -5,9 +5,9 @@ use core::{
     hash::{Hash, Hasher},
 };
 
-use super::{InternalArbiUint, Limb};
+use super::{InternalMpUint, Limb};
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Compares two normalized limb slices as unsigned integers.
     #[must_use]
     pub fn cmp_limbs(left: &[Limb], right: &[Limb]) -> Ordering {
@@ -29,7 +29,7 @@ impl InternalArbiUint {
     }
 }
 
-impl PartialEq for InternalArbiUint {
+impl PartialEq for InternalMpUint {
     #[inline(always)]
     #[allow(
         clippy::inline_always,
@@ -40,9 +40,9 @@ impl PartialEq for InternalArbiUint {
     }
 }
 
-impl Eq for InternalArbiUint {}
+impl Eq for InternalMpUint {}
 
-impl PartialOrd for InternalArbiUint {
+impl PartialOrd for InternalMpUint {
     #[inline(always)]
     #[allow(
         clippy::inline_always,
@@ -53,7 +53,7 @@ impl PartialOrd for InternalArbiUint {
     }
 }
 
-impl Ord for InternalArbiUint {
+impl Ord for InternalMpUint {
     #[inline(always)]
     #[allow(
         clippy::inline_always,
@@ -64,7 +64,7 @@ impl Ord for InternalArbiUint {
     }
 }
 
-impl Hash for InternalArbiUint {
+impl Hash for InternalMpUint {
     #[inline(always)]
     #[allow(
         clippy::inline_always,

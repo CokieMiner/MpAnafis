@@ -218,13 +218,13 @@ impl SharedEval {
         }
     }
 
-    /// The second half of [`sum_and_absolute_difference`], for callers that already
+    /// The second half of [`Self::sum_and_absolute_difference`], for callers that already
     /// know which orientation is nonnegative.
     ///
     /// A tier evaluating a whole schedule of points derives the sign once, while
     /// forming the even and odd accumulators, and would otherwise pay the comparison
     /// here a second time. `odd_is_larger` must be what the comparison in
-    /// [`sum_and_absolute_difference`] would have returned for this pair.
+    /// [`Self::sum_and_absolute_difference`] would have returned for this pair.
     pub fn apply_sum_and_absolute_difference(
         even_sum: &mut [Limb],
         odd_difference: &mut [Limb],
@@ -245,14 +245,14 @@ impl SharedEval {
     /// Replace an already-summed evaluation with the absolute difference of its two
     /// halves.
     ///
-    /// The unfused counterpart of [`apply_sum_and_absolute_difference`], for targets
+    /// The unfused counterpart of [`Self::apply_sum_and_absolute_difference`], for targets
     /// without a combined add-and-subtract kernel. Those form `E + O` first, multiply
     /// that sum, and only then need `|E - O|` — which is recoverable from the sum and
     /// the odd half alone, in one pass, rather than by evaluating the point again.
     ///
     /// `even_sum` holds `E + O` and `odd` holds `O`. On return `even_sum` holds
     /// `|E - O|` and `odd` is clobbered. `odd_is_larger` carries the same meaning as
-    /// in [`apply_sum_and_absolute_difference`].
+    /// in [`Self::apply_sum_and_absolute_difference`].
     pub fn overwrite_sum_with_absolute_difference(
         even_sum: &mut [Limb],
         odd: &mut [Limb],
@@ -293,7 +293,7 @@ impl SharedEval {
     #[allow(clippy::inline_always, reason = "Critical for Toom-Cook evaluation")]
     /// Add `scalar * src` into `dst`, selecting the backend for this one call.
     ///
-    /// The convenience form of [`add_mul_word_with_kernel_in_place`], for callers
+    /// The convenience form of [`Self::add_mul_word_with_kernel_in_place`], for callers
     /// that scale a single value. An evaluator running many points should resolve
     /// the kernel once and pass it instead.
     #[inline(always)]
@@ -335,7 +335,7 @@ impl SharedEval {
     #[allow(clippy::inline_always, reason = "Critical for Toom-Cook interpolation")]
     /// Subtract `scalar * src` from `dst`, borrowing through the guard.
     ///
-    /// The interpolation counterpart of [`add_mul_word_in_place`]. The kernel
+    /// The interpolation counterpart of [`Self::add_mul_word_in_place`]. The kernel
     /// reports the escaping product limb and the subtraction's borrow separately;
     /// both are owed to the limbs above `src`, so they are summed before being
     /// propagated.
@@ -434,7 +434,7 @@ impl SharedEval {
     /// reads and writes `dst` once instead of twice; the chains stay independent
     /// because each tracks its own operand. Widths may differ, so whatever extends
     /// past the shared prefix is finished by
-    /// [`sub_full_slices_with_borrow_in_place`] carrying that chain's borrow in.
+    /// [`Self::sub_full_slices_with_borrow_in_place`] carrying that chain's borrow in.
     #[inline(always)]
     pub fn sub_two_full_slices_in_place(dst: &mut [Limb], src1: &[Limb], src2: &[Limb]) {
         let shared_len = min(dst.len(), min(src1.len(), src2.len()));

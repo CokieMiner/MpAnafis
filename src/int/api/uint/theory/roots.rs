@@ -1,8 +1,8 @@
 //! Unsigned root APIs.
 
-use super::ArbiUint;
+use super::MpUint;
 
-impl ArbiUint {
+impl MpUint {
     /// Returns the floor of the square root of `self`, or `None` if it cannot be computed.
     #[must_use]
     pub fn isqrt(&self) -> Option<Self> {

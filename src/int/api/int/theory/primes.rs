@@ -1,8 +1,8 @@
 //! Signed primality APIs.
 
-use super::{ArbiInt, InternalArbiInt, InternalArbiUint};
+use super::{InternalMpInt, InternalMpUint, MpInt};
 
-impl ArbiInt {
+impl MpInt {
     /// Returns `true` if this value is positive and its absolute value is prime.
     #[must_use]
     pub fn is_prime(&self) -> bool {
@@ -22,11 +22,11 @@ impl ArbiInt {
     #[must_use]
     pub fn next_prime(&self) -> Option<Self> {
         let next_abs = if self.is_negative() {
-            InternalArbiUint::from_u64(2)
+            InternalMpUint::from_u64(2)
         } else {
             self.value.abs.next_prime()
         };
-        let value = InternalArbiInt {
+        let value = InternalMpInt {
             abs: next_abs,
             is_positive: true,
         };

@@ -1,15 +1,15 @@
-//! Core signed arithmetic implemented on `InternalArbiInt`.
+//! Core signed arithmetic implemented on `InternalMpInt`.
 
 #![allow(
     clippy::same_name_method,
-    reason = "InternalArbiInt inherent arithmetic deliberately mirrors the corresponding operator traits."
+    reason = "InternalMpInt inherent arithmetic deliberately mirrors the corresponding operator traits."
 )]
 
 use core::cmp::max;
 
-use super::{InternalArbiInt, InternalArbiUint, negate_normalized_inplace};
+use super::{InternalMpInt, InternalMpUint, negate_normalized_inplace};
 
-impl InternalArbiInt {
+impl InternalMpInt {
     /// Adds two signed values.
     #[inline]
     #[must_use]
@@ -23,7 +23,7 @@ impl InternalArbiInt {
             .normalized()
         } else {
             let subtraction_width = max(self.abs.limbs().len(), other.abs.limbs().len());
-            let mut difference = InternalArbiUint::with_capacity(subtraction_width);
+            let mut difference = InternalMpUint::with_capacity(subtraction_width);
             let underflow = difference.assign_difference(&self.abs, &other.abs);
             if difference.is_zero() {
                 Self::zero()
@@ -49,7 +49,7 @@ impl InternalArbiInt {
     pub fn sub(&self, other: &Self) -> Self {
         if self.is_positive == other.is_positive {
             let subtraction_width = max(self.abs.limbs().len(), other.abs.limbs().len());
-            let mut difference = InternalArbiUint::with_capacity(subtraction_width);
+            let mut difference = InternalMpUint::with_capacity(subtraction_width);
             let underflow = difference.assign_difference(&self.abs, &other.abs);
             if difference.is_zero() {
                 Self::zero()

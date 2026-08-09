@@ -11,7 +11,7 @@ use core::{
     mem::swap,
 };
 
-use super::{Division, DoubleLimb, InternalArbiUint, LIMB_BITS, Limb, SqrtScratch};
+use super::{Division, DoubleLimb, InternalMpUint, LIMB_BITS, Limb, SqrtScratch};
 
 /// Floor square root by Newton iteration, at doubling precision.
 ///
@@ -24,7 +24,7 @@ use super::{Division, DoubleLimb, InternalArbiUint, LIMB_BITS, Limb, SqrtScratch
 /// rather than by `log2(bits)` of them.
 impl SqrtScratch {
     /// Computes the floor square root with Newton iteration.
-    pub fn isqrt_basecase(&mut self, a: &InternalArbiUint) -> InternalArbiUint {
+    pub fn isqrt_basecase(&mut self, a: &InternalMpUint) -> InternalMpUint {
         if a.is_zero() || a.is_one() {
             return a.clone();
         }
@@ -33,7 +33,7 @@ impl SqrtScratch {
         if limbs.len() == 1 {
             // SAFETY: len == 1 so get_unchecked is safe
             let val = unsafe { *limbs.get_unchecked(0) };
-            return InternalArbiUint::from_limb(val.isqrt());
+            return InternalMpUint::from_limb(val.isqrt());
         }
 
         if limbs.len() == 2 {
@@ -52,7 +52,7 @@ impl SqrtScratch {
                 reason = "isqrt fits in Limb"
             )]
             let root = val.isqrt() as Limb;
-            return InternalArbiUint::from_limb(root);
+            return InternalMpUint::from_limb(root);
         }
 
         let bits = a.significant_bits();
@@ -81,10 +81,7 @@ impl SqrtScratch {
     }
 
     /// Computes the floor square root and exact remainder.
-    pub fn sqrt_rem_basecase(
-        &mut self,
-        a: &InternalArbiUint,
-    ) -> (InternalArbiUint, InternalArbiUint) {
+    pub fn sqrt_rem_basecase(&mut self, a: &InternalMpUint) -> (InternalMpUint, InternalMpUint) {
         let root = self.isqrt_basecase(a);
         let mut square = self.get_temp();
         square.assign_product_with_scratch(&root, &root, &mut self.mul_scratch);
@@ -102,13 +99,13 @@ impl SqrtScratch {
 /// of `a` and shifting back costs one recursion at half precision instead of a
 /// chain of corrections at full precision. Falls back to the classic one-bit
 /// estimate when the operand is too narrow for the halving to pay for itself.
-fn seed_estimate(a: &InternalArbiUint, bits: usize, scratch: &mut SqrtScratch) -> InternalArbiUint {
+fn seed_estimate(a: &InternalMpUint, bits: usize, scratch: &mut SqrtScratch) -> InternalMpUint {
     // Below this the recursion costs more than the corrections it saves: the
     // two-limb basecase above already answers everything narrower.
     const HALVING_FLOOR_BITS: usize = 4 * LIMB_BITS;
 
     if bits < HALVING_FLOOR_BITS {
-        let mut estimate = InternalArbiUint::one();
+        let mut estimate = InternalMpUint::one();
         estimate.shl_assign(bits.wrapping_add(1).wrapping_shr(1));
         return estimate;
     }
@@ -132,7 +129,7 @@ fn seed_estimate(a: &InternalArbiUint, bits: usize, scratch: &mut SqrtScratch) -
     // strictly exceeds the true root while staying within a relative `1 / t` of
     // it — close enough that the full-width loop needs one or two corrections.
     let mut estimate = seed;
-    estimate.add_assign(&InternalArbiUint::one());
+    estimate.add_assign(&InternalMpUint::one());
     estimate.shl_assign(shift >> 1);
     estimate
 }
@@ -146,9 +143,9 @@ impl SqrtScratch {
     )]
     pub fn sqrt_rem_recursive(
         &mut self,
-        a: &InternalArbiUint,
+        a: &InternalMpUint,
         need_remainder: bool,
-    ) -> (InternalArbiUint, InternalArbiUint) {
+    ) -> (InternalMpUint, InternalMpUint) {
         let scratch = self;
         let len = a.limbs().len();
         if len <= 2 {
@@ -220,11 +217,11 @@ impl SqrtScratch {
 
                 let mut two_s_minus_1 = s.clone();
                 two_s_minus_1.shl_assign(1);
-                two_s_minus_1.sub_assign(&InternalArbiUint::one());
+                two_s_minus_1.sub_assign(&InternalMpUint::one());
 
                 two_s_minus_1.sub(&r_val)
             });
-            s.sub_assign(&InternalArbiUint::one());
+            s.sub_assign(&InternalMpUint::one());
             remainder
         } else if need_remainder {
             Some(u_b.sub(&q_sq))
@@ -233,6 +230,6 @@ impl SqrtScratch {
         };
         scratch.return_temp(q_sq);
 
-        (s, remainder.unwrap_or_else(InternalArbiUint::zero))
+        (s, remainder.unwrap_or_else(InternalMpUint::zero))
     }
 }

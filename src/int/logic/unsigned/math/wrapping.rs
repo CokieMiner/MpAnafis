@@ -1,8 +1,8 @@
 //! Wrapping operations for internal big integers.
 
-use super::{InternalArbiUint, LIMB_BITS, UintRepr};
+use super::{InternalMpUint, LIMB_BITS, UintRepr};
 
-impl InternalArbiUint {
+impl InternalMpUint {
     /// Masks `self` to `bits` bits for wrapping semantics.
     ///
     /// When the value is heap-allocated, the internal `Vec<Limb>` is mutated in

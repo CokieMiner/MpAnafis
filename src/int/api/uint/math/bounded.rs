@@ -1,8 +1,8 @@
 //! Wrapping, overflowing, and saturating unsigned arithmetic APIs.
 
-use super::{ArbiUint, InternalArbiUint};
+use super::{InternalMpUint, MpUint};
 
-impl ArbiUint {
+impl MpUint {
     // wrapping_* arithmetic
     // ------------------------------------------------------------------
 
@@ -38,7 +38,7 @@ impl ArbiUint {
                 let (difference, underflowed) = self.value.sub_with_underflow(&rhs.value);
                 assert!(
                     !underflowed,
-                    "ArbiUint wrapping_sub for unlimited precision is undefined on underflow; use wrapping_sub_with_width(bits) or saturating_sub"
+                    "MpUint wrapping_sub for unlimited precision is undefined on underflow; use wrapping_sub_with_width(bits) or saturating_sub"
                 );
                 difference
             },
@@ -79,7 +79,7 @@ impl ArbiUint {
     pub fn wrapping_div(&self, rhs: &Self) -> Self {
         let p = self.precision.combine_for_binary_op(rhs.precision);
         let value = if rhs.value.is_zero() {
-            InternalArbiUint::zero()
+            InternalMpUint::zero()
         } else {
             self.value.div(&rhs.value)
         };
@@ -98,7 +98,7 @@ impl ArbiUint {
     pub fn wrapping_rem(&self, rhs: &Self) -> Self {
         let p = self.precision.combine_for_binary_op(rhs.precision);
         let value = if rhs.value.is_zero() {
-            InternalArbiUint::zero()
+            InternalMpUint::zero()
         } else {
             self.value.rem(&rhs.value)
         };
@@ -146,7 +146,7 @@ impl ArbiUint {
             || {
                 let (difference, underflowed) = self.value.sub_with_underflow(&rhs.value);
                 let value = if underflowed {
-                    InternalArbiUint::zero()
+                    InternalMpUint::zero()
                 } else {
                     difference
                 };
@@ -189,7 +189,7 @@ impl ArbiUint {
         let p = self.precision.combine_for_binary_op(rhs.precision);
         if rhs.value.is_zero() {
             let result = Self {
-                value: InternalArbiUint::zero(),
+                value: InternalMpUint::zero(),
                 precision: p,
             };
             result.debug_assert_valid();
@@ -213,7 +213,7 @@ impl ArbiUint {
         let p = self.precision.combine_for_binary_op(rhs.precision);
         if rhs.value.is_zero() {
             let result = Self {
-                value: InternalArbiUint::zero(),
+                value: InternalMpUint::zero(),
                 precision: p,
             };
             result.debug_assert_valid();
@@ -241,7 +241,7 @@ impl ArbiUint {
         let p = self.precision.combine_for_binary_op(rhs.precision);
         let sum = self.value.add(&rhs.value);
         if let Some(bits) = p.significant_bits() {
-            let max_val = InternalArbiUint::max_for_bits(bits);
+            let max_val = InternalMpUint::max_for_bits(bits);
             let value = if sum.significant_bits() > bits {
                 max_val
             } else {
@@ -269,7 +269,7 @@ impl ArbiUint {
         let p = self.precision.combine_for_binary_op(rhs.precision);
         let (difference, underflowed) = self.value.sub_with_underflow(&rhs.value);
         let value = if underflowed {
-            InternalArbiUint::zero()
+            InternalMpUint::zero()
         } else {
             difference
         };
@@ -308,7 +308,7 @@ impl ArbiUint {
         let p = self.precision.combine_for_binary_op(rhs.precision);
         let prod = self.value.mul(&rhs.value);
         if let Some(bits) = p.significant_bits() {
-            let max_val = InternalArbiUint::max_for_bits(bits);
+            let max_val = InternalMpUint::max_for_bits(bits);
             let value = if prod.significant_bits() > bits {
                 max_val
             } else {
@@ -337,7 +337,7 @@ impl ArbiUint {
         let p = self.precision.combine_for_binary_op(rhs.precision);
         if rhs.value.is_zero() {
             let result = Self {
-                value: InternalArbiUint::zero(),
+                value: InternalMpUint::zero(),
                 precision: p,
             };
             result.debug_assert_valid();
@@ -358,7 +358,7 @@ impl ArbiUint {
         let p = self.precision.combine_for_binary_op(rhs.precision);
         if rhs.value.is_zero() {
             let result = Self {
-                value: InternalArbiUint::zero(),
+                value: InternalMpUint::zero(),
                 precision: p,
             };
             result.debug_assert_valid();

@@ -20,7 +20,7 @@ mod types;
 mod tests;
 
 pub use api::*;
-pub use logic::{InternalArbiInt, InternalArbiUint};
+pub use logic::{InternalMpInt, InternalMpUint};
 #[cfg(not(feature = "_internal-tune"))]
 pub use types::Limb;
 #[cfg(feature = "_internal-tune")]

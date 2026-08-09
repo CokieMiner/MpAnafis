@@ -4,7 +4,7 @@ use core::fmt::{Display, Formatter, Result as FmtResult};
 /// The central error type for the arbitrary precision library.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum ArbiError {
+pub enum MpError {
     /// Operation would exceed the maximum permitted precision bound.
     Overflow,
     /// Unsigned subtraction below zero, or precision underflow.
@@ -63,7 +63,7 @@ pub enum ArbiError {
     EmptySlice,
 }
 
-impl Display for ArbiError {
+impl Display for MpError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match *self {
             Self::Overflow => write!(f, "overflow"),
@@ -99,44 +99,44 @@ impl Display for ArbiError {
 }
 
 #[cfg(feature = "std")]
-impl Error for ArbiError {}
+impl Error for MpError {}
 
-/// Error type for parsing an `ArbiInt` from a string or bytes.
+/// Error type for parsing an `MpInt` from a string or bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParseArbiIntError {
-    pub(crate) kind: ParseArbiIntErrorKind,
+pub struct ParseMpIntError {
+    pub(crate) kind: ParseMpIntErrorKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ParseArbiIntErrorKind {
+pub enum ParseMpIntErrorKind {
     Empty,
     InvalidDigit,
     InvalidRadix,
     TooLarge,
 }
 
-impl Display for ParseArbiIntError {
+impl Display for ParseMpIntError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self.kind {
-            ParseArbiIntErrorKind::Empty => write!(f, "cannot parse integer from empty string"),
-            ParseArbiIntErrorKind::InvalidDigit => write!(f, "invalid digit found in string"),
-            ParseArbiIntErrorKind::InvalidRadix => write!(f, "invalid radix"),
-            ParseArbiIntErrorKind::TooLarge => write!(f, "value too large for parsing"),
+            ParseMpIntErrorKind::Empty => write!(f, "cannot parse integer from empty string"),
+            ParseMpIntErrorKind::InvalidDigit => write!(f, "invalid digit found in string"),
+            ParseMpIntErrorKind::InvalidRadix => write!(f, "invalid radix"),
+            ParseMpIntErrorKind::TooLarge => write!(f, "value too large for parsing"),
         }
     }
 }
 
 #[cfg(feature = "std")]
-impl Error for ParseArbiIntError {}
+impl Error for ParseMpIntError {}
 
-/// Error type for parsing an `ArbiUint` from a string or bytes.
+/// Error type for parsing an `MpUint` from a string or bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParseArbiUintError {
-    pub(crate) kind: ParseArbiUintErrorKind,
+pub struct ParseMpUintError {
+    pub(crate) kind: ParseMpUintErrorKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ParseArbiUintErrorKind {
+pub enum ParseMpUintErrorKind {
     Empty,
     InvalidRadix,
     InvalidDigit,
@@ -144,19 +144,19 @@ pub enum ParseArbiUintErrorKind {
     TooLarge,
 }
 
-impl Display for ParseArbiUintError {
+impl Display for ParseMpUintError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self.kind {
-            ParseArbiUintErrorKind::Empty => write!(f, "cannot parse integer from empty string"),
-            ParseArbiUintErrorKind::InvalidDigit => write!(f, "invalid digit found in string"),
-            ParseArbiUintErrorKind::InvalidRadix => write!(f, "invalid radix"),
-            ParseArbiUintErrorKind::Negative => {
+            ParseMpUintErrorKind::Empty => write!(f, "cannot parse integer from empty string"),
+            ParseMpUintErrorKind::InvalidDigit => write!(f, "invalid digit found in string"),
+            ParseMpUintErrorKind::InvalidRadix => write!(f, "invalid radix"),
+            ParseMpUintErrorKind::Negative => {
                 write!(f, "cannot parse unsigned integer from negative value")
             }
-            ParseArbiUintErrorKind::TooLarge => write!(f, "value too large for parsing"),
+            ParseMpUintErrorKind::TooLarge => write!(f, "value too large for parsing"),
         }
     }
 }
 
 #[cfg(feature = "std")]
-impl Error for ParseArbiUintError {}
+impl Error for ParseMpUintError {}

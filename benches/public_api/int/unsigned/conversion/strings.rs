@@ -15,8 +15,8 @@
     reason = "benchmark submodules inherit parent scope"
 )]
 
-use arbi_anafis::ArbiUint;
 use divan::black_box;
+use mp_anafis::MpUint;
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 use rug::Integer;
 
@@ -24,15 +24,15 @@ use rug::Integer;
 use crate::int::support::rug_uint;
 use crate::int::{
     ladders::NARROW,
-    support::{SAMPLE_SIZE_FAST, arbi_uint},
+    support::{SAMPLE_SIZE_FAST, mp_uint},
 };
 
 mod to_string_radix_10 {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).to_string_radix(10));
         });
@@ -52,10 +52,10 @@ mod from_string_radix_10 {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let text = arbi_uint(bits, 42).to_string_radix(10);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let text = mp_uint(bits, 42).to_string_radix(10);
         bencher.bench_local(|| {
-            let _output = black_box(ArbiUint::from_str_radix(black_box(&text), 10));
+            let _output = black_box(MpUint::from_str_radix(black_box(&text), 10));
         });
     }
 
@@ -73,8 +73,8 @@ mod to_string_radix_16 {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).to_string_radix(16));
         });
@@ -94,10 +94,10 @@ mod from_string_radix_16 {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let text = arbi_uint(bits, 42).to_string_radix(16);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let text = mp_uint(bits, 42).to_string_radix(16);
         bencher.bench_local(|| {
-            let _output = black_box(ArbiUint::from_str_radix(black_box(&text), 16));
+            let _output = black_box(MpUint::from_str_radix(black_box(&text), 16));
         });
     }
 
@@ -115,8 +115,8 @@ mod to_string_radix_32 {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).to_string_radix(32));
         });
@@ -136,8 +136,8 @@ mod to_string_radix_8 {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).to_string_radix(8));
         });
@@ -157,8 +157,8 @@ mod to_string_radix_2 {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).to_string_radix(2));
         });
@@ -178,10 +178,10 @@ mod from_string_radix_2 {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let text = arbi_uint(bits, 42).to_string_radix(2);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let text = mp_uint(bits, 42).to_string_radix(2);
         bencher.bench_local(|| {
-            let _output = black_box(ArbiUint::from_str_radix(black_box(&text), 2));
+            let _output = black_box(MpUint::from_str_radix(black_box(&text), 2));
         });
     }
 
@@ -201,8 +201,8 @@ mod display {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(black_box(&value).to_string());
         });
@@ -223,8 +223,8 @@ mod lower_hex {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(format!("{:x}", black_box(&value)));
         });
@@ -245,8 +245,8 @@ mod binary {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(format!("{:b}", black_box(&value)));
         });
@@ -267,8 +267,8 @@ mod octal {
     use super::*;
 
     #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
-    fn arbi(bencher: divan::Bencher, bits: usize) {
-        let value = arbi_uint(bits, 42);
+    fn mp(bencher: divan::Bencher, bits: usize) {
+        let value = mp_uint(bits, 42);
         bencher.bench_local(|| {
             let _output = black_box(format!("{:o}", black_box(&value)));
         });
