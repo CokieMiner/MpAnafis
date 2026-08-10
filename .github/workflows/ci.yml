@@ -1,0 +1,293 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    name: Format, Policy & Native Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust Nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check Formatting
+        run: cargo fmt --all --check
+
+      - name: Import Audit
+        run: python3 -B tools/import_audit.py
+
+      - name: Structure Audit
+        run: python3 -B tools/structure_audit.py
+
+      - name: Native Clippy
+        run: |
+          cargo clippy --all-targets --no-default-features -- -D warnings
+          cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    name: Test (Native x86_64)
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust Stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install FLINT for tuner tests
+        run: sudo apt-get update && sudo apt-get install -y libflint-dev
+
+      - name: Run Tests & Compile Auxiliary Targets
+        run: |
+          cargo test --doc --all-features
+          cargo test --lib --tests --bins --examples --all-features
+          cargo test --lib --no-default-features
+          cargo test --lib --features num-traits --no-default-features
+          cargo check --manifest-path fuzz/Cargo.toml --all-targets --all-features
+
+  # `check_archs` proves every kernel *compiles*; `test` runs the suite against
+  # whichever backend the runner's CPU happens to select, which on GitHub's
+  # x86-64 images is always ADX+BMI2. Without this job the BMI2-only and
+  # baseline kernels are compiled and never executed, and every algorithm above
+  # them is only ever exercised on the fastest path.
+  #
+  # `ARBI_TEST_BACKEND` is honoured only under `debug_assertions`, which is why
+  # these runs are unoptimised. It also degrades rather than faults: a request
+  # the host cannot satisfy falls back to baseline, so this cannot execute an
+  # instruction the runner lacks.
+  #
+  # ADX-without-BMI2 has no matrix entry because it is not reachable by
+  # request -- `adx` selects ADX+BMI2 whenever both are present, and no runner
+  # image offers one without the other.
+  test_x86_backends:
+    name: Kernel Backend (${{ matrix.backend }})
+    needs: quality
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [adx, bmi2, vanilla]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust Stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Tests On Selected Backend
+        env:
+          ARBI_TEST_BACKEND: ${{ matrix.backend }}
+        run: |
+          cargo test --lib --tests --features std,num-traits
+          cargo test --lib --tests --no-default-features
+
+  # The PowerPC64 counterpart of `test_x86_backends`, and a separate job rather
+  # than a `test_cross` matrix entry because it is the one target that needs
+  # RUSTFLAGS, and threading that through twelve `if:` conditions keyed on
+  # `matrix.target` would be worse than a dozen duplicated lines.
+  #
+  # PowerPC has no stable runtime feature detection, so kernels are selected at
+  # compile time and `power9-vector` is not a default of either PowerPC64
+  # target -- powerpc64le defaults to power8-vector. Without this job the ISA
+  # 3.0 kernels are compiled by nothing and executed by nothing.
+  test_power9:
+    name: Test (POWER9 ISA 3.0)
+    needs: quality
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -C target-cpu=pwr9
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust Stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: powerpc64le-unknown-linux-gnu
+
+      - name: Install cross
+        uses: taiki-e/install-action@cross
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: power9
+
+      - name: Run Tests (cross - no_std and std)
+        run: |
+          cross test --lib --tests --no-default-features --target powerpc64le-unknown-linux-gnu
+          cross test --lib --tests --features std,num-traits --target powerpc64le-unknown-linux-gnu
+
+  check_archs:
+    name: Cross-Architecture Assembly Check
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust Nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: clippy, rust-src
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Verify All ASM Kernels Compile
+        run: ./tools/check_all_archs.sh
+
+  test_cross:
+    name: Test (${{ matrix.target }})
+    needs: quality
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-unknown-linux-gnu
+          - armv7-unknown-linux-gnueabihf
+          - powerpc64le-unknown-linux-gnu
+          - powerpc64-unknown-linux-gnu
+          - powerpc-unknown-linux-gnu
+          - s390x-unknown-linux-gnu
+          - riscv64gc-unknown-linux-gnu
+          - riscv32gc-unknown-linux-gnu
+          - mips64-unknown-linux-gnuabi64
+          - mips-unknown-linux-gnu
+          - i686-unknown-linux-gnu
+          - loongarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust Stable
+        if: ${{ matrix.target != 'riscv32gc-unknown-linux-gnu' && matrix.target != 'mips-unknown-linux-gnu' && matrix.target != 'mips64-unknown-linux-gnuabi64' }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Rust Nightly (For Tier 3 targets)
+        if: ${{ matrix.target == 'riscv32gc-unknown-linux-gnu' || matrix.target == 'mips-unknown-linux-gnu' || matrix.target == 'mips64-unknown-linux-gnuabi64' }}
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Install System Cross Compilers & QEMU
+        if: ${{ matrix.target == 'riscv32gc-unknown-linux-gnu' || matrix.target == 'mips-unknown-linux-gnu' || matrix.target == 'mips64-unknown-linux-gnuabi64' || matrix.target == 'loongarch64-unknown-linux-gnu' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user
+          if [ "${{ matrix.target }}" = "riscv32gc-unknown-linux-gnu" ]; then
+            wget -q https://toolchains.bootlin.com/downloads/releases/toolchains/riscv32-ilp32d/tarballs/riscv32-ilp32d--glibc--bleeding-edge-2024.02-1.tar.bz2
+            tar -xf riscv32-ilp32d--glibc--bleeding-edge-2024.02-1.tar.bz2
+          fi
+          if [ "${{ matrix.target }}" = "mips-unknown-linux-gnu" ]; then sudo apt-get install -y gcc-mips-linux-gnu; fi
+          if [ "${{ matrix.target }}" = "mips64-unknown-linux-gnuabi64" ]; then sudo apt-get install -y gcc-mips64-linux-gnuabi64; fi
+          if [ "${{ matrix.target }}" = "loongarch64-unknown-linux-gnu" ]; then
+            wget -q https://github.com/loongson/build-tools/releases/download/2025.08.08/x86_64-cross-tools-loongarch64-binutils_2.45-gcc_15.1.0-glibc_2.42.tar.xz
+            tar -xf x86_64-cross-tools-loongarch64-binutils_2.45-gcc_15.1.0-glibc_2.42.tar.xz
+          fi
+
+      - name: Install cross
+        uses: taiki-e/install-action@cross
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Tests (cross - no_std and std)
+        if: ${{ matrix.target != 'riscv32gc-unknown-linux-gnu' && matrix.target != 'loongarch64-unknown-linux-gnu' && matrix.target != 'mips64-unknown-linux-gnuabi64' && matrix.target != 'mips-unknown-linux-gnu' }}
+        run: |
+          cross test --lib --tests --no-default-features --target ${{ matrix.target }}
+          cross test --lib --tests --features std,num-traits --target ${{ matrix.target }}
+
+      - name: Run Tests (Native QEMU - Tier 3 - no_std and std)
+        if: ${{ matrix.target == 'riscv32gc-unknown-linux-gnu' || matrix.target == 'mips-unknown-linux-gnu' || matrix.target == 'mips64-unknown-linux-gnuabi64' || matrix.target == 'loongarch64-unknown-linux-gnu' }}
+        run: |
+          if [ "${{ matrix.target }}" = "riscv32gc-unknown-linux-gnu" ]; then
+            export PATH=$PATH:$(pwd)/riscv32-ilp32d--glibc--bleeding-edge-2024.02-1/bin
+            export CARGO_TARGET_RISCV32GC_UNKNOWN_LINUX_GNU_LINKER=riscv32-buildroot-linux-gnu-gcc
+            export CARGO_TARGET_RISCV32GC_UNKNOWN_LINUX_GNU_RUNNER="qemu-riscv32 -L $(pwd)/riscv32-ilp32d--glibc--bleeding-edge-2024.02-1/riscv32-buildroot-linux-gnu/sysroot"
+            cargo +nightly test --lib --tests --no-default-features -Zbuild-std --target ${{ matrix.target }}
+            cargo +nightly test --lib --tests --features std,num-traits -Zbuild-std --target ${{ matrix.target }}
+          elif [ "${{ matrix.target }}" = "mips-unknown-linux-gnu" ]; then
+            export CARGO_TARGET_MIPS_UNKNOWN_LINUX_GNU_LINKER=mips-linux-gnu-gcc
+            export CARGO_TARGET_MIPS_UNKNOWN_LINUX_GNU_RUNNER="qemu-mips -L /usr/mips-linux-gnu"
+            cargo +nightly test --lib --tests --no-default-features -Zbuild-std --target ${{ matrix.target }}
+            cargo +nightly test --lib --tests --features std,num-traits -Zbuild-std --target ${{ matrix.target }}
+          elif [ "${{ matrix.target }}" = "mips64-unknown-linux-gnuabi64" ]; then
+            export CARGO_TARGET_MIPS64_UNKNOWN_LINUX_GNUABI64_LINKER=mips64-linux-gnuabi64-gcc
+            export CARGO_TARGET_MIPS64_UNKNOWN_LINUX_GNUABI64_RUNNER="qemu-mips64 -L /usr/mips64-linux-gnuabi64"
+            # Workaround for an open LLVM MIPS backend bug (llvm-project#112010,
+            # "out of range PC16 fixup"): building rust's own `proc_macro` crate
+            # for a libc-based MIPS target fails at O0 because a large function
+            # contains a branch whose target exceeds the PC16 range and the
+            # backend does not expand it. `-force-mips-long-branch` makes the
+            # MIPS long-branch expansion pass expand every branch to long
+            # format, which compiles cleanly (confirmed by the LLVM MIPS
+            # maintainer). This is needed only where the full standard library
+            # is built from rust-src (`-Z build-std`); the core/alloc-only
+            # builds in `check_archs` never trigger it.
+            export CARGO_TARGET_MIPS64_UNKNOWN_LINUX_GNUABI64_RUSTFLAGS="-C llvm-args=-force-mips-long-branch"
+            cargo +nightly test --lib --tests --no-default-features -Zbuild-std --target ${{ matrix.target }}
+            cargo +nightly test --lib --tests --features std,num-traits -Zbuild-std --target ${{ matrix.target }}
+          elif [ "${{ matrix.target }}" = "loongarch64-unknown-linux-gnu" ]; then
+            export PATH=$PATH:$(pwd)/cross-tools/bin
+            export CARGO_TARGET_LOONGARCH64_UNKNOWN_LINUX_GNU_LINKER=loongarch64-unknown-linux-gnu-gcc
+            export CARGO_TARGET_LOONGARCH64_UNKNOWN_LINUX_GNU_RUNNER="qemu-loongarch64 -L $(pwd)/cross-tools/target"
+            export CARGO_TARGET_LOONGARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-fuse-ld=bfd"
+            cargo test --lib --tests --no-default-features --target ${{ matrix.target }}
+            cargo test --lib --tests --features std,num-traits --target ${{ matrix.target }}
+          fi
+
+  # The two feature sets are independent interpreter runs sharing no state, and
+  # Miri is the slowest job in the workflow, so they run as parallel jobs rather
+  # than as two steps of one.
+  #
+  # Deliberately without `needs: quality`, unlike every other job here. Miri
+  # sets the critical path, and gating it behind a formatting check would add
+  # that check's duration to every green run in order to save runner minutes on
+  # red ones. Correctness feedback is worth more than the minutes.
+  miri:
+    name: Miri (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: no_std
+            features: --no-default-features
+          - name: std
+            features: --features std,num-traits
+    env:
+      PROPTEST_DISABLE_FAILURE_PERSISTENCE: 1
+      PROPTEST_CASES: 8
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Nightly & Miri
+        run: |
+          rustup toolchain install nightly --component miri
+          rustup override set nightly
+          cargo miri setup
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: miri-${{ matrix.name }}
+      - name: Run Tests with Miri
+        run: cargo miri test --lib --tests ${{ matrix.features }}

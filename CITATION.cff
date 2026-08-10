@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "arbi-anafis: High-performance arbitrary-precision arithmetic in pure Rust"
+url: "https://github.com/CokieMiner/arbi-anafis"
+authors:
+  - family-names: Martins
+    given-names: Pedro
+    orcid: "https://orcid.org/0009-0001-8170-2930"
+version: 0.1.0
+date-released: "2026-08-08"
+license: Apache-2.0
+keywords:
+  - arbitrary-precision
+  - arithmetic
+  - big-integer
+  - rust
+  - mathematics

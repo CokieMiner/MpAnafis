@@ -1,0 +1,179 @@
+[package]
+name = "arbi-anafis"
+version = "0.1.0"
+edition = "2024"
+authors = ["CokieMiner"]
+description = "High-performance arbitrary-precision arithmetic in pure Rust"
+license = "Apache-2.0"
+repository = "https://github.com/CokieMiner/arbi-anafis"
+readme = "README.md"
+keywords = ["bigint", "arbitrary-precision", "multiprecision", "numerics", "no-std"]
+categories = ["mathematics", "science"]
+
+# ============================================================================
+# Features
+# ============================================================================
+[features]
+default = []
+std = []
+num-traits = ["dep:num-traits"]
+# Internal: enables the host-side tuner and the multiplication benchmarks. The
+# latter link the system FLINT (`pacman -S flint`, `apt install libflint-dev`)
+# for the `compare` group.
+_internal-tune = ["std"]
+
+
+[dependencies]
+num-traits = { version = "0.2", optional = true, default-features = false }
+
+[dev-dependencies]
+divan = "0.1.21"
+proptest = "1.11.0"
+
+[target.'cfg(all(target_arch = "x86_64", target_pointer_width = "64"))'.dev-dependencies]
+gmp-mpfr-sys = { version = "1.7.1", default-features = false, features = ["force-cross"] }
+rug = { version = "1.30", default-features = false, features = ["integer", "std"] }
+
+[[bench]]
+name = "public_api"
+path = "benches/public_api/main.rs"
+harness = false
+required-features = ["std"]
+
+# Links the system GMP and FLINT for the `compare` group.
+[[bench]]
+name = "internal_improvement"
+path = "benches/internal_improvement/main.rs"
+harness = false
+required-features = ["_internal-tune"]
+
+[[bin]]
+name = "arbi-tune"
+path = "tools/tune/main.rs"
+required-features = ["_internal-tune"]
+
+# ============================================================================
+# Profiles
+# ============================================================================
+[profile.release]
+lto = true        # Enable Link-Time Optimization for maximum runtime performance and smaller size
+codegen-units = 1 # Maximize optimizations across translation units
+strip = true      # Strip symbols and debug info from release binaries
+
+[profile.release.build-override]
+opt-level = 3     # Ensure build scripts and auto-tuner run at maximum optimization speed
+
+[profile.bench]
+strip = false     # Keep symbols in benchmarks for profiling (e.g. flamegraphs, samply)
+debug = true      # Include debug info in benchmarks for profiling
+
+# ============================================================================
+# Lints Configuration (applies globally by default; tests, benches, and tools
+# may add top-level #![allow(...)] for stylistic/I/O friction where appropriate)
+# ============================================================================
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "deny"
+let_underscore_drop = "deny"
+missing_copy_implementations = "deny"
+missing_debug_implementations = "deny"
+unused_results = "deny"
+variant_size_differences = "deny"
+trivial_casts = "deny"
+trivial_numeric_casts = "deny"
+
+[lints.rustdoc]
+broken_intra_doc_links = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+# =============================================================================
+# CODE QUALITY & STYLE (RESTRICTION)
+# =============================================================================
+alloc_instead_of_core = "deny"           # Use core for better portability
+allow_attributes_without_reason = "deny" # Require explicit reasons for allow attributes
+arithmetic_side_effects = "deny"          # Force handling of overflows/div-by-zero
+as_conversions = "deny"                  # Prevent silent truncations (prefer try_into)
+clone_on_ref_ptr = "deny"                # Avoid double indirection performance hit
+cognitive_complexity = "deny"            # Keep simplification logic readable
+create_dir = "deny"                      # Force error handling for filesystem ops
+dbg_macro = "deny"                       # No debug artifacts in production (upgraded)
+empty_drop = "deny"                      # Detect accidentally empty Drop implementations
+empty_structs_with_brackets = "deny"     # Consistent struct syntax
+exit = "deny"                            # No hard exits in library code
+filetype_is_file = "deny"                # More robust file type checking
+float_cmp_const = "deny"                 # Safe float comparisons
+fn_to_numeric_cast = "deny"              # Prevent function pointer casting bugs
+format_push_string = "deny"              # Performance: use write! instead of format!
+get_unwrap = "deny"                      # Use [] indexing instead of get().unwrap()
+if_then_some_else_none = "deny"          # Use bool::then_some for clarity
+indexing_slicing = "deny"                # Prevent panics on indexing
+inline_asm_x86_intel_syntax = "deny"     # Consistent ASM syntax
+integer_division = "deny"                # Force explicit float division
+large_include_file = "deny"              # No embedding huge files
+let_underscore_must_use = "deny"         # Don't ignore important return values
+lossy_float_literal = "deny"             # Stricter float precision (upgraded)
+map_err_ignore = "deny"                  # Don't lose error context
+mem_forget = "deny"                      # No memory leaks
+missing_assert_message = "deny"          # Require messages in asserts
+mixed_read_write_in_expression = "deny"  # Avoid subtle bugs
+mutex_atomic = "deny"                    # Performance critical (upgraded)
+non_ascii_literal = "deny"               # Keep code portable
+panic_in_result_fn = "deny"              # No panics in Result-returning functions
+partial_pub_fields = "deny"              # Consistent field visibility
+print_stderr = "deny"                    # No side effects to stderr
+print_stdout = "deny"                    # No side effects to stdout (upgraded)
+pub_without_shorthand = "deny"           # Consistent pub syntax
+rc_buffer = "deny"                       # Memory efficiency (upgraded)
+rc_mutex = "deny"                        # Performance: prefer Arc<Mutex<T>>
+redundant_type_annotations = "deny"      # Clean up unnecessary annotations
+rest_pat_in_fully_bound_structs = "deny" # Explicit field handling
+same_name_method = "deny"                # Avoid confusing method names
+self_named_module_files = "deny"         # Consistent module naming
+semicolon_inside_block = "deny"          # Consistent semicolon style
+shadow_reuse = "deny"                    # Prevent accidental variable reuse
+std_instead_of_alloc = "deny"            # Use alloc for better portability 
+std_instead_of_core = "deny"             # Use core for better portability
+shadow_unrelated = "deny"                # Prevent confusing variable shadowing
+single_char_lifetime_names = "deny"      # Descriptive lifetime names
+host_endian_bytes = "deny"               # Prevent endianness bugs
+exhaustive_enums = "deny"                # Force non-exhaustive enums
+exhaustive_structs = "deny"              # Force non-exhaustive structs
+unnecessary_self_imports = "deny"        # Clean imports
+unneeded_field_pattern = "deny"          # Clean pattern matching
+unwrap_in_result = "deny"                # No unwrap inside Result functions
+unseparated_literal_suffix = "deny"      # Readable numeric literals
+use_debug = "deny"                       # No Debug in production formatting
+verbose_file_reads = "deny"              # Use fs::read_to_string when appropriate
+wildcard_enum_match_arm = "deny"         # Mandatory exhaustive matches
+
+# =============================================================================
+# PERFORMANCE (HPC FOCUSED)
+# =============================================================================
+large_stack_arrays = "deny"              # Prevent stack overflows (upgraded)
+perf = { level = "deny", priority = -1 }
+str_to_string = "deny"                   # Performance: avoid unnecessary allocations
+string_add = "deny"                      # Performance: use format! or push_str
+string_slice = "deny"                    # Performance: consider &str instead
+suboptimal_flops = "deny"                # Mathematical precision is critical (upgraded)
+
+# =============================================================================
+# ROBUSTNESS & ERROR HANDLING
+# =============================================================================
+debug_assert_with_mut_call = "deny" # Side effects in debug asserts
+missing_panics_doc = "deny"         # Document when functions can panic
+panic = "deny"                      # No panics in library code
+todo = "deny"                       # No unfinished code (upgraded)
+try_err = "deny"                    # Use ? operator consistently
+undocumented_unsafe_blocks = "deny" # All unsafe must be documented
+unimplemented = "deny"              # No unfinished implementations
+unreachable = "deny"                # All code paths must be explicitly handled
+unwrap_used = "deny"                # No unwraps - use expect with context
+
+# =============================================================================
+# MATH PRECISION & CORRECTNESS
+# =============================================================================
+imprecise_flops = "deny"            # Mathematical precision critical (upgraded)
+suspicious_xor_used_as_pow = "deny" # Catch common XOR/pow confusion
