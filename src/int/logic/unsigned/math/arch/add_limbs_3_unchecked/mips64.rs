@@ -1,9 +1,6 @@
 //! `MIPS64` 64-bit addition kernels (inline assembly).
 //!
-//! MIPS has no hardware carry flag, so carry is tracked manually with
-//! `sltu` (set-less-than unsigned) and `or`.
-//!
-//! The loop is **4-way unrolled** (`len >> 2`) for maximum throughput.
+//! Evaluates `dst = src1 + src2` using 4-way unrolled loops with branchless `sltu` carry tracking.
 
 use core::{arch::asm, hint::unreachable_unchecked};
 
@@ -12,12 +9,15 @@ use super::Limb;
 /// Compute `dst[i] = src1[i] + src2[i] + carry` for `len` limbs, returning
 /// the final carry.
 ///
+/// # Microarchitectural Strategy
+///
+/// `MIPS64` uses `daddu` and `sltu` (set-less-than unsigned) to detect arithmetic wrap-around.
+/// The 4-way unrolled loop loads and adds 4 limbs per iteration, chaining carries branchlessly with `or`.
+///
 /// # Safety
 ///
 /// - `dst`, `src1`, and `src2` must each be valid for `len` elements.
-/// - `dst` must not overlap either input span: the kernel writes `dst`
-///   while it reads `src1` and `src2`.
-/// - `src1` and `src2` are read-only and may alias each other.
+/// - `dst` must not overlap either input span.
 #[allow(
     clippy::inline_always,
     reason = "Critical for peak assembly performance"
@@ -50,75 +50,87 @@ pub unsafe fn add_limbs_3_unchecked(
     let chunks = len >> 2;
     let rem = len & 3;
 
-    // SAFETY: Caller guarantees pointers are valid for `len` elements.
+    // SAFETY:
+    // 1. `dst`, `src1`, `src2` are valid for `len` 64-bit `Limb` elements.
+    // 2. Memory spans are non-overlapping.
+    // 3. Pointer offsets remain within allocated bounds.
     unsafe {
         asm!(
             ".set noat",
-            "beqz {chunks}, 2f",           // skip main loop if chunks == 0
+            "beqz {chunks}, 2f",                         // If chunks == 0, skip to remainder (2f)
 
-            // ── 4‑way unrolled loop ────────────────────────────────────
-            ".p2align 4",                          // align loop header for fetch efficiency
+            // Main 4-way unrolled loop
+            ".p2align 4",
             "1:",
-            "ld {t0}, 0({src1})",
-            "ld {t1}, 0({src2})",
-            "daddu {t2}, {t1}, {t0}",
-            "sltu {c0}, {t2}, {t0}",
-            "daddu {t2}, {t2}, {carry}",
-            "sltu {c1}, {t2}, {carry}",
-            "or {carry}, {c0}, {c1}",
-            "sd {t2}, 0({dst})",
+            // [Limb 0]
+            "ld {t0}, 0({src1})",                        // Load src1[0]
+            "ld {t1}, 0({src2})",                        // Load src2[0]
+            "daddu {t2}, {t1}, {t0}",                    // t2 = src2[0] + src1[0]
+            "sltu {c0}, {t2}, {t0}",                     // c0 = 1 if addition wrapped
+            "daddu {t2}, {t2}, {carry}",                 // t2 += carry
+            "sltu {c1}, {t2}, {carry}",                  // c1 = 1 if addition with carry wrapped
+            "or {carry}, {c0}, {c1}",                    // Combined carry for next limb
+            "sd {t2}, 0({dst})",                         // Store dst[0]
 
-            "ld {t0}, 8({src1})",
-            "ld {t1}, 8({src2})",
-            "daddu {t2}, {t1}, {t0}",
-            "sltu {c0}, {t2}, {t0}",
-            "daddu {t2}, {t2}, {carry}",
-            "sltu {c1}, {t2}, {carry}",
-            "or {carry}, {c0}, {c1}",
-            "sd {t2}, 8({dst})",
+            // [Limb 1]
+            "ld {t0}, 8({src1})",                        // Load src1[1]
+            "ld {t1}, 8({src2})",                        // Load src2[1]
+            "daddu {t2}, {t1}, {t0}",                    // Add limbs
+            "sltu {c0}, {t2}, {t0}",                     // Detect wrap
+            "daddu {t2}, {t2}, {carry}",                 // Add carry
+            "sltu {c1}, {t2}, {carry}",                  // Detect wrap
+            "or {carry}, {c0}, {c1}",                    // Combine carry
+            "sd {t2}, 8({dst})",                         // Store dst[1]
 
-            "ld {t0}, 16({src1})",
-            "ld {t1}, 16({src2})",
-            "daddu {t2}, {t1}, {t0}",
-            "sltu {c0}, {t2}, {t0}",
-            "daddu {t2}, {t2}, {carry}",
-            "sltu {c1}, {t2}, {carry}",
-            "or {carry}, {c0}, {c1}",
-            "sd {t2}, 16({dst})",
+            // [Limb 2]
+            "ld {t0}, 16({src1})",                       // Load src1[2]
+            "ld {t1}, 16({src2})",                       // Load src2[2]
+            "daddu {t2}, {t1}, {t0}",                    // Add limbs
+            "sltu {c0}, {t2}, {t0}",                     // Detect wrap
+            "daddu {t2}, {t2}, {carry}",                 // Add carry
+            "sltu {c1}, {t2}, {carry}",                  // Detect wrap
+            "or {carry}, {c0}, {c1}",                    // Combine carry
+            "sd {t2}, 16({dst})",                        // Store dst[2]
 
-            "ld {t0}, 24({src1})",
-            "ld {t1}, 24({src2})",
-            "daddu {t2}, {t1}, {t0}",
-            "sltu {c0}, {t2}, {t0}",
-            "daddu {t2}, {t2}, {carry}",
-            "sltu {c1}, {t2}, {carry}",
-            "or {carry}, {c0}, {c1}",
-            "sd {t2}, 24({dst})",
+            // [Limb 3]
+            "ld {t0}, 24({src1})",                       // Load src1[3]
+            "ld {t1}, 24({src2})",                       // Load src2[3]
+            "daddu {t2}, {t1}, {t0}",                    // Add limbs
+            "sltu {c0}, {t2}, {t0}",                     // Detect wrap
+            "daddu {t2}, {t2}, {carry}",                 // Add carry
+            "sltu {c1}, {t2}, {carry}",                  // Detect wrap
+            "or {carry}, {c0}, {c1}",                    // Combine carry
+            "sd {t2}, 24({dst})",                        // Store dst[3]
 
-            "daddiu {src1}, {src1}, 32",
-            "daddiu {src2}, {src2}, 32",
-            "daddiu {dst}, {dst}, 32",
-            "daddiu {chunks}, {chunks}, -1",
-            "bnez {chunks}, 1b",
+            // Advance pointers by 32 bytes and loop
+            "daddiu {src1}, {src1}, 32",                 // Advance src1
+            "daddiu {src2}, {src2}, 32",                 // Advance src2
+            "daddiu {dst}, {dst}, 32",                   // Advance dst
+            "daddiu {chunks}, {chunks}, -1",             // Decrement chunk counter
+            "bnez {chunks}, 1b",                         // Repeat while chunks != 0
 
-            // ── Tail: single‑limb remainder loop ───────────────────────
+            // Remainder entry point (0 to 3 limbs)
             "2:",
-            "beqz {rem}, 4f",              // skip tail if rem == 0
-            ".p2align 4",                          // align loop header for fetch efficiency
+            "beqz {rem}, 4f",                            // If rem == 0, exit (4f)
+            ".p2align 4",
+
+            // 1-limb tail loop
             "3:",
-            "ld {t0}, 0({src1})",
-            "ld {t1}, 0({src2})",
-            "daddu {t2}, {t1}, {t0}",
-            "sltu {c0}, {t2}, {t0}",
-            "daddu {t2}, {t2}, {carry}",
-            "sltu {c1}, {t2}, {carry}",
-            "or {carry}, {c0}, {c1}",
-            "sd {t2}, 0({dst})",
-            "daddiu {src1}, {src1}, 8",
-            "daddiu {src2}, {src2}, 8",
-            "daddiu {dst}, {dst}, 8",
-            "daddiu {rem}, {rem}, -1",
-            "bnez {rem}, 3b",
+            "ld {t0}, 0({src1})",                        // Load single src1 limb
+            "ld {t1}, 0({src2})",                        // Load single src2 limb
+            "daddu {t2}, {t1}, {t0}",                    // Add limbs
+            "sltu {c0}, {t2}, {t0}",                     // Detect wrap
+            "daddu {t2}, {t2}, {carry}",                 // Add carry
+            "sltu {c1}, {t2}, {carry}",                  // Detect wrap
+            "or {carry}, {c0}, {c1}",                    // Combine carry
+            "sd {t2}, 0({dst})",                         // Store dst limb
+            "daddiu {src1}, {src1}, 8",                  // Advance src1
+            "daddiu {src2}, {src2}, 8",                  // Advance src2
+            "daddiu {dst}, {dst}, 8",                    // Advance dst
+            "daddiu {rem}, {rem}, -1",                   // Decrement rem
+            "bnez {rem}, 3b",                            // Repeat while rem != 0
+
+            // Exit
             "4:",
 
             carry = inout(reg) carry,
@@ -144,9 +156,7 @@ pub unsafe fn add_limbs_3_unchecked(
 /// # Safety
 ///
 /// - `dst`, `src1`, and `src2` must each be valid for `len` elements.
-/// - `dst` must not overlap either input span: it is written while `src1`
-///   and `src2` are read.
-/// - `src1` and `src2` are read-only and may alias each other.
+/// - `dst` must not overlap either input span.
 #[allow(
     clippy::inline_always,
     clippy::too_many_lines,
@@ -167,20 +177,20 @@ unsafe fn add_small_3_unchecked(
                 asm!(
                     ".set noat",
                     // Limb 0 (carry-in = 0)
-                    "ld {t0}, 0({src1})",
-                    "ld {t1}, 0({src2})",
-                    "daddu {t1}, {t1}, {t0}",
-                    "sltu {carry}, {t1}, {t0}",
-                    "sd {t1}, 0({dst})",
+                    "ld {t0}, 0({src1})",                // Load src1[0]
+                    "ld {t1}, 0({src2})",                // Load src2[0]
+                    "daddu {t1}, {t1}, {t0}",            // t1 = src2[0] + src1[0]
+                    "sltu {carry}, {t1}, {t0}",          // carry = 1 if wrap
+                    "sd {t1}, 0({dst})",                 // Store dst[0]
                     // Limb 1
-                    "ld {t0}, 8({src1})",
-                    "ld {t1}, 8({src2})",
-                    "daddu {t1}, {t1}, {t0}",
-                    "sltu {c0}, {t1}, {t0}",
-                    "daddu {t1}, {t1}, {carry}",
-                    "sltu {c1}, {t1}, {carry}",
-                    "or {carry}, {c0}, {c1}",
-                    "sd {t1}, 8({dst})",
+                    "ld {t0}, 8({src1})",                // Load src1[1]
+                    "ld {t1}, 8({src2})",                // Load src2[1]
+                    "daddu {t1}, {t1}, {t0}",            // Add limb 1
+                    "sltu {c0}, {t1}, {t0}",             // Detect wrap
+                    "daddu {t1}, {t1}, {carry}",         // Add carry
+                    "sltu {c1}, {t1}, {carry}",          // Detect wrap
+                    "or {carry}, {c0}, {c1}",            // Final carry
+                    "sd {t1}, 8({dst})",                 // Store dst[1]
                     src1 = in(reg) src1,
                     src2 = in(reg) src2,
                     dst = in(reg) dst,
@@ -199,29 +209,29 @@ unsafe fn add_small_3_unchecked(
                 asm!(
                     ".set noat",
                     // Limb 0 (carry-in = 0)
-                    "ld {t0}, 0({src1})",
-                    "ld {t1}, 0({src2})",
-                    "daddu {t1}, {t1}, {t0}",
-                    "sltu {carry}, {t1}, {t0}",
-                    "sd {t1}, 0({dst})",
+                    "ld {t0}, 0({src1})",                // Load src1[0]
+                    "ld {t1}, 0({src2})",                // Load src2[0]
+                    "daddu {t1}, {t1}, {t0}",            // Add limb 0
+                    "sltu {carry}, {t1}, {t0}",          // Detect wrap
+                    "sd {t1}, 0({dst})",                 // Store dst[0]
                     // Limb 1
-                    "ld {t0}, 8({src1})",
-                    "ld {t1}, 8({src2})",
-                    "daddu {t1}, {t1}, {t0}",
-                    "sltu {c0}, {t1}, {t0}",
-                    "daddu {t1}, {t1}, {carry}",
-                    "sltu {c1}, {t1}, {carry}",
-                    "or {carry}, {c0}, {c1}",
-                    "sd {t1}, 8({dst})",
+                    "ld {t0}, 8({src1})",                // Load src1[1]
+                    "ld {t1}, 8({src2})",                // Load src2[1]
+                    "daddu {t1}, {t1}, {t0}",            // Add limb 1
+                    "sltu {c0}, {t1}, {t0}",             // Detect wrap
+                    "daddu {t1}, {t1}, {carry}",         // Add carry
+                    "sltu {c1}, {t1}, {carry}",          // Detect wrap
+                    "or {carry}, {c0}, {c1}",            // Combine carry
+                    "sd {t1}, 8({dst})",                 // Store dst[1]
                     // Limb 2
-                    "ld {t0}, 16({src1})",
-                    "ld {t1}, 16({src2})",
-                    "daddu {t1}, {t1}, {t0}",
-                    "sltu {c0}, {t1}, {t0}",
-                    "daddu {t1}, {t1}, {carry}",
-                    "sltu {c1}, {t1}, {carry}",
-                    "or {carry}, {c0}, {c1}",
-                    "sd {t1}, 16({dst})",
+                    "ld {t0}, 16({src1})",               // Load src1[2]
+                    "ld {t1}, 16({src2})",               // Load src2[2]
+                    "daddu {t1}, {t1}, {t0}",            // Add limb 2
+                    "sltu {c0}, {t1}, {t0}",             // Detect wrap
+                    "daddu {t1}, {t1}, {carry}",         // Add carry
+                    "sltu {c1}, {t1}, {carry}",          // Detect wrap
+                    "or {carry}, {c0}, {c1}",            // Final carry
+                    "sd {t1}, 16({dst})",                // Store dst[2]
                     src1 = in(reg) src1,
                     src2 = in(reg) src2,
                     dst = in(reg) dst,
@@ -240,38 +250,38 @@ unsafe fn add_small_3_unchecked(
                 asm!(
                     ".set noat",
                     // Limb 0 (carry-in = 0)
-                    "ld {t0}, 0({src1})",
-                    "ld {t1}, 0({src2})",
-                    "daddu {t1}, {t1}, {t0}",
-                    "sltu {carry}, {t1}, {t0}",
-                    "sd {t1}, 0({dst})",
+                    "ld {t0}, 0({src1})",                // Load src1[0]
+                    "ld {t1}, 0({src2})",                // Load src2[0]
+                    "daddu {t1}, {t1}, {t0}",            // Add limb 0
+                    "sltu {carry}, {t1}, {t0}",          // Detect wrap
+                    "sd {t1}, 0({dst})",                 // Store dst[0]
                     // Limb 1
-                    "ld {t0}, 8({src1})",
-                    "ld {t1}, 8({src2})",
-                    "daddu {t1}, {t1}, {t0}",
-                    "sltu {c0}, {t1}, {t0}",
-                    "daddu {t1}, {t1}, {carry}",
-                    "sltu {c1}, {t1}, {carry}",
-                    "or {carry}, {c0}, {c1}",
-                    "sd {t1}, 8({dst})",
+                    "ld {t0}, 8({src1})",                // Load src1[1]
+                    "ld {t1}, 8({src2})",                // Load src2[1]
+                    "daddu {t1}, {t1}, {t0}",            // Add limb 1
+                    "sltu {c0}, {t1}, {t0}",             // Detect wrap
+                    "daddu {t1}, {t1}, {carry}",         // Add carry
+                    "sltu {c1}, {t1}, {carry}",          // Detect wrap
+                    "or {carry}, {c0}, {c1}",            // Combine carry
+                    "sd {t1}, 8({dst})",                 // Store dst[1]
                     // Limb 2
-                    "ld {t0}, 16({src1})",
-                    "ld {t1}, 16({src2})",
-                    "daddu {t1}, {t1}, {t0}",
-                    "sltu {c0}, {t1}, {t0}",
-                    "daddu {t1}, {t1}, {carry}",
-                    "sltu {c1}, {t1}, {carry}",
-                    "or {carry}, {c0}, {c1}",
-                    "sd {t1}, 16({dst})",
+                    "ld {t0}, 16({src1})",               // Load src1[2]
+                    "ld {t1}, 16({src2})",               // Load src2[2]
+                    "daddu {t1}, {t1}, {t0}",            // Add limb 2
+                    "sltu {c0}, {t1}, {t0}",             // Detect wrap
+                    "daddu {t1}, {t1}, {carry}",         // Add carry
+                    "sltu {c1}, {t1}, {carry}",          // Detect wrap
+                    "or {carry}, {c0}, {c1}",            // Combine carry
+                    "sd {t1}, 16({dst})",                // Store dst[2]
                     // Limb 3
-                    "ld {t0}, 24({src1})",
-                    "ld {t1}, 24({src2})",
-                    "daddu {t1}, {t1}, {t0}",
-                    "sltu {c0}, {t1}, {t0}",
-                    "daddu {t1}, {t1}, {carry}",
-                    "sltu {c1}, {t1}, {carry}",
-                    "or {carry}, {c0}, {c1}",
-                    "sd {t1}, 24({dst})",
+                    "ld {t0}, 24({src1})",               // Load src1[3]
+                    "ld {t1}, 24({src2})",               // Load src2[3]
+                    "daddu {t1}, {t1}, {t0}",            // Add limb 3
+                    "sltu {c0}, {t1}, {t0}",             // Detect wrap
+                    "daddu {t1}, {t1}, {carry}",         // Add carry
+                    "sltu {c1}, {t1}, {carry}",          // Detect wrap
+                    "or {carry}, {c0}, {c1}",            // Final carry
+                    "sd {t1}, 24({dst})",                // Store dst[3]
                     src1 = in(reg) src1,
                     src2 = in(reg) src2,
                     dst = in(reg) dst,

@@ -1,26 +1,36 @@
 //! RISC-V 32-bit fused dual-row multiply-add kernel.
+//!
+//! Evaluates two simultaneous multiplication rows (`dst += src * s0 + (src * s1 << 32)`)
+//! using 32×32→64-bit multipliers (`mul`/`mulhu`) and branchless `sltu` carry capture.
 
 use core::arch::asm;
 
 use super::Limb;
 
-/// Fused `add_mul_2` kernel for RISC-V 32-bit.
+/// Fused dual-row multiply-add kernel for RISC-V 32-bit.
 ///
 /// Computes:
+///
 /// ```text
-/// dst[0..len] += src[0..len] * s0 + c0
-/// dst[1..len+1] += src[0..len] * s1 + c1
+///   dst[0..len] += src[0..len] * s0 + c0
+///   dst[1..len+1] += src[0..len] * s1 + c1
 /// ```
+///
+/// # Microarchitectural Strategy
+///
+/// RISC-V 32-bit evaluates four 32×32→64-bit products per limb across both rows (`s0` and `s1`),
+/// captures two independent carry chains branchlessly with `sltu`, and updates memory in place.
 ///
 /// # Safety
 ///
-/// - `dst` must be valid for reads and writes of `len + 1` limbs: the second
-///   row writes one limb ahead of the first, so the last store lands at
-///   `dst[len]`.
-/// - `src` must be valid for reads of `len` limbs.
-/// - `dst` and `src` must not overlap, even partially: the loop reads `src`
-///   while it writes `dst`, so any overlap is a data race.
-#[allow(clippy::inline_always, reason = "Performance critical inner loop")]
+/// - `dst` must point to a readable and writable buffer of at least `len + 1` initialized 32-bit limbs.
+/// - `src` must point to a readable buffer of at least `len` initialized 32-bit limbs.
+/// - `src` and `dst` buffers must not overlap in memory (non-aliasing invariant).
+/// - `len` must reflect the allocated capacity of both buffers.
+#[allow(
+    clippy::inline_always,
+    reason = "Critical inner loop for 2-row multi-precision Karatsuba and basecase multiplication"
+)]
 #[inline(always)]
 pub unsafe fn add_mul_2_limbs_unchecked(
     dst: *mut Limb,
@@ -36,41 +46,48 @@ pub unsafe fn add_mul_2_limbs_unchecked(
         return (0, 0);
     }
 
-    // SAFETY: Caller guarantees dst and src are valid for len elements.
+    // SAFETY:
+    // 1. `dst` is valid for reads and writes of `len + 1` 32-bit `Limb` elements.
+    // 2. `src` is valid for reads of `len` 32-bit `Limb` elements.
+    // 3. Pointer offsets (`0`, `4`) remain within allocated bounds.
+    // 4. Memory spans are non-overlapping.
     unsafe {
         asm!(
+            // Main dual-row accumulation loop
             "1:",
-            "lw {s}, 0({src})",
-            "lw {d0}, 0({dst})",
-            "lw {d1}, 4({dst})",
+            "lw {s}, 0({src})",                          // Load src[j]
+            "lw {d0}, 0({dst})",                         // Load dst[j]
+            "lw {d1}, 4({dst})",                         // Load dst[j+1]
 
-            // --- s0 chain: dst[j] += src[j] * s0 + c0 ---
-            "mul {p_lo0}, {s}, {s0}",
-            "mulhu {p_hi0}, {s}, {s0}",
-            "add {t_lo0}, {p_lo0}, {c0}",
-            "sltu {ca0}, {t_lo0}, {c0}",
-            "add {p_hi0}, {p_hi0}, {ca0}",
-            "add {t0}, {t_lo0}, {d0}",
-            "sltu {cb0}, {t0}, {d0}",
-            "add {c0}, {p_hi0}, {cb0}",
+            // [Row 0 Carry Chain: dst[j] += src[j] * s0 + c0]
+            "mul {p_lo0}, {s}, {s0}",                    // Low 32 bits of src[j] * s0
+            "mulhu {p_hi0}, {s}, {s0}",                  // High 32 bits of src[j] * s0
+            "add {t_lo0}, {p_lo0}, {c0}",                // t_lo0 = p_lo0 + c0
+            "sltu {ca0}, {t_lo0}, {c0}",                 // ca0 = 1 if addition wrapped
+            "add {p_hi0}, {p_hi0}, {ca0}",               // p_hi0 += ca0
+            "add {t0}, {t_lo0}, {d0}",                   // t0 = t_lo0 + d0
+            "sltu {cb0}, {t0}, {d0}",                    // cb0 = 1 if addition wrapped
+            "add {c0}, {p_hi0}, {cb0}",                  // c0 = p_hi0 + cb0 (row 0 carry)
 
-            // --- s1 chain: dst[j+1] += src[j] * s1 + c1 ---
-            "mul {p_lo1}, {s}, {s1}",
-            "mulhu {p_hi1}, {s}, {s1}",
-            "add {t_lo1}, {p_lo1}, {c1}",
-            "sltu {ca1}, {t_lo1}, {c1}",
-            "add {p_hi1}, {p_hi1}, {ca1}",
-            "add {t1}, {t_lo1}, {d1}",
-            "sltu {cb1}, {t1}, {d1}",
-            "add {c1}, {p_hi1}, {cb1}",
+            // [Row 1 Carry Chain: dst[j+1] += src[j] * s1 + c1]
+            "mul {p_lo1}, {s}, {s1}",                    // Low 32 bits of src[j] * s1
+            "mulhu {p_hi1}, {s}, {s1}",                  // High 32 bits of src[j] * s1
+            "add {t_lo1}, {p_lo1}, {c1}",                // t_lo1 = p_lo1 + c1
+            "sltu {ca1}, {t_lo1}, {c1}",                 // ca1 = 1 if addition wrapped
+            "add {p_hi1}, {p_hi1}, {ca1}",               // p_hi1 += ca1
+            "add {t1}, {t_lo1}, {d1}",                   // t1 = t_lo1 + d1
+            "sltu {cb1}, {t1}, {d1}",                    // cb1 = 1 if addition wrapped
+            "add {c1}, {p_hi1}, {cb1}",                  // c1 = p_hi1 + cb1 (row 1 carry)
 
-            "sw {t0}, 0({dst})",
-            "sw {t1}, 4({dst})",
+            // Store updated destination limbs
+            "sw {t0}, 0({dst})",                         // Store finalized dst[j]
+            "sw {t1}, 4({dst})",                         // Store intermediate dst[j+1]
 
-            "addi {src}, {src}, 4",
-            "addi {dst}, {dst}, 4",
-            "addi {len}, {len}, -1",
-            "bnez {len}, 1b",
+            // Advance pointers and loop
+            "addi {src}, {src}, 4",                      // Advance src pointer by 4 bytes
+            "addi {dst}, {dst}, 4",                      // Advance dst pointer by 4 bytes
+            "addi {len}, {len}, -1",                     // Decrement remaining limbs
+            "bnez {len}, 1b",                            // Repeat while len != 0
 
             c0 = inout(reg) c0,
             c1 = inout(reg) c1,

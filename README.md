@@ -40,7 +40,7 @@ assert!(neg_val.is_negative());
 
 ---
 
-## Why `mp-anafis`?
+## Why `MpAnafis`?
 
 ### Inline Small-Value Storage (`INLINE_LIMBS`)
 Values up to `INLINE_LIMBS` limbs (`4` limbs, providing 256 bits of capacity on 64-bit architectures, 128 bits on 32-bit, and 64 bits on 16-bit) are stored inline. This avoids heap allocation (`malloc`/`free`) for construction, movement, and operations whose results and required scratch space remain within the inline or stack-backed capacity. This includes many common 128-bit and 256-bit integer workloads, depending on the target limb width and operation.
@@ -52,7 +52,7 @@ Arithmetic separates existing value metadata from newly-constructed target preci
 - **Ambient (`AmbientPrecision`)**: Inherits precision policies from thread-local or global execution contexts (`PrecisionContext::set_global`). For infallible conversions (`From<T>`), ambient precision acts strictly as a target floor. Results widen automatically (`max(target_bits, required_bits)`), so construction is exact and lossless.
 
 ### Hierarchical Multiplication & Division Towers
-`mp-anafis` structures algorithms across magnitude thresholds (`thresholds.rs`, dynamically calibrated via `mp-tune`):
+`MpAnafis` structures algorithms across magnitude thresholds (`thresholds.rs`, dynamically calibrated via `mp-tune`):
 - **Production multiplication**: Schoolbook $\rightarrow$ Karatsuba $\rightarrow$ Toom-Cook (3, 4, 6, and 8.5) $\rightarrow$ Schönhage–Strassen/Fermat FFT, subject to the generated profile and operand-shape gates.
 - **Production division**: Algorithm D (Knuth) $\rightarrow$ Burnikel–Ziegler $\rightarrow$ Newton–Raphson. Division kernels preserve the normalization and correction bounds required by their respective algorithms.
 - **Modular reduction**: Barrett, Montgomery, and combined Barrett–Montgomery paths.
@@ -110,11 +110,11 @@ is documented in `docs/int/kernel-matrix.md`.
 
 ## Status and limitations
 
-`mp-anafis` is functional, extensively tested, and under active development towards stable v1.0:
+`MpAnafis` is functional, extensively tested, and under active development towards stable v1.0:
 - **Experimental API Surface**: Public trait structures and methods may undergo refinement prior to the 1.0 release.
 - **Machine-Specific Crossovers**: Portable architecture profiles provide defaults, while `mp-tune` derives machine-local thresholds for workloads that require tighter dispatch calibration.
 - **Incomplete NTT Tier**: NTT remains disabled in production dispatch. SSA is the production transform backend when its profile threshold and operand-shape requirements admit it.
-- **Not Designed for Constant-Time Execution**: `mp-anafis` is designed for general-purpose multi-precision arithmetic and is **not** built for constant-time execution. Do not use it for secret-dependent cryptographic operations without auditing target execution paths.
+- **Not Designed for Constant-Time Execution**: `MpAnafis` is designed for general-purpose multi-precision arithmetic and is **not** built for constant-time execution. Do not use it for secret-dependent cryptographic operations without auditing target execution paths.
 
 ---
 
@@ -136,7 +136,7 @@ cargo doc --lib --all-features --open
 
 ## Citation
 
-If you use `mp-anafis` in academic work, please cite:
+If you use `MpAnafis` in academic work, please cite:
 
 ```bibtex
 @software{mpanafis,
@@ -156,6 +156,6 @@ is limited to the project's principal contributors.
 
 ## License
 
-`mp-anafis` is licensed under the Apache License, Version 2.0.
+`MpAnafis` is licensed under the Apache License, Version 2.0.
 See the [LICENSE](https://github.com/CokieMiner/MpAnafis/blob/master/LICENSE)
 file for the full license text.

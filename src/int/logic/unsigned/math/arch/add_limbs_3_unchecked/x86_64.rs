@@ -1,7 +1,6 @@
 //! x86‑64 (AMD64) 3‑operand addition kernel.
 //!
-//! Uses `adcq` for all limbs. Lengths above four use an optional 4-limb
-//! prefix followed by an **8-way unrolled** loop.
+//! Evaluates `dst = src1 + src2` using 4-limb prefix, 8-way unrolled `adcq` loops, and CF-preserving indexed addressing.
 
 use core::{arch::asm, hint::unreachable_unchecked};
 
@@ -10,9 +9,21 @@ use super::Limb;
 /// Compute `dst[i] = src1[i] + src2[i] + carry` for `len` limbs,
 /// returning the final carry.
 ///
+/// Computes:
+///
+/// ```text
+///   (carry, dst[0..len]) = src1[0..len] + src2[0..len]
+/// ```
+///
+/// # Microarchitectural Strategy
+///
+/// Small inputs (2..=4 limbs) execute straight-line `addq`/`adcq` chains without branching.
+/// Larger slices process an optional 4-limb prefix followed by an 8-way unrolled `adcq` loop with scaled indexing.
+///
 /// # Safety
 ///
-/// `dst`, `src1`, and `src2` must each be valid for `len` elements.
+/// - `dst`, `src1`, and `src2` must each be valid for `len` elements.
+/// - `dst` must not overlap either input span.
 #[allow(
     clippy::inline_always,
     reason = "Critical for peak assembly performance"
@@ -43,76 +54,79 @@ pub unsafe fn add_limbs_3_unchecked(
     let chunks = len >> 3;
     let rem = len & 3;
     let idx = 0_usize;
-    // Binary decomposition gives `len = 8*chunks + 4*prefix + rem` with
-    // `prefix <= 1` and `rem < 4`. The blocks run in increasing index order;
-    // every intervening `decq`, `js`/`jns`, and `leaq` preserves CF, so the
-    // carry established by limb i is consumed unchanged by limb i+1.
-    // SAFETY: Assembly block accesses `len` elements from `dst`, `src1`, and `src2`, which caller guarantees are valid.
+
+    // SAFETY:
+    // 1. `dst`, `src1`, `src2` are valid for `len` 64-bit `Limb` elements.
+    // 2. Memory spans are non-overlapping.
+    // 3. Pointer offsets remain within allocated bounds.
     unsafe {
         asm!(
-            "xorl {carry:e}, {carry:e}",        // carry = 0, clears CF
-            // ── Optional 4-limb prefix, then 8-way loop ──────────────────
-            "decq {prefix}",
-            "js 1f",
-            "movq ({src1}, {idx}, 8), %rax",
-            "movq 8({src1}, {idx}, 8), %rcx",
-            "movq 16({src1}, {idx}, 8), %rdx",
-            "movq 24({src1}, {idx}, 8), %r8",
-            "adcq ({src2}, {idx}, 8), %rax",
-            "adcq 8({src2}, {idx}, 8), %rcx",
-            "adcq 16({src2}, {idx}, 8), %rdx",
-            "adcq 24({src2}, {idx}, 8), %r8",
-            "movq %rax, ({dst}, {idx}, 8)",
-            "movq %rcx, 8({dst}, {idx}, 8)",
-            "movq %rdx, 16({dst}, {idx}, 8)",
-            "movq %r8, 24({dst}, {idx}, 8)",
-            "leaq 4({idx}), {idx}",
+            "xorl {carry:e}, {carry:e}",                  // Clear CF and initialize carry register to 0
+            // Optional 4-limb prefix block
+            "decq {prefix}",                             // Decrement prefix flag (preserves CF)
+            "js 1f",                                     // If prefix == 0, jump to 8-way loop (1f)
+            "movq ({src1}, {idx}, 8), %rax",             // Load src1[0]
+            "movq 8({src1}, {idx}, 8), %rcx",            // Load src1[1]
+            "movq 16({src1}, {idx}, 8), %rdx",           // Load src1[2]
+            "movq 24({src1}, {idx}, 8), %r8",            // Load src1[3]
+            "adcq ({src2}, {idx}, 8), %rax",             // %rax += src2[0] + CF
+            "adcq 8({src2}, {idx}, 8), %rcx",            // %rcx += src2[1] + CF
+            "adcq 16({src2}, {idx}, 8), %rdx",           // %rdx += src2[2] + CF
+            "adcq 24({src2}, {idx}, 8), %r8",            // %r8 += src2[3] + CF
+            "movq %rax, ({dst}, {idx}, 8)",              // Store dst[0]
+            "movq %rcx, 8({dst}, {idx}, 8)",             // Store dst[1]
+            "movq %rdx, 16({dst}, {idx}, 8)",            // Store dst[2]
+            "movq %r8, 24({dst}, {idx}, 8)",             // Store dst[3]
+            "leaq 4({idx}), {idx}",                      // Advance idx by 4 (preserves CF)
+
+            // Main 8-way unrolled loop
             "1:",
-            "decq {chunks}",                      // jump if -1 (chunks == 0)
-            "js 3f",
-            ".p2align 4",                          // align loop header for fetch efficiency
+            "decq {chunks}",                             // Pre-decrement chunk counter (preserves CF)
+            "js 3f",                                     // If chunks < 0, jump to remainder (3f)
             "2:",
-            "movq ({src1}, {idx}, 8), %rax",     // load first 4 limbs of src1
-            "movq 8({src1}, {idx}, 8), %rcx",
-            "movq 16({src1}, {idx}, 8), %rdx",
-            "movq 24({src1}, {idx}, 8), %r8",
-            "adcq ({src2}, {idx}, 8), %rax",     // add first 4 limbs of src2 + CF
-            "adcq 8({src2}, {idx}, 8), %rcx",
-            "adcq 16({src2}, {idx}, 8), %rdx",
-            "adcq 24({src2}, {idx}, 8), %r8",
-            "movq %rax, ({dst}, {idx}, 8)",      // store first 4 limbs to dst
-            "movq %rcx, 8({dst}, {idx}, 8)",
-            "movq %rdx, 16({dst}, {idx}, 8)",
-            "movq %r8, 24({dst}, {idx}, 8)",
-            "movq 32({src1}, {idx}, 8), %rax",   // load next 4 limbs of src1
-            "movq 40({src1}, {idx}, 8), %rcx",
-            "movq 48({src1}, {idx}, 8), %rdx",
-            "movq 56({src1}, {idx}, 8), %r8",
-            "adcq 32({src2}, {idx}, 8), %rax",   // add next 4 limbs of src2 + CF
-            "adcq 40({src2}, {idx}, 8), %rcx",
-            "adcq 48({src2}, {idx}, 8), %rdx",
-            "adcq 56({src2}, {idx}, 8), %r8",
-            "movq %rax, 32({dst}, {idx}, 8)",    // store next 4 limbs to dst
-            "movq %rcx, 40({dst}, {idx}, 8)",
-            "movq %rdx, 48({dst}, {idx}, 8)",
-            "movq %r8, 56({dst}, {idx}, 8)",
-            "leaq 8({idx}), {idx}",              // advance idx by 8
-            "decq {chunks}",                      // decrement chunks
-            "jns 2b",                             // loop back if chunks >= 0
-            // ── Tail: single‑limb remainder ────────────────────────────
+            "movq ({src1}, {idx}, 8), %rax",             // Load src1[0]
+            "movq 8({src1}, {idx}, 8), %rcx",            // Load src1[1]
+            "movq 16({src1}, {idx}, 8), %rdx",           // Load src1[2]
+            "movq 24({src1}, {idx}, 8), %r8",            // Load src1[3]
+            "adcq ({src2}, {idx}, 8), %rax",             // Add src2[0] + CF
+            "adcq 8({src2}, {idx}, 8), %rcx",            // Add src2[1] + CF
+            "adcq 16({src2}, {idx}, 8), %rdx",           // Add src2[2] + CF
+            "adcq 24({src2}, {idx}, 8), %r8",            // Add src2[3] + CF
+            "movq %rax, ({dst}, {idx}, 8)",              // Store dst[0]
+            "movq %rcx, 8({dst}, {idx}, 8)",             // Store dst[1]
+            "movq %rdx, 16({dst}, {idx}, 8)",            // Store dst[2]
+            "movq %r8, 24({dst}, {idx}, 8)",             // Store dst[3]
+            "movq 32({src1}, {idx}, 8), %rax",           // Load src1[4]
+            "movq 40({src1}, {idx}, 8), %rcx",           // Load src1[5]
+            "movq 48({src1}, {idx}, 8), %rdx",           // Load src1[6]
+            "movq 56({src1}, {idx}, 8), %r8",            // Load src1[7]
+            "adcq 32({src2}, {idx}, 8), %rax",           // Add src2[4] + CF
+            "adcq 40({src2}, {idx}, 8), %rcx",           // Add src2[5] + CF
+            "adcq 48({src2}, {idx}, 8), %rdx",           // Add src2[6] + CF
+            "adcq 56({src2}, {idx}, 8), %r8",            // Add src2[7] + CF
+            "movq %rax, 32({dst}, {idx}, 8)",            // Store dst[4]
+            "movq %rcx, 40({dst}, {idx}, 8)",            // Store dst[5]
+            "movq %rdx, 48({dst}, {idx}, 8)",            // Store dst[6]
+            "movq %r8, 56({dst}, {idx}, 8)",             // Store dst[7]
+            "leaq 8({idx}), {idx}",                      // Advance idx by 8 (preserves CF)
+            "decq {chunks}",                             // Decrement chunks (preserves CF)
+            "jns 2b",                                    // Repeat while chunks >= 0
+
+            // Remainder entry point (0 to 3 limbs)
             "3:",
-            "decq {rem}",                         // jump if -1 (rem == 0)
-            "js 5f",
-            ".p2align 4",                          // align tail loop header
+            "decq {rem}",                                // Pre-decrement remainder counter (preserves CF)
+            "js 5f",                                     // If rem < 0, skip to exit (5f)
             "4:",
-            "movq ({src1}, {idx}, 8), %rax",     // load src1[idx]
-            "adcq ({src2}, {idx}, 8), %rax",     // rax += src2[idx] + CF
-            "movq %rax, ({dst}, {idx}, 8)",      // store dst[idx]
-            "leaq 1({idx}), {idx}",              // advance idx by 1
-            "decq {rem}",                         // decrement remainder
-            "jns 4b",                             // loop back if rem >= 0
+            "movq ({src1}, {idx}, 8), %rax",             // Load single src1 limb
+            "adcq ({src2}, {idx}, 8), %rax",             // %rax += src2 limb + CF
+            "movq %rax, ({dst}, {idx}, 8)",              // Store single dst limb
+            "leaq 1({idx}), {idx}",                      // Advance idx by 1 (preserves CF)
+            "decq {rem}",                                // Decrement remainder (preserves CF)
+            "jns 4b",                                    // Repeat while rem >= 0
+
+            // Exit: capture final carry
             "5:",
-            "adcq {carry}, {carry}",             // carry = 0 + 0 + CF
+            "adcq {carry}, {carry}",                     // carry = 0 + 0 + CF (0 or 1)
             carry = out(reg) carry,
             idx = inout(reg) idx => _,
             dst = in(reg) dst,
@@ -137,9 +151,7 @@ pub unsafe fn add_limbs_3_unchecked(
 /// # Safety
 ///
 /// - `dst`, `src1`, and `src2` must each be valid for `len` elements.
-/// - `dst` must not overlap either input span: it is written while `src1`
-///   and `src2` are read.
-/// - `src1` and `src2` are read-only and may alias each other.
+/// - `dst` must not overlap either input span.
 #[allow(
     clippy::inline_always,
     reason = "The fixed-size carry chains must inline into the public kernel"
@@ -157,14 +169,14 @@ unsafe fn add_small_3_unchecked(
             // SAFETY: The caller guarantees all pointers are valid for 2 limbs.
             unsafe {
                 asm!(
-                    "xorl {carry:e}, {carry:e}",
-                    "movq ({src1}), %rax",
-                    "movq 8({src1}), %rcx",
-                    "addq ({src2}), %rax",
-                    "adcq 8({src2}), %rcx",
-                    "movq %rax, ({dst})",
-                    "movq %rcx, 8({dst})",
-                    "adcq {carry}, {carry}",
+                    "xorl {carry:e}, {carry:e}",         // Clear CF and carry register
+                    "movq ({src1}), %rax",               // Load src1[0]
+                    "movq 8({src1}), %rcx",              // Load src1[1]
+                    "addq ({src2}), %rax",               // %rax = src1[0] + src2[0], set CF
+                    "adcq 8({src2}), %rcx",              // %rcx = src1[1] + src2[1] + CF
+                    "movq %rax, ({dst})",                // Store dst[0]
+                    "movq %rcx, 8({dst})",               // Store dst[1]
+                    "adcq {carry}, {carry}",             // carry = 0 + CF (0 or 1)
                     src1 = in(reg) src1,
                     src2 = in(reg) src2,
                     dst = in(reg) dst,
@@ -181,17 +193,17 @@ unsafe fn add_small_3_unchecked(
             // SAFETY: The caller guarantees all pointers are valid for 3 limbs.
             unsafe {
                 asm!(
-                    "xorl {carry:e}, {carry:e}",
-                    "movq ({src1}), %rax",
-                    "movq 8({src1}), %rcx",
-                    "movq 16({src1}), %rdx",
-                    "addq ({src2}), %rax",
-                    "adcq 8({src2}), %rcx",
-                    "adcq 16({src2}), %rdx",
-                    "movq %rax, ({dst})",
-                    "movq %rcx, 8({dst})",
-                    "movq %rdx, 16({dst})",
-                    "adcq {carry}, {carry}",
+                    "xorl {carry:e}, {carry:e}",         // Clear CF and carry register
+                    "movq ({src1}), %rax",               // Load src1[0]
+                    "movq 8({src1}), %rcx",              // Load src1[1]
+                    "movq 16({src1}), %rdx",             // Load src1[2]
+                    "addq ({src2}), %rax",               // %rax = src1[0] + src2[0], set CF
+                    "adcq 8({src2}), %rcx",              // %rcx = src1[1] + src2[1] + CF
+                    "adcq 16({src2}), %rdx",             // %rdx = src1[2] + src2[2] + CF
+                    "movq %rax, ({dst})",                // Store dst[0]
+                    "movq %rcx, 8({dst})",               // Store dst[1]
+                    "movq %rdx, 16({dst})",              // Store dst[2]
+                    "adcq {carry}, {carry}",             // carry = 0 + CF
                     src1 = in(reg) src1,
                     src2 = in(reg) src2,
                     dst = in(reg) dst,
@@ -209,20 +221,20 @@ unsafe fn add_small_3_unchecked(
             // SAFETY: The caller guarantees all pointers are valid for 4 limbs.
             unsafe {
                 asm!(
-                    "xorl {carry:e}, {carry:e}",
-                    "movq ({src1}), %rax",
-                    "movq 8({src1}), %rcx",
-                    "movq 16({src1}), %rdx",
-                    "movq 24({src1}), %r8",
-                    "addq ({src2}), %rax",
-                    "adcq 8({src2}), %rcx",
-                    "adcq 16({src2}), %rdx",
-                    "adcq 24({src2}), %r8",
-                    "movq %rax, ({dst})",
-                    "movq %rcx, 8({dst})",
-                    "movq %rdx, 16({dst})",
-                    "movq %r8, 24({dst})",
-                    "adcq {carry}, {carry}",
+                    "xorl {carry:e}, {carry:e}",         // Clear CF and carry register
+                    "movq ({src1}), %rax",               // Load src1[0]
+                    "movq 8({src1}), %rcx",              // Load src1[1]
+                    "movq 16({src1}), %rdx",             // Load src1[2]
+                    "movq 24({src1}), %r8",              // Load src1[3]
+                    "addq ({src2}), %rax",               // %rax = src1[0] + src2[0], set CF
+                    "adcq 8({src2}), %rcx",              // %rcx = src1[1] + src2[1] + CF
+                    "adcq 16({src2}), %rdx",             // %rdx = src1[2] + src2[2] + CF
+                    "adcq 24({src2}), %r8",              // %r8 = src1[3] + src2[3] + CF
+                    "movq %rax, ({dst})",                // Store dst[0]
+                    "movq %rcx, 8({dst})",               // Store dst[1]
+                    "movq %rdx, 16({dst})",              // Store dst[2]
+                    "movq %r8, 24({dst})",               // Store dst[3]
+                    "adcq {carry}, {carry}",             // carry = 0 + CF
                     src1 = in(reg) src1,
                     src2 = in(reg) src2,
                     dst = in(reg) dst,

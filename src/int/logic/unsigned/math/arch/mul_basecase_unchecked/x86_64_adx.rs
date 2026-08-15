@@ -35,20 +35,19 @@ macro_rules! define_fixed_add_mul {
             // by the constant offset list below.
             unsafe {
                 asm!(
-                    "xorl %r10d, %r10d",
-                    "xorl %eax, %eax",
+                    "xorl %r10d, %r10d",                          // Clear r10 (previous high product) and OF/CF flags
+                    "xorl %eax, %eax",                            // Clear eax
                     $(
-                        concat!("mulxq ", stringify!($offset), "({src}), %r8, %r9"),
-                        concat!("movq ", stringify!($offset), "({dst}), %r11"),
-                        "adcxq %r8, %r11",
-                        "adoxq %r10, %r11",
-                        concat!("movq %r11, ", stringify!($offset), "({dst})"),
-                        "movq %r9, %r10",
+                        concat!("mulxq ", stringify!($offset), "({src}), %r8, %r9"), // (%r9:%r8) = src[i] * scalar
+                        concat!("adcxq ", stringify!($offset), "({dst}), %r8"),      // r8 += dst[i] + CF
+                        "adoxq %r10, %r8",                        // r8 += previous high + OF
+                        concat!("movq %r8, ", stringify!($offset), "({dst})"),       // Store updated dst[i]
+                        "movq %r9, %r10",                         // Save high product for next limb
                     )+
-                    "movq $0, %r11",
-                    "adcxq %r11, %r10",
-                    "adoxq %r11, %r10",
-                    "movq %r10, {carry_hi}",
+                    "movq $0, %r8",                               // Zero r8 for carry flush
+                    "adcxq %r8, %r10",                            // Flush CF into r10
+                    "adoxq %r8, %r10",                            // Flush OF into r10
+                    "movq %r10, {carry_hi}",                      // Store final carry-out
                     carry_hi = out(reg) carry_hi,
                     src = in(reg) src,
                     dst = in(reg) dst,
@@ -57,7 +56,6 @@ macro_rules! define_fixed_add_mul {
                     out("r8") _,
                     out("r9") _,
                     out("r10") _,
-                    out("r11") _,
                     options(nostack, att_syntax)
                 );
             }

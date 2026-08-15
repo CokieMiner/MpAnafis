@@ -1,10 +1,6 @@
 //! `LoongArch32` addition kernels (inline assembly).
 //!
-//! `LoongArch32` uses the same carry-tracking idiom as RISC-V 32:
-//! `add.w` for addition and `sltu` (set-less-than unsigned) to detect
-//! carry (wrap-around).  There is no carry flag in the ISA.
-//!
-//! The loop is **4-way unrolled** (`len >> 2`) for maximum throughput.
+//! Evaluates `dst += src` using 4-way unrolled loops with branchless `sltu` carry tracking.
 
 use core::{arch::asm, hint::unreachable_unchecked};
 
@@ -12,13 +8,22 @@ use super::Limb;
 
 /// Add `len` limbs from `src` into `dst` and return the final carry.
 ///
+/// Computes:
+///
+/// ```text
+///   (carry, dst[0..len]) = dst[0..len] + src[0..len]
+/// ```
+///
+/// # Microarchitectural Strategy
+///
+/// `LoongArch32` uses `add.w` and `sltu` (set-less-than unsigned) to detect arithmetic wrap-around.
+/// The 4-way unrolled loop loads and adds 4 limbs per iteration, chaining carries branchlessly with `or`.
+///
 /// # Safety
 ///
 /// - `dst` must be valid for reads and writes of `len` elements.
 /// - `src` must be valid for reads of `len` elements.
-/// - The `dst` and `src` spans must be identical or disjoint: the kernel
-///   reads `src[i]` and `dst[i]` and then writes `dst[i]`, so a partial
-///   overlap is a data race.
+/// - The `dst` and `src` spans must be identical or disjoint.
 #[allow(
     clippy::inline_always,
     reason = "Critical for peak assembly performance"
@@ -45,76 +50,85 @@ pub unsafe fn add_limbs_unchecked(dst: *mut Limb, src: *const Limb, len: usize) 
     let mut carry: Limb = 0;
     let chunks = len >> 2;
     let rem = len & 3;
-    // SAFETY: Assembly block accesses `len` elements from `dst` and `src`, which caller guarantees are valid.
+
+    // SAFETY:
+    // 1. `dst` and `src` are valid for `len` 32-bit `Limb` elements.
+    // 2. Memory spans are non-overlapping.
+    // 3. Pointer offsets remain within allocated bounds.
     unsafe {
         asm!(
-            "beqz {chunks}, 2f",
-            // ── 4-way unrolled loop ────────────────────────────────────
-            ".p2align 4",                          // align loop header for fetch efficiency
+            "beqz {chunks}, 2f",                         // If chunks == 0, skip to remainder (2f)
+            ".p2align 4",
+
+            // Main 4-way unrolled loop
             "1:",
-            // Limb 0
-            "ld.w {t0}, {src}, 0",
-            "ld.w {t1}, {dst}, 0",
-            "add.w {t1}, {t1}, {t0}",
-            "sltu {c0}, {t1}, {t0}",
-            "add.w {t1}, {t1}, {carry}",
-            "sltu {c1}, {t1}, {carry}",
-            "or {carry}, {c0}, {c1}",
-            "st.w {t1}, {dst}, 0",
+            // [Limb 0]
+            "ld.w {t0}, {src}, 0",                      // Load src[0]
+            "ld.w {t1}, {dst}, 0",                      // Load dst[0]
+            "add.w {t1}, {t1}, {t0}",                    // t1 = dst[0] + src[0]
+            "sltu {c0}, {t1}, {t0}",                     // c0 = 1 if addition wrapped
+            "add.w {t1}, {t1}, {carry}",                 // t1 += carry
+            "sltu {c1}, {t1}, {carry}",                  // c1 = 1 if addition with carry wrapped
+            "or {carry}, {c0}, {c1}",                    // Combined carry for next limb
+            "st.w {t1}, {dst}, 0",                       // Store updated dst[0]
 
-            // Limb 1
-            "ld.w {t0}, {src}, 4",
-            "ld.w {t1}, {dst}, 4",
-            "add.w {t1}, {t1}, {t0}",
-            "sltu {c0}, {t1}, {t0}",
-            "add.w {t1}, {t1}, {carry}",
-            "sltu {c1}, {t1}, {carry}",
-            "or {carry}, {c0}, {c1}",
-            "st.w {t1}, {dst}, 4",
+            // [Limb 1]
+            "ld.w {t0}, {src}, 4",                       // Load src[1]
+            "ld.w {t1}, {dst}, 4",                       // Load dst[1]
+            "add.w {t1}, {t1}, {t0}",                    // Add limbs
+            "sltu {c0}, {t1}, {t0}",                     // Detect wrap
+            "add.w {t1}, {t1}, {carry}",                 // Add carry
+            "sltu {c1}, {t1}, {carry}",                  // Detect wrap
+            "or {carry}, {c0}, {c1}",                    // Combine carry
+            "st.w {t1}, {dst}, 4",                       // Store dst[1]
 
-            // Limb 2
-            "ld.w {t0}, {src}, 8",
-            "ld.w {t1}, {dst}, 8",
-            "add.w {t1}, {t1}, {t0}",
-            "sltu {c0}, {t1}, {t0}",
-            "add.w {t1}, {t1}, {carry}",
-            "sltu {c1}, {t1}, {carry}",
-            "or {carry}, {c0}, {c1}",
-            "st.w {t1}, {dst}, 8",
+            // [Limb 2]
+            "ld.w {t0}, {src}, 8",                       // Load src[2]
+            "ld.w {t1}, {dst}, 8",                       // Load dst[2]
+            "add.w {t1}, {t1}, {t0}",                    // Add limbs
+            "sltu {c0}, {t1}, {t0}",                     // Detect wrap
+            "add.w {t1}, {t1}, {carry}",                 // Add carry
+            "sltu {c1}, {t1}, {carry}",                  // Detect wrap
+            "or {carry}, {c0}, {c1}",                    // Combine carry
+            "st.w {t1}, {dst}, 8",                       // Store dst[2]
 
-            // Limb 3
-            "ld.w {t0}, {src}, 12",
-            "ld.w {t1}, {dst}, 12",
-            "add.w {t1}, {t1}, {t0}",
-            "sltu {c0}, {t1}, {t0}",
-            "add.w {t1}, {t1}, {carry}",
-            "sltu {c1}, {t1}, {carry}",
-            "or {carry}, {c0}, {c1}",
-            "st.w {t1}, {dst}, 12",
+            // [Limb 3]
+            "ld.w {t0}, {src}, 12",                      // Load src[3]
+            "ld.w {t1}, {dst}, 12",                      // Load dst[3]
+            "add.w {t1}, {t1}, {t0}",                    // Add limbs
+            "sltu {c0}, {t1}, {t0}",                     // Detect wrap
+            "add.w {t1}, {t1}, {carry}",                 // Add carry
+            "sltu {c1}, {t1}, {carry}",                  // Detect wrap
+            "or {carry}, {c0}, {c1}",                    // Combine carry
+            "st.w {t1}, {dst}, 12",                      // Store dst[3]
 
-            "addi.w {src}, {src}, 16",
-            "addi.w {dst}, {dst}, 16",
-            "addi.w {chunks}, {chunks}, -1",
-            "bnez {chunks}, 1b",
+            // Advance pointers by 16 bytes and loop
+            "addi.w {src}, {src}, 16",                   // Advance src pointer
+            "addi.w {dst}, {dst}, 16",                   // Advance dst pointer
+            "addi.w {chunks}, {chunks}, -1",             // Decrement chunk counter
+            "bnez {chunks}, 1b",                         // Repeat while chunks != 0
 
-            // ── Tail: single-limb remainder loop ───────────────────────
+            // Remainder entry point (0 to 3 limbs)
             "2:",
-            "beqz {rem}, 4f",
-            ".p2align 4",                          // align loop header for fetch efficiency
-            "3:",
-            "ld.w {t0}, {src}, 0",
-            "ld.w {t1}, {dst}, 0",
-            "add.w {t1}, {t1}, {t0}",
-            "sltu {c0}, {t1}, {t0}",
-            "add.w {t1}, {t1}, {carry}",
-            "sltu {c1}, {t1}, {carry}",
-            "or {carry}, {c0}, {c1}",
-            "st.w {t1}, {dst}, 0",
+            "beqz {rem}, 4f",                            // If rem == 0, exit (4f)
+            ".p2align 4",
 
-            "addi.w {src}, {src}, 4",
-            "addi.w {dst}, {dst}, 4",
-            "addi.w {rem}, {rem}, -1",
-            "bnez {rem}, 3b",
+            // 1-limb tail loop
+            "3:",
+            "ld.w {t0}, {src}, 0",                      // Load single src limb
+            "ld.w {t1}, {dst}, 0",                      // Load single dst limb
+            "add.w {t1}, {t1}, {t0}",                    // Add limbs
+            "sltu {c0}, {t1}, {t0}",                     // Detect wrap
+            "add.w {t1}, {t1}, {carry}",                 // Add carry
+            "sltu {c1}, {t1}, {carry}",                  // Detect wrap
+            "or {carry}, {c0}, {c1}",                    // Combine carry
+            "st.w {t1}, {dst}, 0",                       // Store dst limb
+            "addi.w {src}, {src}, 4",                    // Advance src
+            "addi.w {dst}, {dst}, 4",                    // Advance dst
+            "addi.w {rem}, {rem}, -1",                   // Decrement rem
+            "bnez {rem}, 3b",                            // Repeat while rem != 0
+
+            // Exit
             "4:",
 
             carry = inout(reg) carry,
@@ -139,9 +153,7 @@ pub unsafe fn add_limbs_unchecked(dst: *mut Limb, src: *const Limb, len: usize) 
 ///
 /// - `dst` must be valid for reads and writes of `len` elements.
 /// - `src` must be valid for reads of `len` elements.
-/// - The `dst` and `src` spans must be identical or disjoint: the kernel
-///   reads `src[i]` and `dst[i]` and then writes `dst[i]`, so a partial
-///   overlap is a data race.
+/// - The `dst` and `src` spans must be identical or disjoint.
 #[allow(
     clippy::inline_always,
     clippy::too_many_lines,
@@ -156,20 +168,20 @@ unsafe fn add_small_unchecked(dst: *mut Limb, src: *const Limb, len: usize) -> L
             unsafe {
                 asm!(
                     // Limb 0 (carry-in = 0)
-                    "ld.w {t0}, {src}, 0",
-                    "ld.w {t1}, {dst}, 0",
-                    "add.w {t1}, {t1}, {t0}",
-                    "sltu {carry}, {t1}, {t0}",
-                    "st.w {t1}, {dst}, 0",
+                    "ld.w {t0}, {src}, 0",              // Load src[0]
+                    "ld.w {t1}, {dst}, 0",              // Load dst[0]
+                    "add.w {t1}, {t1}, {t0}",            // t1 = dst[0] + src[0]
+                    "sltu {carry}, {t1}, {t0}",          // carry = 1 if wrap
+                    "st.w {t1}, {dst}, 0",               // Store updated dst[0]
                     // Limb 1
-                    "ld.w {t0}, {src}, 4",
-                    "ld.w {t1}, {dst}, 4",
-                    "add.w {t1}, {t1}, {t0}",
-                    "sltu {c0}, {t1}, {t0}",
-                    "add.w {t1}, {t1}, {carry}",
-                    "sltu {c1}, {t1}, {carry}",
-                    "or {carry}, {c0}, {c1}",
-                    "st.w {t1}, {dst}, 4",
+                    "ld.w {t0}, {src}, 4",              // Load src[1]
+                    "ld.w {t1}, {dst}, 4",              // Load dst[1]
+                    "add.w {t1}, {t1}, {t0}",            // Add limb 1
+                    "sltu {c0}, {t1}, {t0}",             // Detect wrap
+                    "add.w {t1}, {t1}, {carry}",         // Add carry
+                    "sltu {c1}, {t1}, {carry}",          // Detect wrap
+                    "or {carry}, {c0}, {c1}",            // Final carry
+                    "st.w {t1}, {dst}, 4",               // Store updated dst[1]
                     src = in(reg) src,
                     dst = in(reg) dst,
                     t0 = out(reg) _, t1 = out(reg) _,
@@ -186,29 +198,29 @@ unsafe fn add_small_unchecked(dst: *mut Limb, src: *const Limb, len: usize) -> L
             unsafe {
                 asm!(
                     // Limb 0 (carry-in = 0)
-                    "ld.w {t0}, {src}, 0",
-                    "ld.w {t1}, {dst}, 0",
-                    "add.w {t1}, {t1}, {t0}",
-                    "sltu {carry}, {t1}, {t0}",
-                    "st.w {t1}, {dst}, 0",
+                    "ld.w {t0}, {src}, 0",              // Load src[0]
+                    "ld.w {t1}, {dst}, 0",              // Load dst[0]
+                    "add.w {t1}, {t1}, {t0}",            // Add limb 0
+                    "sltu {carry}, {t1}, {t0}",          // Detect wrap
+                    "st.w {t1}, {dst}, 0",               // Store dst[0]
                     // Limb 1
-                    "ld.w {t0}, {src}, 4",
-                    "ld.w {t1}, {dst}, 4",
-                    "add.w {t1}, {t1}, {t0}",
-                    "sltu {c0}, {t1}, {t0}",
-                    "add.w {t1}, {t1}, {carry}",
-                    "sltu {c1}, {t1}, {carry}",
-                    "or {carry}, {c0}, {c1}",
-                    "st.w {t1}, {dst}, 4",
+                    "ld.w {t0}, {src}, 4",              // Load src[1]
+                    "ld.w {t1}, {dst}, 4",              // Load dst[1]
+                    "add.w {t1}, {t1}, {t0}",            // Add limb 1
+                    "sltu {c0}, {t1}, {t0}",             // Detect wrap
+                    "add.w {t1}, {t1}, {carry}",         // Add carry
+                    "sltu {c1}, {t1}, {carry}",          // Detect wrap
+                    "or {carry}, {c0}, {c1}",            // Combine carry
+                    "st.w {t1}, {dst}, 4",               // Store dst[1]
                     // Limb 2
-                    "ld.w {t0}, {src}, 8",
-                    "ld.w {t1}, {dst}, 8",
-                    "add.w {t1}, {t1}, {t0}",
-                    "sltu {c0}, {t1}, {t0}",
-                    "add.w {t1}, {t1}, {carry}",
-                    "sltu {c1}, {t1}, {carry}",
-                    "or {carry}, {c0}, {c1}",
-                    "st.w {t1}, {dst}, 8",
+                    "ld.w {t0}, {src}, 8",              // Load src[2]
+                    "ld.w {t1}, {dst}, 8",              // Load dst[2]
+                    "add.w {t1}, {t1}, {t0}",            // Add limb 2
+                    "sltu {c0}, {t1}, {t0}",             // Detect wrap
+                    "add.w {t1}, {t1}, {carry}",         // Add carry
+                    "sltu {c1}, {t1}, {carry}",          // Detect wrap
+                    "or {carry}, {c0}, {c1}",            // Final carry
+                    "st.w {t1}, {dst}, 8",               // Store dst[2]
                     src = in(reg) src,
                     dst = in(reg) dst,
                     t0 = out(reg) _, t1 = out(reg) _,
@@ -225,38 +237,38 @@ unsafe fn add_small_unchecked(dst: *mut Limb, src: *const Limb, len: usize) -> L
             unsafe {
                 asm!(
                     // Limb 0 (carry-in = 0)
-                    "ld.w {t0}, {src}, 0",
-                    "ld.w {t1}, {dst}, 0",
-                    "add.w {t1}, {t1}, {t0}",
-                    "sltu {carry}, {t1}, {t0}",
-                    "st.w {t1}, {dst}, 0",
+                    "ld.w {t0}, {src}, 0",              // Load src[0]
+                    "ld.w {t1}, {dst}, 0",              // Load dst[0]
+                    "add.w {t1}, {t1}, {t0}",            // Add limb 0
+                    "sltu {carry}, {t1}, {t0}",          // Detect wrap
+                    "st.w {t1}, {dst}, 0",               // Store dst[0]
                     // Limb 1
-                    "ld.w {t0}, {src}, 4",
-                    "ld.w {t1}, {dst}, 4",
-                    "add.w {t1}, {t1}, {t0}",
-                    "sltu {c0}, {t1}, {t0}",
-                    "add.w {t1}, {t1}, {carry}",
-                    "sltu {c1}, {t1}, {carry}",
-                    "or {carry}, {c0}, {c1}",
-                    "st.w {t1}, {dst}, 4",
+                    "ld.w {t0}, {src}, 4",              // Load src[1]
+                    "ld.w {t1}, {dst}, 4",              // Load dst[1]
+                    "add.w {t1}, {t1}, {t0}",            // Add limb 1
+                    "sltu {c0}, {t1}, {t0}",             // Detect wrap
+                    "add.w {t1}, {t1}, {carry}",         // Add carry
+                    "sltu {c1}, {t1}, {carry}",          // Detect wrap
+                    "or {carry}, {c0}, {c1}",            // Combine carry
+                    "st.w {t1}, {dst}, 4",               // Store dst[1]
                     // Limb 2
-                    "ld.w {t0}, {src}, 8",
-                    "ld.w {t1}, {dst}, 8",
-                    "add.w {t1}, {t1}, {t0}",
-                    "sltu {c0}, {t1}, {t0}",
-                    "add.w {t1}, {t1}, {carry}",
-                    "sltu {c1}, {t1}, {carry}",
-                    "or {carry}, {c0}, {c1}",
-                    "st.w {t1}, {dst}, 8",
+                    "ld.w {t0}, {src}, 8",              // Load src[2]
+                    "ld.w {t1}, {dst}, 8",              // Load dst[2]
+                    "add.w {t1}, {t1}, {t0}",            // Add limb 2
+                    "sltu {c0}, {t1}, {t0}",             // Detect wrap
+                    "add.w {t1}, {t1}, {carry}",         // Add carry
+                    "sltu {c1}, {t1}, {carry}",          // Detect wrap
+                    "or {carry}, {c0}, {c1}",            // Combine carry
+                    "st.w {t1}, {dst}, 8",               // Store dst[2]
                     // Limb 3
-                    "ld.w {t0}, {src}, 12",
-                    "ld.w {t1}, {dst}, 12",
-                    "add.w {t1}, {t1}, {t0}",
-                    "sltu {c0}, {t1}, {t0}",
-                    "add.w {t1}, {t1}, {carry}",
-                    "sltu {c1}, {t1}, {carry}",
-                    "or {carry}, {c0}, {c1}",
-                    "st.w {t1}, {dst}, 12",
+                    "ld.w {t0}, {src}, 12",             // Load src[3]
+                    "ld.w {t1}, {dst}, 12",             // Load dst[3]
+                    "add.w {t1}, {t1}, {t0}",            // Add limb 3
+                    "sltu {c0}, {t1}, {t0}",             // Detect wrap
+                    "add.w {t1}, {t1}, {carry}",         // Add carry
+                    "sltu {c1}, {t1}, {carry}",          // Detect wrap
+                    "or {carry}, {c0}, {c1}",            // Final carry
+                    "st.w {t1}, {dst}, 12",              // Store dst[3]
                     src = in(reg) src,
                     dst = in(reg) dst,
                     t0 = out(reg) _, t1 = out(reg) _,

@@ -1,11 +1,11 @@
-# mp-anafis — Project Guidelines
+# MpAnafis — Project Guidelines
 
 This file defines the architecture, correctness rules, performance discipline,
-organization, and release gates for work on `mp-anafis`.
+organization, and release gates for work on `MpAnafis` (`mp_anafis` for Cargo, `mp-anafis` for Pip).
 
 ## 1. Project and priorities
 
-`mp-anafis` is a high-performance multi-precision mathematics library written
+`MpAnafis` is a high-performance multi-precision mathematics library written
 in Rust. Its current integer engine provides:
 
 - `MpUint`, an unsigned arbitrary-precision integer backed by native

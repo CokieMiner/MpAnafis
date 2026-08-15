@@ -1,27 +1,33 @@
-//! `AArch64` architecture-specific shift kernels.
+//! `AArch64` multi-precision right shift kernel.
 //!
-//! Merges bits from adjacent registers using `lsl`/`lsr`/`orr`. A64's `extr`
-//! takes an *immediate* `#lsb`, but our shift amounts are runtime values
-//! (divisor normalization shifts, user-supplied shift counts), so the
-//! register-form `lsl`+`lsr`+`orr` sequence is used instead. This is still
-//! tighter than the compiler's shift+and+or split (no explicit `and` mask).
+//! Shifts an array of limbs right by `shift` bits in place, extracting the low overflow bits
+//! and merging adjacent limbs using 64-bit `lsl`/`lsr`/`orr` sequences.
 
 use core::arch::asm;
 
 use super::Limb;
 
-/// Right-shift `len` limbs in-place by `shift` bits (0 < shift < 64).
+/// Right-shift `len` limbs in-place by `shift` bits (`0 < shift < 64`).
 /// Returns the bits shifted out of the bottom limb.
+///
+/// Computes:
+///
+/// ```text
+///   (limbs[0..len], carry_out) = limbs[0..len] >> shift
+/// ```
+///
+/// # Microarchitectural Strategy
+///
+/// Operates bottom-up (from 0 up to `len - 1`) to allow strictly in-place modifications without
+/// overwriting unshifted bits. Adjacent limbs are combined via register-form `lsl`+`lsr`+`orr`.
 ///
 /// # Safety
 ///
-/// - `limbs` must be valid for reads and writes of `len` elements.
-/// - `shift` must satisfy `0 < shift < LIMB_BITS`: the kernel computes
-///   `LIMB_BITS - shift` and applies both shift amounts to each element, so
-///   an out-of-range amount is undefined behavior.
+/// - `limbs` must point to a readable and writable buffer of at least `len` initialized 64-bit limbs.
+/// - `0 < shift < 64`.
 #[allow(
     clippy::inline_always,
-    reason = "Critical for peak assembly performance"
+    reason = "Critical for peak assembly performance in right shifts"
 )]
 #[inline(always)]
 pub unsafe fn rshift_unchecked(limbs: *mut Limb, len: usize, shift: u32) -> Limb {
@@ -34,51 +40,47 @@ pub unsafe fn rshift_unchecked(limbs: *mut Limb, len: usize, shift: u32) -> Limb
         reason = "Limb::BITS (≤64) fits in Limb on all targets; shift < Limb::BITS fits in Limb"
     )]
     let c_shift = (Limb::BITS as Limb).wrapping_sub(shift as Limb);
-    let last = len.wrapping_sub(1);
-    // SAFETY: Caller guarantees `limbs` has `len` elements, shift in 1..63
+    let count = len.wrapping_sub(1);
+    let ptr = limbs;
+
+    // SAFETY:
+    // 1. `limbs` is valid for reads and writes of `len` 64-bit `Limb` elements.
+    // 2. `0 < shift < 64`.
+    // 3. Pointer traversal stays within buffer bounds.
     unsafe {
         asm!(
-            // carry_out = bottom_limb << (64 - shift)
-            "ldr {bot}, [{limbs}]",
-            "lsl {carry_out}, {bot}, {c_shift}",
+            // Extract bottom carry: carry_out = bottom_limb << (64 - shift)
+            "ldr {bot}, [{ptr}]",                        // Load lowest limb limbs[0]
+            "lsl {carry_out}, {bot}, {c_shift}",         // Extract low overflow bits
 
-            // Loop: from i = 0 up to len-2
-            "mov {i}, #0",
-            "cmp {i}, {last}",
-            "b.ge 2f",                     // skip loop if len == 1
+            // Loop: bottom-up traversal from limbs[0] up to limbs[len-2]
+            "cbz {count}, 2f",                           // If len == 1 (count == 0), skip to top limb (2f)
 
             "1:",
-            "add {j}, {i}, #1",
-            "ldr {next}, [{limbs}, {j}, lsl #3]",
-            // limbs[i] = (next:bot >> shift) = (next << (64-shift)) | (bot >> shift)
-            "lsl {tmp}, {next}, {c_shift}",
-            "lsr {tmp2}, {bot}, {shift}",
-            "orr {bot}, {tmp}, {tmp2}",
-            "str {bot}, [{limbs}, {i}, lsl #3]",
-            "mov {bot}, {next}",
-            "mov {i}, {j}",
-            "cmp {i}, {last}",
-            "b.lt 1b",
+            "ldr {next}, [{ptr}, #8]!",                  // Load next higher limb and advance ptr
+            "lsl {tmp}, {next}, {c_shift}",              // tmp = next << (64 - shift)
+            "lsr {tmp2}, {bot}, {shift}",                // tmp2 = bot >> shift
+            "orr {bot}, {tmp}, {tmp2}",                  // Merge bits into new limb value
+            "str {bot}, [{ptr}, #-8]",                   // Store merged limb at previous position
+            "mov {bot}, {next}",                         // bot = next for next iteration
+            "subs {count}, {count}, #1",                 // Decrement loop counter
+            "b.ne 1b",                                   // Repeat while count != 0
 
-            // Shift top limb in place. {bot} already holds limbs[last] from
-            // the last loop iteration (or the original load when len == 1),
-            // so no reload is needed.
+            // Shift top limb in place (limbs[len-1] has no higher neighbour)
             "2:",
-            "lsr {bot}, {bot}, {shift}",
-            "str {bot}, [{limbs}, {last}, lsl #3]",
+            "lsr {bot}, {bot}, {shift}",                 // limbs[len-1] = limbs[len-1] >> shift
+            "str {bot}, [{ptr}]",                        // Store finalized top limb
 
             carry_out = out(reg) carry_out,
-            limbs = in(reg) limbs,
-            last = in(reg) last,
+            ptr = inout(reg) ptr => _,
+            count = inout(reg) count => _,
             shift = in(reg) u64::from(shift),
             c_shift = in(reg) c_shift,
             bot = out(reg) _,
             next = out(reg) _,
-            i = out(reg) _,
-            j = out(reg) _,
             tmp = out(reg) _,
             tmp2 = out(reg) _,
-            options(nostack)
+            options(nostack),
         );
     }
     carry_out

@@ -28,6 +28,7 @@ pub type FlintSize = isize;
 #[link(name = "flint")]
 unsafe extern "C" {
     /// `flint_mpn_mul(r, x, xn, y, yn)`, requiring `xn >= yn >= 1`.
+    #[link_name = "_flint_mpn_mul"]
     pub fn flint_mpn_mul(
         destination: *mut FlintLimb,
         larger: *const FlintLimb,
@@ -36,6 +37,7 @@ unsafe extern "C" {
         smaller_len: FlintSize,
     ) -> FlintLimb;
     /// `flint_mpn_mul_n(r, x, y, n)` for equal widths.
+    #[link_name = "_flint_mpn_mul_n"]
     pub fn flint_mpn_mul_n(
         destination: *mut FlintLimb,
         left: *const FlintLimb,

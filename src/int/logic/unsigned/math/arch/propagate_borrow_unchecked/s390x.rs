@@ -1,16 +1,25 @@
 //! `s390x` (IBM Z) borrow propagation kernel (inline assembly).
 //!
-//! Uses CC via `slbgr` (subtract logical with borrow) in a 2-way unrolled loop.
+//! Propagates a borrow through an array of limbs in place, utilizing 2-way unrolled
+//! `slbgr` (subtract logical with borrow) and CC-neutral `brctg` branching.
 
 use core::arch::asm;
 
 use super::Limb;
 
-/// Propagate borrow through `dst` slice.
+/// Propagate borrow through `dst` slice in-place.
+///
+/// Returns the final borrow-out (0 or 1).
+///
+/// # Microarchitectural Strategy
+///
+/// Uses `slbgr` to propagate borrow across destination limbs, seeding the Condition Code (CC)
+/// via `slgr` with `0 - borrow`. `brctg` decrements the loop counter without modifying CC.
 ///
 /// # Safety
-/// - `dst` must be valid for reads and writes of `len` elements.
-/// - `borrow` must be `0` or `1` (the CC is derived from `0 - borrow`).
+///
+/// - `dst` must point to a readable and writable buffer of at least `len` initialized 64-bit limbs.
+/// - `borrow <= 1`.
 #[allow(
     unsafe_code,
     reason = "Hardware inline assembly natively requires unsafe code"
@@ -24,40 +33,50 @@ pub unsafe fn propagate_borrow_unchecked(dst: *mut Limb, len: usize, mut borrow:
     let chunks = len >> 1;
     let rem = len & 1;
     let zero_const: Limb = 0;
-    // SAFETY: deferred to caller per the doc comment above.
+
+    // SAFETY:
+    // 1. `dst` is valid for reads and writes of `len` 64-bit `Limb` elements.
+    // 2. Pointer offsets remain within allocated bounds.
     unsafe {
         asm!(
-            "cgij {chunks}, 0, 8, 1f",          // skip main loop if chunks == 0
+            "cgij {chunks}, 0, 8, 1f",                   // If chunks == 0, skip main loop (1f)
 
-            // chunks > 0: set CC from borrow before entering main loop
-            "lghi {cc_seed}, 0",
-            "slgr {cc_seed}, {borrow}",         // CC = 2/3 if borrow==1, CC=0/1 if borrow==0
-            ".p2align 4",
-            "2:",
-            "lg {val0}, 0({dst})",
-            "lg {val1}, 8({dst})",
-            "slbgr {val0}, {zero}",             // val0 -= 0 + borrow_from_CC
-            "slbgr {val1}, {zero}",             // val1 -= 0 + borrow_from_CC
-            "stg {val0}, 0({dst})",
-            "stg {val1}, 8({dst})",
-            "la {dst}, 16({dst})",
-            "brctg {chunks}, 2b",
-            "j 4f",                             // skip CC re-init (main loop done, CC already set)
+            // Seed CC from borrow: (0 - borrow) produces CC borrow iff borrow == 1
+            "lghi {cc_seed}, 0",                         // cc_seed = 0
+            "slgr {cc_seed}, {borrow}",                  // Set Condition Code (CC)
 
-            "1:",                                // chunks == 0: set CC from borrow for tail/exit
-            "lghi {cc_seed}, 0",
-            "slgr {cc_seed}, {borrow}",
+            ".p2align 4",                                // Align loop header for branch prediction
+            // 2-way unrolled main loop
+            "2:",                                        // Loop head label
+            "lg {val0}, 0({dst})",                       // Load dst[j]
+            "lg {val1}, 8({dst})",                       // Load dst[j+1]
+            "slbgr {val0}, {zero}",                      // val0 -= 0 + borrow_from_CC
+            "slbgr {val1}, {zero}",                      // val1 -= 0 + borrow_from_CC
+            "stg {val0}, 0({dst})",                      // Store updated dst[j]
+            "stg {val1}, 8({dst})",                      // Store updated dst[j+1]
+            "la {dst}, 16({dst})",                       // Advance dst pointer (+16)
+            "brctg {chunks}, 2b",                        // Decrement chunks and branch if > 0 (CC-neutral)
+            "j 4f",                                      // Jump to tail/exit
 
-            "4:",                                // common: CC is ready (set either above or by main loop)
-            "brctg {rem}, 3f",
-            "lg {val0}, 0({dst})",
-            "slbgr {val0}, {zero}",
-            "stg {val0}, 0({dst})",
-            "3:",
-            "5:",
-            "lghi {borrow}, 0",
-            "slbgr {borrow}, {borrow}",         // borrow = -borrow_from_CC (0 or -1)
-            "lcgr {borrow}, {borrow}",          // two's complement -> 0 or 1
+            // Remainder entry seed path
+            "1:",                                        // Remainder entry label
+            "lghi {cc_seed}, 0",                         // cc_seed = 0
+            "slgr {cc_seed}, {borrow}",                  // Set CC
+
+            // 1-limb tail
+            "4:",                                        // Tail loop label
+            "brctg {rem}, 3f",                           // If rem == 0, skip tail (3f)
+            "lg {val0}, 0({dst})",                       // Load single limb
+            "slbgr {val0}, {zero}",                      // Subtract borrow
+            "stg {val0}, 0({dst})",                      // Store limb
+            "3:",                                        // Remainder exit label
+
+            // Capture final borrow out of CC: (0 - 0 - borrow) -> 0 or -1, then negate to get 0 or 1
+            "5:",                                        // Exit label
+            "lghi {borrow}, 0",                          // borrow = 0
+            "slbgr {borrow}, {borrow}",                  // borrow = 0 - 0 - borrow (0 or -1)
+            "lcgr {borrow}, {borrow}",                   // borrow = -borrow (0 or 1)
+
             borrow = inout(reg) borrow,
             dst = inout(reg_addr) dst => _,
             chunks = inout(reg) chunks => _,

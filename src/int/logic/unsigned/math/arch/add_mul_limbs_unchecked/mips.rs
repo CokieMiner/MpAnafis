@@ -1,28 +1,37 @@
-//! MIPS 32-bit architecture-specific limb operations.
+//! MIPS 32-bit (`MIPS32r2` / `MIPS32r6`) fused multiply-add limb kernel.
 //!
-//! Uses `multu`/`mflo`/`mfhi` for efficient 32x32->64 multiplication and
-//! `addu` with `sltu` for carry tracking.
+//! Uses hardware 32×32→64-bit integer multiplier (`multu` with `mflo`/`mfhi`),
+//! non-trapping 32-bit addition (`addu`), and branchless carry capture via `sltu`.
 
 use core::arch::asm;
 
 use super::Limb;
 
-/// Multiply `len` limbs from `src` by `scalar`, add the result into `dst`,
+/// Multiply `len` 32-bit limbs from `src` by `scalar`, add the result into `dst`,
 /// and return the final carry.
 ///
-/// This computes:
+/// Computes:
 ///
 /// ```text
 ///   (carry, dst[0..len]) = dst[0..len] + (src[0..len] × scalar)
 /// ```
 ///
+/// # Microarchitectural Strategy
+///
+/// Standard `MIPS32` provides the `multu` instruction computing a 64-bit product into `HI` and `LO`.
+/// `mflo` (low 32 bits) and `mfhi` (high 32 bits) transfer the product into general-purpose registers.
+/// Multi-precision addition overflow is detected branchlessly with `sltu`. The loop is 2-way unrolled
+/// (8 bytes per iteration).
+///
 /// # Safety
 ///
-/// - `dst` must be valid for reads and writes of `len` elements.
-/// - `src` must be valid for reads of `len` elements.
+/// - `dst` must point to a readable and writable buffer of at least `len` initialized 32-bit limbs.
+/// - `src` must point to a readable buffer of at least `len` initialized 32-bit limbs.
+/// - `src` and `dst` buffers must not overlap in memory (non-aliasing invariant).
+/// - `len` must reflect the allocated capacity of both buffers.
 #[allow(
     clippy::inline_always,
-    reason = "Critical for peak assembly performance"
+    reason = "Critical for peak assembly performance in 32-bit MIPS multi-precision hot paths"
 )]
 #[inline(always)]
 pub unsafe fn add_mul_limbs_unchecked(
@@ -34,59 +43,76 @@ pub unsafe fn add_mul_limbs_unchecked(
     let mut carry_in: Limb = 0;
     let chunks = len >> 1;
     let rem = len & 1;
-    // SAFETY: Assembly block accesses `len` elements from `dst` and `src`, which caller guarantees are valid.
+
+    // SAFETY:
+    // 1. `dst` is valid for writes of `len` 32-bit `Limb` elements.
+    // 2. `src` is valid for reads of `len` 32-bit `Limb` elements.
+    // 3. Pointer offsets (`0`, `4`, `8`) remain within `len * 4` bytes.
+    // 4. Memory spans are non-overlapping.
     unsafe {
         asm!(
-            ".set noat",
-            "beqz {chunks}, 2f",
+            ".set noat",                                  // Disable assembler temporary register ($at) clobber
+            "beqz {chunks}, 2f",                          // If chunks == 0, jump to remainder loop (2f)
+
+            // Main 2-way unrolled loop body
             "1:",
-            "lw {s0}, 0({src})",
-            "lw {s1}, 4({src})",
-            "lw {d0}, 0({dst})",
-            "lw {d1}, 4({dst})",
 
-            "multu {s0}, {scalar}",
-            "mflo {p_lo0}",
-            "mfhi {p_hi0}",
-            "addu {t_lo}, {p_lo0}, {carry_in}",
-            "sltu {ca}, {t_lo}, {p_lo0}",
-            "addu {p_hi0}, {p_hi0}, {ca}",
-            "addu {t0}, {t_lo}, {d0}",
-            "sltu {cb}, {t0}, {d0}",
-            "addu {carry_in}, {p_hi0}, {cb}",
-            "sw {t0}, 0({dst})",
+            // [Limb 0 Multiply-Accumulate]
+            "lw {s0}, 0({src})",                          // Load src[0] (32-bit Load Word)
+            "lw {s1}, 4({src})",                          // Load src[1]
+            "lw {d0}, 0({dst})",                          // Load dst[0]
+            "lw {d1}, 4({dst})",                          // Load dst[1]
 
-            "multu {s1}, {scalar}",
-            "mflo {p_lo1}",
-            "mfhi {p_hi1}",
-            "addu {t_lo}, {p_lo1}, {carry_in}",
-            "sltu {ca}, {t_lo}, {p_lo1}",
-            "addu {p_hi1}, {p_hi1}, {ca}",
-            "addu {t0}, {t_lo}, {d1}",
-            "sltu {cb}, {t0}, {d1}",
-            "addu {carry_in}, {p_hi1}, {cb}",
-            "sw {t0}, 4({dst})",
+            "multu {s0}, {scalar}",                       // HI:LO = src[0] * scalar (64-bit unsigned product)
+            "mflo {p_lo0}",                               // Move low 32 bits from LO register
+            "mfhi {p_hi0}",                               // Move high 32 bits from HI register
+            "addu {t_lo}, {p_lo0}, {carry_in}",           // t_lo = p_lo0 + carry_in (non-trapping add)
+            "sltu {ca}, {t_lo}, {p_lo0}",                 // ca = (t_lo < p_lo0) ? 1 : 0 (detect carry)
+            "addu {p_hi0}, {p_hi0}, {ca}",                // p_hi0 += ca (absorb carry into high product)
+            "addu {t0}, {t_lo}, {d0}",                    // t0 = t_lo + dst[0]
+            "sltu {cb}, {t0}, {d0}",                      // cb = (t0 < dst[0]) ? 1 : 0 (detect destination carry)
+            "addu {carry_in}, {p_hi0}, {cb}",             // carry_in = p_hi0 + cb (new running carry)
+            "sw {t0}, 0({dst})",                          // Store accumulated result to dst[0]
 
+            // [Limb 1 Multiply-Accumulate]
+            "multu {s1}, {scalar}",                       // HI:LO = src[1] * scalar
+            "mflo {p_lo1}",                               // Low 32 bits
+            "mfhi {p_hi1}",                               // High 32 bits
+            "addu {t_lo}, {p_lo1}, {carry_in}",           // t_lo = p_lo1 + carry_in
+            "sltu {ca}, {t_lo}, {p_lo1}",                 // ca = 1 if carry occurred
+            "addu {p_hi1}, {p_hi1}, {ca}",                // p_hi1 += ca
+            "addu {t0}, {t_lo}, {d1}",                    // t0 = t_lo + dst[1]
+            "sltu {cb}, {t0}, {d1}",                      // cb = 1 if destination carry occurred
+            "addu {carry_in}, {p_hi1}, {cb}",             // Update running carry
+            "sw {t0}, 4({dst})",                          // Store to dst[1]
+
+            // Advance pointers by 2 limbs (8 bytes)
             "addiu {src}, {src}, 8",
             "addiu {dst}, {dst}, 8",
+            // Decrement chunk counter and repeat while chunks != 0
             "addiu {chunks}, {chunks}, -1",
             "bnez {chunks}, 1b",
 
+            // Remainder processing (0 or 1 limb)
             "2:",
             "beqz {rem}, 4f",
+
+            // 1-limb tail
             "3:",
-            "lw {s0}, 0({src})",
-            "lw {d0}, 0({dst})",
-            "multu {s0}, {scalar}",
-            "mflo {p_lo0}",
-            "mfhi {p_hi0}",
-            "addu {t_lo}, {p_lo0}, {carry_in}",
-            "sltu {ca}, {t_lo}, {p_lo0}",
-            "addu {p_hi0}, {p_hi0}, {ca}",
-            "addu {t0}, {t_lo}, {d0}",
-            "sltu {cb}, {t0}, {d0}",
-            "addu {carry_in}, {p_hi0}, {cb}",
-            "sw {t0}, 0({dst})",
+            "lw {s0}, 0({src})",                          // Load single src limb
+            "lw {d0}, 0({dst})",                          // Load single dst limb
+            "multu {s0}, {scalar}",                       // HI:LO = src[0] * scalar
+            "mflo {p_lo0}",                               // Low 32 bits
+            "mfhi {p_hi0}",                               // High 32 bits
+            "addu {t_lo}, {p_lo0}, {carry_in}",           // Add running carry
+            "sltu {ca}, {t_lo}, {p_lo0}",                 // Detect carry
+            "addu {p_hi0}, {p_hi0}, {ca}",                // Propagate carry
+            "addu {t0}, {t_lo}, {d0}",                    // Accumulate into destination limb
+            "sltu {cb}, {t0}, {d0}",                      // Detect destination carry
+            "addu {carry_in}, {p_hi0}, {cb}",             // Update running carry
+            "sw {t0}, 0({dst})",                          // Store updated limb
+
+            // Tail completion
             "4:",
 
             carry_in = inout(reg) carry_in,

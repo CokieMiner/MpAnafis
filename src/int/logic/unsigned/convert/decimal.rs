@@ -7,7 +7,9 @@
 
 use alloc::{string::String, vec::Vec};
 
-use super::{ArchKernels, InternalMpUint, Limb, byte_from_digit, estimated_digits};
+use super::{
+    ArchKernels, DoubleLimb, InternalMpUint, LIMB_BITS, Limb, byte_from_digit, estimated_digits,
+};
 
 // Decimal chunking: radix 10 divides by a single-limb power of ten per step,
 // emitting `DECIMAL_CHUNK_DIGITS` digits per division instead of one. The
@@ -82,24 +84,61 @@ impl InternalMpUint {
 /// Divides `value` by a single-limb `divisor`, storing the quotient in place
 /// and returning the remainder.
 ///
-/// The loop walks the limbs most significant first, feeding the running
-/// remainder of the previous step into the architecture division kernel, and
-/// renormalizes the value before returning.
+/// For multi-limb inputs, precomputes a normalized single-limb reciprocal once
+/// and reduces limbs using fast 2-multiply steps instead of unpipelined hardware divide.
 pub fn div_rem_small(value: &mut InternalMpUint, divisor: Limb) -> Limb {
     let len = value.limbs().len();
-    let mut remainder = 0;
+    if len == 0 {
+        return 0;
+    }
+    if len == 1 {
+        // SAFETY: len is 1.
+        let limb = unsafe { *value.limbs().as_ptr() };
+        // SAFETY: divisor is non-zero in small division; rem_hi is 0 < divisor.
+        let (quotient, remainder) = unsafe { ArchKernels::divrem_1_unchecked(limb, 0, divisor) };
+        // SAFETY: len is 1.
+        unsafe {
+            *value.limbs_mut().as_mut_ptr() = quotient;
+        }
+        value.normalize();
+        return remainder;
+    }
 
+    #[allow(
+        clippy::as_conversions,
+        clippy::cast_possible_truncation,
+        reason = "leading_zeros() is always in 0..LIMB_BITS"
+    )]
+    let shift = divisor.leading_zeros() as usize;
+    let d_norm = divisor << shift;
+
+    // Precompute reciprocal v = floor((2^(2W) - 1) / d_norm) - 2^W
+    // SAFETY: d_norm has MSB set, so !d_norm < d_norm, satisfying divrem_1 contract.
+    let (reciprocal, _) = unsafe { ArchKernels::divrem_1_unchecked(Limb::MAX, !d_norm, d_norm) };
+
+    let mut remainder = 0;
     for index in (0..len).rev() {
         // SAFETY: index is in 0..len.
         let limb = unsafe { *value.limbs().as_ptr().add(index) };
-        // SAFETY: division maintains remainder < divisor.
-        let (quotient, next_remainder) =
-            unsafe { ArchKernels::divrem_1_unchecked(limb, remainder, divisor) };
+        let (u1, u0) = if shift == 0 {
+            (remainder, limb)
+        } else {
+            let u1 = (remainder << shift) | (limb >> (LIMB_BITS.wrapping_sub(shift)));
+            let u0 = limb << shift;
+            (u1, u0)
+        };
+
+        let (quotient, next_rem_norm) = divrem_2by1_reciprocal(u1, u0, d_norm, reciprocal);
+        remainder = if shift == 0 {
+            next_rem_norm
+        } else {
+            next_rem_norm >> shift
+        };
+
         // SAFETY: index is in 0..len, and the source limb was read first.
         unsafe {
             *value.limbs_mut().as_mut_ptr().add(index) = quotient;
         }
-        remainder = next_remainder;
     }
 
     value.normalize();
@@ -261,6 +300,56 @@ fn div_rem_decimal_chunk(value: &mut InternalMpUint) -> Limb {
 #[inline]
 fn div_rem_decimal_chunk(value: &mut InternalMpUint) -> Limb {
     div_rem_small(value, DECIMAL_CHUNK_DIVISOR)
+}
+
+/// Divides a 2-limb numerator `(u1 << LIMB_BITS) | u0` by normalized divisor `d`
+/// using precomputed reciprocal `v = floor((2^(2W) - 1) / d) - 2^W`.
+#[allow(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless,
+    clippy::inline_always,
+    reason = "DoubleLimb widening, Limb truncation, and inline step are mathematically bounded in the division inner loop"
+)]
+#[inline(always)]
+fn divrem_2by1_reciprocal(u1: Limb, u0: Limb, d: Limb, v: Limb) -> (Limb, Limb) {
+    debug_assert!(
+        u1 < d,
+        "high numerator must be strictly less than normalized divisor"
+    );
+    debug_assert!(
+        d >= (1 << (LIMB_BITS.wrapping_sub(1))),
+        "divisor must be normalized with most significant bit set"
+    );
+
+    let prod = (v as DoubleLimb).wrapping_mul(u1 as DoubleLimb);
+    let p1 = (prod >> LIMB_BITS) as Limb;
+    let p0 = prod as Limb;
+
+    let (_sum0, c0) = p0.overflowing_add(u0);
+    let mut q_est = u1.wrapping_add(p1).wrapping_add(usize::from(c0));
+
+    let qd = (q_est as DoubleLimb).wrapping_mul(d as DoubleLimb);
+    let qd_hi = (qd >> LIMB_BITS) as Limb;
+    let qd_lo = qd as Limb;
+
+    let (mut r0, b0) = u0.overflowing_sub(qd_lo);
+    let (r1, _) = u1.wrapping_sub(qd_hi).overflowing_sub(usize::from(b0));
+
+    if r1 == Limb::MAX {
+        q_est = q_est.wrapping_sub(1);
+        r0 = r0.wrapping_add(d);
+    } else {
+        let mut r_full = ((r1 as DoubleLimb) << LIMB_BITS) | (r0 as DoubleLimb);
+        let d_wide = d as DoubleLimb;
+        while r_full >= d_wide {
+            q_est = q_est.wrapping_add(1);
+            r_full = r_full.wrapping_sub(d_wide);
+        }
+        r0 = r_full as Limb;
+    }
+
+    (q_est, r0)
 }
 
 #[cfg(test)]

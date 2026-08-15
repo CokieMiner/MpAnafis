@@ -1,4 +1,7 @@
 //! `AArch64` Montgomery reduction step kernel.
+//!
+//! Implements Coarsely Integrated Operand Scanning (CIOS) Montgomery reduction step
+//! using `AArch64` inline assembly (`mul`, `umulh`, `adds`, `adc`).
 
 use core::arch::asm;
 
@@ -8,18 +11,31 @@ use super::Limb;
 /// using `AArch64` inline assembly (`mul`, `umulh`, `adds`, `adc`).
 ///
 /// For step `i`, this computes:
-/// `(out[0..len] + a_i * b[0..len] + q * m[0..len]) / 2^LIMB_BITS`
-/// where `q = ((out[0] + a_i * b[0]) * m_inv) mod 2^LIMB_BITS`.
+///
+/// ```text
+///   (out[0..len] + a_i * b[0..len] + q * m[0..len]) / 2^64
+/// ```
+///
+/// where `q = ((out[0] + a_i * b[0]) * m_inv) mod 2^64`.
 ///
 /// Stores the shifted result into `out[0..len-1]`, stores the combined low carry into
 /// `out[len-1]`, and returns the top overflow carry (either 0 or 1).
 ///
+/// # Microarchitectural Strategy
+///
+/// Pass 1 computes `out += a_i * b` using `mul`/`umulh` with single carry-chain accumulation.
+/// Pass 2 derives the quotient multiplier `q = out[0] * m_inv`.
+/// Pass 3 evaluates `(out + q * m) >> 64` with offset pointer loads and stores to perform the
+/// 1-limb right shift directly in register flight without memory rewrites.
+///
 /// # Safety
-/// - `out` must be valid for reads and writes of `len` elements.
-/// - `b` and `m` must be valid for reads of `len` elements.
+///
+/// - `out` must be valid for reads and writes of `len` 64-bit limbs.
+/// - `b` and `m` must be valid for reads of `len` 64-bit limbs.
+/// - Memory buffers must not alias except where documented by CIOS in-place updates.
 #[allow(
     clippy::inline_always,
-    reason = "Critical for peak assembly performance"
+    reason = "Critical for peak assembly performance in Montgomery modular exponentiation"
 )]
 #[inline(always)]
 pub unsafe fn monty_redc_step_unchecked(
@@ -34,75 +50,78 @@ pub unsafe fn monty_redc_step_unchecked(
         return 0;
     }
 
-    // SAFETY: caller guarantees out, b, and m have at least len elements.
+    // SAFETY:
+    // 1. `out` is valid for reads and writes of `len` 64-bit `Limb` elements.
+    // 2. `b` and `m` are valid for reads of `len` 64-bit `Limb` elements.
+    // 3. Pointer offsets remain within `len * 8` bytes.
     unsafe {
         asm!(
             // --- Pass 1: out = out + a_i * b ---
-            "mov {carry}, xzr",
-            "mov {offset}, xzr",
+            "mov {carry}, xzr",                          // Zero carry register
+            "mov {offset}, xzr",                         // Zero byte offset counter
 
             "1:",
-            "ldr {val_m_b}, [{b}, {offset}]",
-            "ldr {val_out}, [{out}, {offset}]",
-            "mul {p_lo}, {val_m_b}, {a_i}",
-            "umulh {p_hi}, {val_m_b}, {a_i}",
-            "adds {p_lo}, {p_lo}, {carry}",
-            "adc {p_hi}, {p_hi}, xzr",
-            "adds {val_out}, {val_out}, {p_lo}",
-            "adc {carry}, {p_hi}, xzr",
-            "str {val_out}, [{out}, {offset}]",
-            "add {offset}, {offset}, #8",
-            "cmp {offset}, {len}, lsl #3",
-            "b.lo 1b",
-            "mov {a_i}, {carry}",             // save carry_b from Pass 1 into a_i
+            "ldr {val_m_b}, [{b}, {offset}]",            // Load b[j]
+            "ldr {val_out}, [{out}, {offset}]",          // Load out[j]
+            "mul {p_lo}, {val_m_b}, {a_i}",              // Low 64 bits of b[j] * a_i
+            "umulh {p_hi}, {val_m_b}, {a_i}",            // High 64 bits of b[j] * a_i
+            "adds {p_lo}, {p_lo}, {carry}",              // p_lo += carry, set C flag
+            "adc {p_hi}, {p_hi}, xzr",                   // p_hi += C flag + 0
+            "adds {val_out}, {val_out}, {p_lo}",         // out[j] += p_lo, set C flag
+            "adc {carry}, {p_hi}, xzr",                  // carry = p_hi + C flag
+            "str {val_out}, [{out}, {offset}]",          // Store updated out[j]
+            "add {offset}, {offset}, #8",                // Advance offset by 8 bytes
+            "cmp {offset}, {len}, lsl #3",               // Check if offset < len * 8
+            "b.lo 1b",                                   // Repeat while offset < len * 8
+            "mov {a_i}, {carry}",                        // Save carry_b from Pass 1 into a_i
 
             // --- Pass 2: q = out[0] * m_inv ---
-            "ldr {val_out}, [{out}]",
-            "mul {q}, {val_out}, {m_inv}",
+            "ldr {val_out}, [{out}]",                    // Load updated out[0]
+            "mul {q}, {val_out}, {m_inv}",               // q = (out[0] * m_inv) mod 2^64
 
             // --- Pass 3: out = (out + q * m) >> 64 ---
-            "mov {carry}, xzr",
+            "mov {carry}, xzr",                          // Reset carry for reduction pass
 
-            // Step 0 (j=0): compute q * m[0] + out[0], result is 0 mod 2^64, just keep carry
-            "ldr {val_m_b}, [{m}]",
-            "ldr {val_out}, [{out}]",
-            "mul {p_lo}, {val_m_b}, {q}",
-            "umulh {p_hi}, {val_m_b}, {q}",
-            "adds {p_lo}, {p_lo}, {carry}",
-            "adc {p_hi}, {p_hi}, xzr",
-            "adds {val_out}, {val_out}, {p_lo}",
-            "adc {carry}, {p_hi}, xzr",
+            // Step 0 (j=0): compute q * m[0] + out[0], result is 0 mod 2^64, capture carry
+            "ldr {val_m_b}, [{m}]",                      // Load m[0]
+            "ldr {val_out}, [{out}]",                    // Load out[0]
+            "mul {p_lo}, {val_m_b}, {q}",                // Low 64 bits of m[0] * q
+            "umulh {p_hi}, {val_m_b}, {q}",              // High 64 bits of m[0] * q
+            "adds {p_lo}, {p_lo}, {carry}",              // p_lo += carry
+            "adc {p_hi}, {p_hi}, xzr",                   // p_hi += C flag
+            "adds {val_out}, {val_out}, {p_lo}",         // Low word is 0 (discarded by shift)
+            "adc {carry}, {p_hi}, xzr",                  // Capture reduction carry
 
             "mov {loops}, {len}",
-            "sub {loops}, {loops}, #1",
-            "cbz {loops}, 3f",            // if len == 1, skip
+            "sub {loops}, {loops}, #1",                  // loops = len - 1
+            "cbz {loops}, 3f",                           // If len == 1, skip loop (3f)
 
-            "add {m_ptr}, {m}, #8",       // m_ptr = m + 8 (read m[1] first iter)
-            "add {out_read}, {out}, #8",  // out_read = out + 8 (read out[1] first iter)
-            "mov {out_write}, {out}",     // out_write = out (write out[0] first iter)
+            "add {m_ptr}, {m}, #8",                      // m_ptr = m + 8 (read m[1] first iteration)
+            "add {out_read}, {out}, #8",                 // out_read = out + 8 (read out[1] first iteration)
+            "mov {out_write}, {out}",                    // out_write = out (write out[0] first iteration)
 
-            "2:",                          // for j = 1 to len-1
-            "ldr {val_m_b}, [{m_ptr}], #8",
-            "ldr {val_out}, [{out_read}], #8",
-            "mul {p_lo}, {val_m_b}, {q}",
-            "umulh {p_hi}, {val_m_b}, {q}",
-            "adds {p_lo}, {p_lo}, {carry}",
-            "adc {p_hi}, {p_hi}, xzr",
-            "adds {val_out}, {val_out}, {p_lo}",
-            "adc {carry}, {p_hi}, xzr",
-            "str {val_out}, [{out_write}], #8",
-            "subs {loops}, {loops}, #1",
-            "b.ne 2b",
+            "2:",                                        // Loop for j = 1 to len-1
+            "ldr {val_m_b}, [{m_ptr}], #8",              // Load m[j] and advance m_ptr
+            "ldr {val_out}, [{out_read}], #8",           // Load out[j] and advance read pointer
+            "mul {p_lo}, {val_m_b}, {q}",                // Low 64 bits of m[j] * q
+            "umulh {p_hi}, {val_m_b}, {q}",              // High 64 bits of m[j] * q
+            "adds {p_lo}, {p_lo}, {carry}",              // p_lo += carry
+            "adc {p_hi}, {p_hi}, xzr",                   // p_hi += C flag
+            "adds {val_out}, {val_out}, {p_lo}",         // out[j] += p_lo
+            "adc {carry}, {p_hi}, xzr",                  // Update carry
+            "str {val_out}, [{out_write}], #8",          // Store shifted limb into out[j-1]
+            "subs {loops}, {loops}, #1",                 // Decrement remaining limbs
+            "b.ne 2b",                                   // Repeat while loops != 0
 
             "3:",
-            "mov {m_inv}, {carry}",       // return carry_m in m_inv reg
+            "mov {m_inv}, {carry}",                      // Return carry_m in m_inv register
 
             out = in(reg) out,
             b = in(reg) b,
             m = in(reg) m,
             len = in(reg) len,
-            a_i = inout(reg) a_i,         // outputs carry_b
-            m_inv = inout(reg) m_inv,     // outputs carry_m
+            a_i = inout(reg) a_i,                        // Outputs carry_b
+            m_inv = inout(reg) m_inv,                    // Outputs carry_m
             carry = out(reg) _,
             offset = out(reg) _,
             m_ptr = out(reg) _,
@@ -116,7 +135,13 @@ pub unsafe fn monty_redc_step_unchecked(
             loops = out(reg) _,
             options(nostack)
         );
-        let (final_sum, final_carry) = a_i.overflowing_add(m_inv);
+    }
+
+    let carry_b = a_i;
+    let carry_m = m_inv;
+    // SAFETY: out points to at least len limbs.
+    unsafe {
+        let (final_sum, final_carry) = carry_b.overflowing_add(carry_m);
         *out.add(len.wrapping_sub(1)) = final_sum;
         Limb::from(final_carry)
     }

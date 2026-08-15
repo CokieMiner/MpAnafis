@@ -1,22 +1,39 @@
 //! `x86_64` carry propagation kernel (inline assembly).
 //!
 //! Resolves the overwhelmingly common first-limb stop before entering assembly,
-//! then uses CF via `adcq` in a 4-way unrolled loop for a genuine carry chain.
+//! then uses fast `incq`/`jnz` early-exit propagation for extended carry chains.
 
 use core::arch::asm;
 
 use super::Limb;
 
-/// Propagate a carry through a raw limb pointer slice.
+/// Propagate a binary carry through a raw limb pointer slice.
+///
+/// Computes:
+///
+/// ```text
+///   (carry_out, dst[0..len]) = dst[0..len] + carry
+/// ```
+///
+/// # Microarchitectural Strategy
+///
+/// Carry propagation terminates at the first limb that does not wrap (i.e. where `dst[i] != Limb::MAX`).
+/// Statistically, $1 - 2^{-64}$ of all carry propagations stop at limb 0 without requiring loop entry.
+/// For rare chains traversing multiple MAX limbs, the assembly loop uses single-uOp `incq` with
+/// zero-flag conditional branching (`jnz`) to break immediately on the first non-wrapping limb.
 ///
 /// # Safety
 ///
-/// `dst` must be valid for reading and writing `len` elements of type `Limb`.
+/// - `dst` must point to a readable and writable buffer of at least `len` initialized 64-bit limbs.
+/// - `carry` must be a valid binary carry ($\in \{0, 1\}$).
 #[allow(
     unsafe_code,
     reason = "Hardware inline assembly natively requires unsafe code"
 )]
-#[allow(clippy::inline_always, reason = "Critical for peak performance")]
+#[allow(
+    clippy::inline_always,
+    reason = "Critical for peak performance in carry propagation hot paths"
+)]
 #[inline(always)]
 pub unsafe fn propagate_carry_unchecked(dst: *mut Limb, len: usize, mut carry: Limb) -> Limb {
     debug_assert!(carry <= 1, "carry propagation accepts a binary carry");
@@ -42,43 +59,32 @@ pub unsafe fn propagate_carry_unchecked(dst: *mut Limb, len: usize, mut carry: L
     // SAFETY: len > 1 proves the one-limb offset remains within the allocation.
     let tail_dst = unsafe { dst.add(1) };
     let tail_len = len.wrapping_sub(1);
-    let chunks = tail_len >> 2;
-    let rem = tail_len & 3;
-    let idx = 0_usize;
     // SAFETY: Caller guarantees `tail_dst` is valid for `tail_len` elements.
     unsafe {
         asm!(
-            "btq $0, {carry}",
-            "decq {chunks}",
-            "js 1f",
-            ".p2align 4",
-            "2:",
-            "adcq $0, ({dst}, {idx}, 8)",
-            "adcq $0, 8({dst}, {idx}, 8)",
-            "adcq $0, 16({dst}, {idx}, 8)",
-            "adcq $0, 24({dst}, {idx}, 8)",
-            "jnc 5f",
-            "leaq 4({idx}), {idx}",
-            "decq {chunks}",
-            "jns 2b",
-            "1:",
-            "decq {rem}",
-            "js 5f",
-            ".p2align 4",
-            "3:",
-            "adcq $0, ({dst}, {idx}, 8)",
-            "jnc 5f",
-            "leaq 1({idx}), {idx}",
-            "decq {rem}",
-            "jns 3b",
-            "5:",
-            "movl $0, {carry:e}",
-            "adcq {carry}, {carry}",
-            carry = inout(reg) carry,
-            dst = in(reg) tail_dst,
-            idx = inout(reg) idx => _,
-            chunks = inout(reg) chunks => _,
-            rem = inout(reg) rem => _,
+            "1:",                                        // Loop head label
+            "movq ({dst}), %rax",                        // Load dst[i]
+            "incq %rax",                                 // Increment limb (Limb::MAX -> 0 sets ZF=1)
+            "movq %rax, ({dst})",                        // Write updated limb back to dst[i]
+            "jnz 2f",                                    // If result != 0 (ZF=0), carry absorbed! Exit early
+            "leaq 8({dst}), {dst}",                      // Advance pointer by 8 bytes
+            "decq {len}",                                // Decrement remaining limb count
+            "jnz 1b",                                    // Repeat while len != 0
+
+            // All limbs wrapped to zero: final carry out is 1
+            "movq $1, {carry}",                          // Set carry out to 1
+            "jmp 3f",                                    // Jump to completion label
+
+            // Early exit: carry absorbed by non-MAX limb
+            "2:",                                        // Early exit label
+            "movq $0, {carry}",                          // Set carry out to 0
+
+            // Completion
+            "3:",                                        // Completion label
+            carry = out(reg) carry,
+            dst = inout(reg) tail_dst => _,
+            len = inout(reg) tail_len => _,
+            out("rax") _,
             options(nostack, att_syntax)
         );
     }

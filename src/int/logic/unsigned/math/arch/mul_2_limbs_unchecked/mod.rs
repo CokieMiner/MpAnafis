@@ -14,6 +14,7 @@ select_arch_kernel! {
     backends: [
         x86 => all(not(miri), target_arch = "x86", target_pointer_width = "32"),
         aarch64 => all(not(miri), target_arch = "aarch64", target_pointer_width = "64"),
+        arm => all(not(miri), target_arch = "arm"),
         riscv64 => all(not(miri), target_arch = "riscv64", target_pointer_width = "64"),
         s390x => all(not(miri), target_arch = "s390x", target_pointer_width = "64"),
     ];

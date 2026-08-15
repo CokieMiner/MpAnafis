@@ -77,7 +77,7 @@ fn resolve_installed_profile(tuned_path: &Path) -> String {
     if tuned_path.exists() {
         drop(writeln!(
             stdout(),
-            "cargo:warning=mp-anafis: Using tuned profile from src/int/tuned_thresholds.rs"
+            "cargo:warning=mp_anafis: Using tuned profile from src/int/tuned_thresholds.rs"
         ));
         read_complete_profile(tuned_path)
     } else {
@@ -91,7 +91,7 @@ fn resolve_installed_profile(tuned_path: &Path) -> String {
 fn resolve_candidate_profile(path: &Path) -> String {
     drop(writeln!(
         stdout(),
-        "cargo:warning=mp-anafis: Using autotuner candidate profile {}",
+        "cargo:warning=mp_anafis: Using autotuner candidate profile {}",
         path.display()
     ));
     drop(writeln!(
@@ -129,7 +129,7 @@ fn read_complete_profile(path: &Path) -> String {
     let missing = missing_definition(&source);
     assert!(
         missing.is_none(),
-        "mp-anafis: tuning profile {} is missing {missing:?}",
+        "mp_anafis: tuning profile {} is missing {missing:?}",
         path.display()
     );
     source

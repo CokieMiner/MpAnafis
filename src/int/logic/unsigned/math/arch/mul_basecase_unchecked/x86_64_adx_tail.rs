@@ -32,21 +32,21 @@ macro_rules! define_pipelined_fixed_add_mul {
             // SAFETY: the caller proves the spans encoded by these offsets.
             unsafe {
                 asm!(
-                    "xorl %r10d, %r10d",
+                    "xorl %r10d, %r10d",                          // Clear r10 (previous high product) and OF/CF flags
                     $(
-                        concat!("mulxq ", stringify!($even), "({src}), %r8, %r9"),
-                        "adcxq %r10, %r8",
-                        concat!("adoxq ", stringify!($even), "({dst}), %r8"),
-                        concat!("mulxq ", stringify!($odd), "({src}), %r11, %r10"),
-                        concat!("movq %r8, ", stringify!($even), "({dst})"),
-                        "adcxq %r9, %r11",
-                        concat!("adoxq ", stringify!($odd), "({dst}), %r11"),
-                        concat!("movq %r11, ", stringify!($odd), "({dst})"),
+                        concat!("mulxq ", stringify!($even), "({src}), %r8, %r9"),   // (%r9:%r8) = src[even] * scalar
+                        "adcxq %r10, %r8",                        // r8 += previous high + CF
+                        concat!("adoxq ", stringify!($even), "({dst}), %r8"),        // r8 += dst[even] + OF
+                        concat!("mulxq ", stringify!($odd), "({src}), %r11, %r10"),  // (%r10:%r11) = src[odd] * scalar
+                        concat!("movq %r8, ", stringify!($even), "({dst})"),         // Store updated dst[even]
+                        "adcxq %r9, %r11",                        // r11 += high(even) + CF
+                        concat!("adoxq ", stringify!($odd), "({dst}), %r11"),        // r11 += dst[odd] + OF
+                        concat!("movq %r11, ", stringify!($odd), "({dst})"),         // Store updated dst[odd]
                     )+
-                    "movq $0, %r11",
-                    "adcxq %r11, %r10",
-                    "adoxq %r11, %r10",
-                    "movq %r10, {carry_hi}",
+                    "movq $0, %r11",                              // Zero r11 for carry flush
+                    "adcxq %r11, %r10",                           // Flush CF into r10
+                    "adoxq %r11, %r10",                           // Flush OF into r10
+                    "movq %r10, {carry_hi}",                      // Store final carry-out
                     carry_hi = out(reg) carry_hi,
                     src = in(reg) src,
                     dst = in(reg) dst,
@@ -91,25 +91,25 @@ macro_rules! define_pipelined_fixed_add_mul_odd {
             // SAFETY: the caller proves the spans encoded by these offsets.
             unsafe {
                 asm!(
-                    "xorl %r10d, %r10d",
+                    "xorl %r10d, %r10d",                          // Clear r10 (previous high product) and OF/CF flags
                     $(
-                        concat!("mulxq ", stringify!($even), "({src}), %r8, %r9"),
-                        "adcxq %r10, %r8",
-                        concat!("adoxq ", stringify!($even), "({dst}), %r8"),
-                        concat!("mulxq ", stringify!($odd), "({src}), %r11, %r10"),
-                        concat!("movq %r8, ", stringify!($even), "({dst})"),
-                        "adcxq %r9, %r11",
-                        concat!("adoxq ", stringify!($odd), "({dst}), %r11"),
-                        concat!("movq %r11, ", stringify!($odd), "({dst})"),
+                        concat!("mulxq ", stringify!($even), "({src}), %r8, %r9"),   // (%r9:%r8) = src[even] * scalar
+                        "adcxq %r10, %r8",                        // r8 += previous high + CF
+                        concat!("adoxq ", stringify!($even), "({dst}), %r8"),        // r8 += dst[even] + OF
+                        concat!("mulxq ", stringify!($odd), "({src}), %r11, %r10"),  // (%r10:%r11) = src[odd] * scalar
+                        concat!("movq %r8, ", stringify!($even), "({dst})"),         // Store updated dst[even]
+                        "adcxq %r9, %r11",                        // r11 += high(even) + CF
+                        concat!("adoxq ", stringify!($odd), "({dst}), %r11"),        // r11 += dst[odd] + OF
+                        concat!("movq %r11, ", stringify!($odd), "({dst})"),         // Store updated dst[odd]
                     )+
-                    concat!("mulxq ", stringify!($last), "({src}), %r8, %r9"),
-                    "adcxq %r10, %r8",
-                    concat!("adoxq ", stringify!($last), "({dst}), %r8"),
-                    concat!("movq %r8, ", stringify!($last), "({dst})"),
-                    "movq $0, %r11",
-                    "adcxq %r11, %r9",
-                    "adoxq %r11, %r9",
-                    "movq %r9, {carry_hi}",
+                    concat!("mulxq ", stringify!($last), "({src}), %r8, %r9"),       // Final odd limb multiply
+                    "adcxq %r10, %r8",                            // r8 += previous high + CF
+                    concat!("adoxq ", stringify!($last), "({dst}), %r8"),            // r8 += dst[last] + OF
+                    concat!("movq %r8, ", stringify!($last), "({dst})"),            // Store dst[last]
+                    "movq $0, %r11",                              // Zero r11 for carry flush
+                    "adcxq %r11, %r9",                            // Flush CF into r9
+                    "adoxq %r11, %r9",                            // Flush OF into r9
+                    "movq %r9, {carry_hi}",                       // Store final carry-out
                     carry_hi = out(reg) carry_hi,
                     src = in(reg) src,
                     dst = in(reg) dst,

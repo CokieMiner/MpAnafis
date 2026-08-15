@@ -1,7 +1,7 @@
 //! Educational textbook-RSA arithmetic demonstration.
 //!
 //! Demonstrates primality testing, large multiplication, modular inversion,
-//! modular exponentiation, and signed extended GCD using `mp-anafis`.
+//! modular exponentiation, and signed extended GCD using `MpAnafis`.
 //!
 //! **This example is not suitable for production cryptography.** It uses
 //! deterministic primes, textbook RSA without padding, and APIs that do not

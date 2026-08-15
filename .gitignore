@@ -11,4 +11,7 @@ local
 src/int/tuned_thresholds.rs
 __pycache__/
 # Machine-specific empirical oracle measurements (host nanoBench data)
+tools/oracle/data/
+tools/asm_analyzer/data/
 tools/_mca/
+

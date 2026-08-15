@@ -8,13 +8,17 @@ use core::ptr::{copy_nonoverlapping, write_bytes};
 
 use alloc::vec::Vec;
 
-use super::{Addition, ArchKernels, Division, InternalMpUint, LIMB_BITS, Limb};
+use super::{Addition, ArchKernels, Division, DoubleLimb, InternalMpUint, LIMB_BITS, Limb};
 
 impl Division {
     /// Divides a multi-limb numerator by a single limb divisor.
     ///
     /// Returns the remainder, writing the quotient limbs into `quotient_out`
     /// when `WRITE_QUOTIENT` is set.
+    ///
+    /// When `num_limbs.len() >= 2`, precomputes a single normalized reciprocal
+    /// outside the loop and uses fast 2-multiply reduction per limb instead of
+    /// repeated non-pipelined hardware divide instructions.
     ///
     /// # Safety
     ///
@@ -25,17 +29,63 @@ impl Division {
         quotient_out: &mut InternalMpUint,
     ) -> Limb {
         let len = num_limbs.len();
+        if len == 0 {
+            if WRITE_QUOTIENT {
+                *quotient_out = InternalMpUint::zero();
+            }
+            return 0;
+        }
         if WRITE_QUOTIENT {
             // SAFETY: the loop below writes all `len` elements before any read.
             let _ = unsafe { quotient_out.ensure_capacity_set_len_get_limbs(len) };
         }
+        if len == 1 {
+            // SAFETY: len is 1.
+            let limb = unsafe { *num_limbs.get_unchecked(0) };
+            // SAFETY: den_v is non-zero (caller contract); rem_hi is 0 < den_v.
+            let (q_val, rem) = unsafe { ArchKernels::divrem_1_unchecked(limb, 0, den_v) };
+            if WRITE_QUOTIENT {
+                // SAFETY: quotient_out has capacity for len=1 initialized above.
+                unsafe {
+                    *quotient_out.limbs_mut().get_unchecked_mut(0) = q_val;
+                }
+                quotient_out.normalize();
+            }
+            return rem;
+        }
+
+        #[allow(
+            clippy::as_conversions,
+            clippy::cast_possible_truncation,
+            reason = "leading_zeros() is always in 0..LIMB_BITS"
+        )]
+        let shift = den_v.leading_zeros() as usize;
+        let d_norm = den_v << shift;
+
+        // Precompute reciprocal v = floor((2^(2W) - 1) / d_norm) - 2^W
+        // SAFETY: d_norm has MSB set, so !d_norm < d_norm, satisfying the divrem_1 contract.
+        let (reciprocal, _) =
+            unsafe { ArchKernels::divrem_1_unchecked(Limb::MAX, !d_norm, d_norm) };
+
         let mut rem: Limb = 0;
         for i in (0..len).rev() {
             // SAFETY: i is always within bounds [0, len)
             let limb = unsafe { *num_limbs.get_unchecked(i) };
-            // SAFETY: divisor den_v is non-zero (caller contract); rem < den_v holds by induction
-            let (q_val, new_rem) = unsafe { ArchKernels::divrem_1_unchecked(limb, rem, den_v) };
-            rem = new_rem;
+            let (u1, u0) = if shift == 0 {
+                (rem, limb)
+            } else {
+                let u1 = (rem << shift) | (limb >> (LIMB_BITS.wrapping_sub(shift)));
+                let u0 = limb << shift;
+                (u1, u0)
+            };
+
+            let (q_val, new_rem_norm) = divrem_2by1_reciprocal(u1, u0, d_norm, reciprocal);
+            rem = if shift == 0 {
+                new_rem_norm
+            } else {
+                new_rem_norm >> shift
+            };
+
             if WRITE_QUOTIENT {
                 // SAFETY: `quotient_out` was initialized to `len` limbs above and
                 // the reversed loop keeps `i` in `0..len`.
@@ -246,4 +296,61 @@ impl Division {
             "division normalization expects normalized nonzero input when shift is nonzero"
         );
     }
+}
+
+/// Divides a 2-limb numerator `(u1 << LIMB_BITS) | u0` by normalized divisor `d`
+/// using precomputed reciprocal `v = floor((2^(2W) - 1) / d) - 2^W`.
+///
+/// Preconditions: `u1 < d` and `d >= (1 << (LIMB_BITS - 1))`.
+#[allow(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless,
+    clippy::inline_always,
+    reason = "DoubleLimb widening, Limb truncation, and inline step are mathematically bounded in the division inner loop"
+)]
+#[inline(always)]
+fn divrem_2by1_reciprocal(u1: Limb, u0: Limb, d: Limb, v: Limb) -> (Limb, Limb) {
+    debug_assert!(
+        u1 < d,
+        "high numerator must be strictly less than normalized divisor"
+    );
+    debug_assert!(
+        d >= (1 << (LIMB_BITS.wrapping_sub(1))),
+        "divisor must be normalized with most significant bit set"
+    );
+
+    // 1. q_est = u1 + high_word(v * u1 + u0)
+    let prod = (v as DoubleLimb).wrapping_mul(u1 as DoubleLimb);
+    let p1 = (prod >> LIMB_BITS) as Limb;
+    let p0 = prod as Limb;
+
+    let (_sum0, c0) = p0.overflowing_add(u0);
+    let mut q_est = u1.wrapping_add(p1).wrapping_add(usize::from(c0));
+
+    // 2. qd = q_est * d
+    let qd = (q_est as DoubleLimb).wrapping_mul(d as DoubleLimb);
+    let qd_hi = (qd >> LIMB_BITS) as Limb;
+    let qd_lo = qd as Limb;
+
+    // r0 = u0 - qd_lo, r1 = u1 - qd_hi - borrow
+    let (mut r0, b0) = u0.overflowing_sub(qd_lo);
+    let (r1, _) = u1.wrapping_sub(qd_hi).overflowing_sub(usize::from(b0));
+
+    if r1 == Limb::MAX {
+        // r1 is -1 => q_est was 1 too high
+        q_est = q_est.wrapping_sub(1);
+        r0 = r0.wrapping_add(d);
+    } else {
+        // r1 >= 0: adjust while remainder >= d
+        let mut r_full = ((r1 as DoubleLimb) << LIMB_BITS) | (r0 as DoubleLimb);
+        let d_wide = d as DoubleLimb;
+        while r_full >= d_wide {
+            q_est = q_est.wrapping_add(1);
+            r_full = r_full.wrapping_sub(d_wide);
+        }
+        r0 = r_full as Limb;
+    }
+
+    (q_est, r0)
 }

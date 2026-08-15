@@ -1,10 +1,10 @@
-# Contributing to `mp-anafis`
+# Contributing to `MpAnafis`
 
-Thank you for considering contributing to `mp-anafis`.
+Thank you for considering contributing to `MpAnafis` (`mp_anafis` on crates.io / `mp-anafis` on PyPI).
 
 Contributions of all sizes are welcome, including bug reports, minimized reproducers, documentation fixes, benchmarks, and partial patches.
 
-`mp-anafis` is built for high-performance arbitrary-precision arithmetic with strict correctness, inline small-value storage, and configurable precision semantics. The target-state architecture and safety rules in [`AGENTS.md`](AGENTS.md) are intentionally comprehensive, but **you do not need to satisfy every maintainer-only check before opening a pull request**.
+`MpAnafis` is built for high-performance arbitrary-precision arithmetic with strict correctness, inline small-value storage, and configurable precision semantics. The target-state architecture and safety rules in [`AGENTS.md`](AGENTS.md) are intentionally comprehensive, but **you do not need to satisfy every maintainer-only check before opening a pull request**.
 
 ## 1. Required before opening a PR
 

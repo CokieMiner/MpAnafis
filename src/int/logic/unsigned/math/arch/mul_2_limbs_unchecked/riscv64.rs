@@ -1,4 +1,7 @@
 //! RISC-V 64-bit write-only dual-row multiplication kernel.
+//!
+//! Evaluates `dst = src * (s0 + s1 * B)` in a single write-only pass using
+//! 64×64→128-bit multipliers (`mul`/`mulhu`) and branchless `sltu` carry capture.
 
 use core::arch::asm;
 
@@ -6,11 +9,24 @@ use super::Limb;
 
 /// Write `src * (s0 + s1 * B)` into `dst` without reading its old contents.
 ///
+/// Computes:
+///
+/// ```text
+///   dst[0..len+2] = src[0..len] × (s0 + s1 × 2^64)
+/// ```
+///
+/// # Microarchitectural Strategy
+///
+/// Evaluates two simultaneous multiplication rows in registers without memory reads of `dst`.
+/// Both products (`src[j] * s0` and `src[j] * s1`) are computed via `mul`/`mulhu`, and
+/// carries are merged branchlessly using `sltu`.
+///
 /// # Safety
 ///
-/// `src` must be valid for `len` limbs and `dst` for `len + 2` limbs. The
-/// input and output regions must not overlap. A zero length returns without
-/// dereferencing either pointer.
+/// - `dst` must point to a writable buffer of at least `len + 2` initialized 64-bit limbs.
+/// - `src` must point to a readable buffer of at least `len` initialized 64-bit limbs.
+/// - `src` and `dst` buffers must not overlap in memory (non-aliasing invariant).
+/// - `len` must reflect the allocated capacity of both buffers.
 #[allow(
     clippy::inline_always,
     reason = "Critical basecase initialization kernel; removing its call boundary matters for small products"
@@ -31,44 +47,47 @@ pub unsafe fn mul_2_limbs_unchecked(
     let carry1: Limb = 0;
     let pending1: Limb = 0;
 
-    // `mulhu` supplies the exact high half of each B-by-B product. The `sltu`
-    // results are single carry bits, so adding them to the corresponding high
-    // halves maintains carry0, carry1 < B. The final pair therefore occupies
-    // exactly dst[len..len+2].
-    // SAFETY: the caller guarantees the source and destination spans. The
-    // loop reads exactly src[0..len], writes dst[0..len], and the epilogue
-    // writes dst[len..len+2].
+    // SAFETY:
+    // 1. `dst` is valid for writes of `len + 2` 64-bit `Limb` elements.
+    // 2. `src` is valid for reads of `len` 64-bit `Limb` elements.
+    // 3. Pointer offsets remain within allocated bounds.
+    // 4. Memory spans are non-overlapping.
     unsafe {
         asm!(
+            // Main dual-row multiplication loop
             "1:",
-            "ld {value}, 0({src})",
+            "ld {value}, 0({src})",                      // Load src[j]
 
-            "mul {lo0}, {value}, {s0}",
-            "mulhu {hi0}, {value}, {s0}",
-            "add {sum0}, {lo0}, {carry0}",
-            "sltu {carry_bit0}, {sum0}, {carry0}",
-            "add {hi0}, {hi0}, {carry_bit0}",
-            "add {out}, {sum0}, {pending1}",
-            "sltu {carry_bit1}, {out}, {pending1}",
-            "add {carry0}, {hi0}, {carry_bit1}",
-            "sd {out}, 0({dst})",
+            // [Row 0 Multiplication & Carry Merge]
+            "mul {lo0}, {value}, {s0}",                  // Low 64 bits of src[j] * s0
+            "mulhu {hi0}, {value}, {s0}",                // High 64 bits of src[j] * s0
+            "add {sum0}, {lo0}, {carry0}",               // sum0 = lo0 + carry0
+            "sltu {carry_bit0}, {sum0}, {carry0}",       // carry_bit0 = 1 if addition wrapped
+            "add {hi0}, {hi0}, {carry_bit0}",            // hi0 += carry_bit0
+            "add {out}, {sum0}, {pending1}",             // out = sum0 + pending1 (finalized limb)
+            "sltu {carry_bit1}, {out}, {pending1}",      // carry_bit1 = 1 if second addition wrapped
+            "add {carry0}, {hi0}, {carry_bit1}",         // carry0 = hi0 + carry_bit1 (row 0 carry)
+            "sd {out}, 0({dst})",                        // Store finalized dst[j]
 
-            "mul {lo1}, {value}, {s1}",
-            "mulhu {hi1}, {value}, {s1}",
-            "add {pending1}, {lo1}, {carry1}",
-            "sltu {carry_bit2}, {pending1}, {carry1}",
-            "add {carry1}, {hi1}, {carry_bit2}",
+            // [Row 1 Multiplication & Pending Carry Accumulation]
+            "mul {lo1}, {value}, {s1}",                  // Low 64 bits of src[j] * s1
+            "mulhu {hi1}, {value}, {s1}",                // High 64 bits of src[j] * s1
+            "add {pending1}, {lo1}, {carry1}",           // pending1 = lo1 + carry1
+            "sltu {carry_bit2}, {pending1}, {carry1}",   // carry_bit2 = 1 if addition wrapped
+            "add {carry1}, {hi1}, {carry_bit2}",         // carry1 = hi1 + carry_bit2 (row 1 carry)
 
-            "addi {src}, {src}, 8",
-            "addi {dst}, {dst}, 8",
-            "addi {len}, {len}, -1",
-            "bnez {len}, 1b",
+            // Advance pointers and loop
+            "addi {src}, {src}, 8",                      // Advance src pointer by 8 bytes
+            "addi {dst}, {dst}, 8",                      // Advance dst pointer by 8 bytes
+            "addi {len}, {len}, -1",                     // Decrement remaining count
+            "bnez {len}, 1b",                            // Repeat while len != 0
 
-            "add {out}, {pending1}, {carry0}",
-            "sltu {carry_bit0}, {out}, {pending1}",
-            "add {carry1}, {carry1}, {carry_bit0}",
-            "sd {out}, 0({dst})",
-            "sd {carry1}, 8({dst})",
+            // [Epilogue: Store trailing high limbs]
+            "add {out}, {pending1}, {carry0}",           // out = pending1 + carry0
+            "sltu {carry_bit0}, {out}, {pending1}",      // Detect final wrap
+            "add {carry1}, {carry1}, {carry_bit0}",      // carry1 += carry_bit0
+            "sd {out}, 0({dst})",                        // Store dst[len]
+            "sd {carry1}, 8({dst})",                     // Store final high limb dst[len+1]
 
             src = inout(reg) src => _,
             dst = inout(reg) dst => _,

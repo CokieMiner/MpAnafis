@@ -1,7 +1,7 @@
-//! MIPS 64-bit architecture-specific limb operations.
+//! MIPS 64-bit fused multiply-subtract limb kernel.
 //!
-//! Uses `dmultu`/`mflo`/`mfhi` for efficient 64x64->128 multiplication and
-//! `daddu`/`dsubu` with `sltu` for carry/borrow tracking.
+//! Uses 64×64→128-bit hardware multipliers (`dmultu`/`mflo`/`mfhi`), non-trapping addition/subtraction
+//! (`daddu`/`dsubu`), and branchless carry/borrow capture via `sltu`.
 
 use core::arch::asm;
 
@@ -10,15 +10,27 @@ use super::Limb;
 /// Multiply `len` limbs from `src` by `scalar`, subtract the result from
 /// `dst`, and return the final `(carry, borrow)` pair.
 ///
+/// Computes:
+///
+/// ```text
+///   (borrow, carry, dst[0..len]) = dst[0..len] - (src[0..len] × scalar)
+/// ```
+///
+/// # Microarchitectural Strategy
+///
+/// `MIPS64` uses dedicated accumulator registers `HI` and `LO` for unsigned double-word multiplication
+/// (`dmultu`). Carries and borrows are tracked branchlessly without hardware condition flags using
+/// `sltu` (Set Less Than Unsigned) and non-trapping arithmetic `daddu`/`dsubu`. The loop is 2-way unrolled.
+///
 /// # Safety
 ///
-/// - `dst` must be valid for reads and writes of `len` elements and `src`
-///   for reads of `len` elements.
-/// - `dst` and `src` must not overlap, even partially: the kernel reads
-///   `src` while it writes `dst`.
+/// - `dst` must point to a readable and writable buffer of at least `len` initialized 64-bit limbs.
+/// - `src` must point to a readable buffer of at least `len` initialized 64-bit limbs.
+/// - `src` and `dst` buffers must not overlap in memory (non-aliasing invariant).
+/// - `len` must reflect the allocated capacity of both buffers.
 #[allow(
     clippy::inline_always,
-    reason = "Critical for peak assembly performance"
+    reason = "Critical for peak assembly performance in 64-bit MIPS multi-precision hot paths"
 )]
 #[inline(always)]
 pub unsafe fn sub_mul_limbs_unchecked(
@@ -31,65 +43,82 @@ pub unsafe fn sub_mul_limbs_unchecked(
     let mut borrow_out: Limb = 0;
     let chunks = len >> 1;
     let rem = len & 1;
-    // SAFETY: Assembly block accesses `len` elements from `dst` and `src`, which caller guarantees are valid.
+
+    // SAFETY:
+    // 1. `dst` is valid for writes of `len` 64-bit `Limb` elements.
+    // 2. `src` is valid for reads of `len` 64-bit `Limb` elements.
+    // 3. Pointer offsets (`0`, `8`, `16`) remain within `len * 8` bytes.
+    // 4. Memory spans are non-overlapping.
     unsafe {
         asm!(
             ".set noat",
-            "beqz {chunks}, 2f",
+            "beqz {chunks}, 2f",                         // If chunks == 0, skip to remainder loop (2f)
+
+            // Main 2-way unrolled loop body
             "1:",
-            "ld {s0}, 0({src})",
-            "ld {s1}, 8({src})",
-            "ld {d0}, 0({dst})",
-            "ld {d1}, 8({dst})",
 
-            "dmultu {s0}, {scalar}",
-            "mflo {p_lo0}",
-            "mfhi {p_hi0}",
-            "daddu {t_lo}, {p_lo0}, {carry_in}",
-            "sltu {ca}, {t_lo}, {p_lo0}",
-            "daddu {carry_in}, {p_hi0}, {ca}",
-            "dsubu {t0}, {d0}, {t_lo}",
-            "sltu {b0}, {d0}, {t_lo}",
-            "dsubu {t1}, {t0}, {borrow_out}",
-            "sltu {b1}, {t0}, {borrow_out}",
-            "or {borrow_out}, {b0}, {b1}",
-            "sd {t1}, 0({dst})",
+            // [Load 2 Source and 2 Destination Limbs]
+            "ld {s0}, 0({src})",                         // Load src[0]
+            "ld {s1}, 8({src})",                         // Load src[1]
+            "ld {d0}, 0({dst})",                         // Load dst[0]
+            "ld {d1}, 8({dst})",                         // Load dst[1]
 
-            "dmultu {s1}, {scalar}",
-            "mflo {p_lo1}",
-            "mfhi {p_hi1}",
-            "daddu {t_lo}, {p_lo1}, {carry_in}",
-            "sltu {ca}, {t_lo}, {p_lo1}",
-            "daddu {carry_in}, {p_hi1}, {ca}",
-            "dsubu {t0}, {d1}, {t_lo}",
-            "sltu {b0}, {d1}, {t_lo}",
-            "dsubu {t1}, {t0}, {borrow_out}",
-            "sltu {b1}, {t0}, {borrow_out}",
-            "or {borrow_out}, {b0}, {b1}",
-            "sd {t1}, 8({dst})",
+            // [Limb 0 Multiply-Subtract]
+            "dmultu {s0}, {scalar}",                     // HI:LO = src[0] * scalar (128-bit product)
+            "mflo {p_lo0}",                              // Extract low 64 bits from LO
+            "mfhi {p_hi0}",                              // Extract high 64 bits from HI
+            "daddu {t_lo}, {p_lo0}, {carry_in}",         // t_lo = p_lo0 + carry_in
+            "sltu {ca}, {t_lo}, {p_lo0}",                // ca = 1 if addition wrapped
+            "daddu {carry_in}, {p_hi0}, {ca}",           // carry_in = p_hi0 + ca
+            "dsubu {t0}, {d0}, {t_lo}",                  // t0 = d0 - t_lo
+            "sltu {b0}, {d0}, {t_lo}",                   // b0 = 1 if first subtraction underflowed
+            "dsubu {t1}, {t0}, {borrow_out}",            // t1 = t0 - borrow_out
+            "sltu {b1}, {t0}, {borrow_out}",             // b1 = 1 if second subtraction underflowed
+            "or {borrow_out}, {b0}, {b1}",               // borrow_out = b0 | b1 (combined borrow)
+            "sd {t1}, 0({dst})",                         // Store updated dst[0]
 
+            // [Limb 1 Multiply-Subtract]
+            "dmultu {s1}, {scalar}",                     // HI:LO = src[1] * scalar
+            "mflo {p_lo1}",                              // Extract low 64 bits
+            "mfhi {p_hi1}",                              // Extract high 64 bits
+            "daddu {t_lo}, {p_lo1}, {carry_in}",         // t_lo = p_lo1 + carry_in
+            "sltu {ca}, {t_lo}, {p_lo1}",                // ca = 1 if addition wrapped
+            "daddu {carry_in}, {p_hi1}, {ca}",           // carry_in = p_hi1 + ca
+            "dsubu {t0}, {d1}, {t_lo}",                  // t0 = d1 - t_lo
+            "sltu {b0}, {d1}, {t_lo}",                   // First borrow
+            "dsubu {t1}, {t0}, {borrow_out}",            // t1 = t0 - borrow
+            "sltu {b1}, {t0}, {borrow_out}",             // Second borrow
+            "or {borrow_out}, {b0}, {b1}",               // Combined borrow
+            "sd {t1}, 8({dst})",                         // Store updated dst[1]
+
+            // Advance pointers by 2 limbs (16 bytes) and loop
             "daddiu {src}, {src}, 16",
             "daddiu {dst}, {dst}, 16",
             "daddiu {chunks}, {chunks}, -1",
             "bnez {chunks}, 1b",
 
+            // Remainder processing (0 or 1 limb)
             "2:",
             "beqz {rem}, 4f",
+
+            // 1-limb tail
             "3:",
-            "ld {s0}, 0({src})",
-            "ld {d0}, 0({dst})",
-            "dmultu {s0}, {scalar}",
-            "mflo {p_lo0}",
-            "mfhi {p_hi0}",
-            "daddu {t_lo}, {p_lo0}, {carry_in}",
-            "sltu {ca}, {t_lo}, {p_lo0}",
-            "daddu {carry_in}, {p_hi0}, {ca}",
-            "dsubu {t0}, {d0}, {t_lo}",
-            "sltu {b0}, {d0}, {t_lo}",
-            "dsubu {t1}, {t0}, {borrow_out}",
-            "sltu {b1}, {t0}, {borrow_out}",
-            "or {borrow_out}, {b0}, {b1}",
-            "sd {t1}, 0({dst})",
+            "ld {s0}, 0({src})",                         // Load single src limb
+            "ld {d0}, 0({dst})",                         // Load single dst limb
+            "dmultu {s0}, {scalar}",                     // 64x64->128 product
+            "mflo {p_lo0}",                              // Extract LO
+            "mfhi {p_hi0}",                              // Extract HI
+            "daddu {t_lo}, {p_lo0}, {carry_in}",         // Add incoming carry
+            "sltu {ca}, {t_lo}, {p_lo0}",                // Detect carry out
+            "daddu {carry_in}, {p_hi0}, {ca}",           // Propagate carry
+            "dsubu {t0}, {d0}, {t_lo}",                  // Subtract product
+            "sltu {b0}, {d0}, {t_lo}",                   // First borrow
+            "dsubu {t1}, {t0}, {borrow_out}",            // Subtract previous borrow
+            "sltu {b1}, {t0}, {borrow_out}",             // Second borrow
+            "or {borrow_out}, {b0}, {b1}",               // Combine borrow bits
+            "sd {t1}, 0({dst})",                         // Store updated limb
+
+            // Tail completion
             "4:",
 
             carry_in = inout(reg) carry_in,

@@ -1,4 +1,7 @@
-//! x86-64 BMI2 shifted-high subtraction.
+//! x86-64 BMI2 shifted-high subtraction kernel.
+//!
+//! Evaluates $dst = dst - (src \gg \text{shift}) - \text{borrow}$ using flag-preserving BMI2
+//! `shrxq`/`shlxq` and `leaq` merging, keeping an uninterrupted `sbbq` borrow chain.
 
 use core::arch::asm;
 
@@ -6,22 +9,34 @@ use super::Limb;
 
 /// Subtract a cross-limb shifted source span from `dst`, including `borrow`.
 ///
-/// `SHLX`/`SHRX`, `LEA`, and the pointer updates preserve the carry flag, so
-/// one `SBB` chain runs across the complete span. The last source limb is
-/// handled separately because the mathematical limb above it is zero, not an
-/// addressable padding or Fermat guard limb.
+/// Computes:
+///
+/// ```text
+///   (borrow_out, dst[0..len]) = dst[0..len] - (src[0..len] >> shift) - borrow
+/// ```
+///
+/// # Microarchitectural Strategy
+///
+/// BMI2 shift instructions (`shrxq`, `shlxq`) and address computation (`leaq`) do not alter
+/// condition flags (specifically the Carry/Borrow Flag `CF`). This kernel interleaves cross-limb
+/// bit realignment directly into the middle of the `sbbq` subtract-with-borrow chain without
+/// needing register spills or carry reloading.
 ///
 /// # Safety
 ///
-/// - `dst` and `src` must each cover `len` limbs.
-/// - Their active spans must not overlap.
-/// - `0 < shift < Limb::BITS`.
+/// - `dst` and `src` must each point to readable/writable buffers of at least `len` initialized 64-bit limbs.
+/// - `src` and `dst` must not overlap in memory (non-aliasing invariant).
+/// - `0 < shift < 64`.
 /// - `borrow <= 1`.
-/// - The caller must ensure the CPU supports BMI2.
 #[allow(
     clippy::as_conversions,
     reason = "shift is strictly below 64 and therefore fits the x86-64 shift-count register"
 )]
+#[allow(
+    clippy::inline_always,
+    reason = "Critical division kernel inlined into multi-precision quotient estimation"
+)]
+#[inline(always)]
 pub unsafe fn sub_shifted_high_limbs_unchecked(
     dst: *mut Limb,
     src: *const Limb,
@@ -48,57 +63,65 @@ pub unsafe fn sub_shifted_high_limbs_unchecked(
     let right_shift = (Limb::BITS as usize).wrapping_sub(left_shift);
     let borrow_out: u8;
 
-    // SAFETY: the caller proves both `len`-limb spans and BMI2 availability.
-    // Each paired iteration reads three source limbs to produce two results;
-    // `pair_count = (len - 1) / 2` keeps that third read inside `src[..len]`.
-    // The optional even-length limb and the final zero-extended limb complete
-    // the span. Every instruction between SBB operations is flag-neutral.
+    // SAFETY:
+    // 1. `dst` is valid for writes of `len` `Limb` elements.
+    // 2. `src` is valid for reads of `len` `Limb` elements.
+    // 3. Pointer offsets (`0`, `8`, `16`) remain within `len * 8` bytes.
+    // 4. Memory spans are non-overlapping.
     unsafe {
         asm!(
-            "movq ({src_ptr}), %r8",
-            "btq $0, {borrow}",
-            "jrcxz 2f",
-            ".p2align 4",
+            "movq ({src_ptr}), %r8",                     // %r8 = src[0]
+            "btq $0, {borrow}",                          // Set CF = borrow bit (0 or 1)
+            "jrcxz 2f",                                  // If pair_count == 0, skip paired loop (2f)
+
+            // Main 2-limb paired unrolled loop body
             "1:",
-            "movq 8({src_ptr}), %r9",
-            "movq 16({src_ptr}), %r10",
-            "shrxq {right_shift}, %r8, %r11",
-            "shlxq {left_shift}, %r9, %r12",
-            "leaq (%r11,%r12), %r11",
-            "movq ({dst_ptr}), %r13",
-            "sbbq %r11, %r13",
-            "movq %r13, ({dst_ptr})",
-            "shrxq {right_shift}, %r9, %r11",
-            "shlxq {left_shift}, %r10, %r12",
-            "leaq (%r11,%r12), %r11",
-            "movq 8({dst_ptr}), %r13",
-            "sbbq %r11, %r13",
-            "movq %r13, 8({dst_ptr})",
-            "movq %r10, %r8",
-            "leaq 16({src_ptr}), {src_ptr}",
-            "leaq 16({dst_ptr}), {dst_ptr}",
-            "leaq -1(%rcx), %rcx",
-            "jrcxz 2f",
-            "jmp 1b",
+            "movq 8({src_ptr}), %r9",                    // Load src[i+1]
+            "movq 16({src_ptr}), %r10",                  // Load src[i+2]
+            "shrxq {right_shift}, %r8, %r11",            // %r11 = src[i] >> (64 - shift) (flag-preserving)
+            "shlxq {left_shift}, %r9, %r12",             // %r12 = src[i+1] << shift (flag-preserving)
+            "leaq (%r11,%r12), %r11",                    // %r11 = merged cross-limb word (flag-preserving)
+            "movq ({dst_ptr}), %r13",                    // Load dst[i]
+            "sbbq %r11, %r13",                           // dst[i] - r11 - CF -> updates CF (borrow)
+            "movq %r13, ({dst_ptr})",                    // Store updated dst[i]
+
+            "shrxq {right_shift}, %r9, %r11",            // %r11 = src[i+1] >> (64 - shift)
+            "shlxq {left_shift}, %r10, %r12",            // %r12 = src[i+2] << shift
+            "leaq (%r11,%r12), %r11",                    // %r11 = merged cross-limb word
+            "movq 8({dst_ptr}), %r13",                   // Load dst[i+1]
+            "sbbq %r11, %r13",                           // dst[i+1] - r11 - CF -> updates CF
+            "movq %r13, 8({dst_ptr})",                   // Store updated dst[i+1]
+
+            "movq %r10, %r8",                            // %r8 = src[i+2]
+            "leaq 16({src_ptr}), {src_ptr}",             // Advance src by 2 limbs (16 bytes)
+            "leaq 16({dst_ptr}), {dst_ptr}",             // Advance dst by 2 limbs (16 bytes)
+            "leaq -1(%rcx), %rcx",                       // Decrement %rcx pair counter (flag-preserving!)
+            "jrcxz 2f",                                  // If %rcx == 0, exit loop
+            "jmp 1b",                                    // Repeat loop
+
+            // Even-length extra limb handling
             "2:",
-            "movq {even_extra}, %rcx",
-            "jrcxz 3f",
-            "movq 8({src_ptr}), %r9",
-            "shrxq {right_shift}, %r8, %r11",
-            "shlxq {left_shift}, %r9, %r12",
-            "leaq (%r11,%r12), %r11",
-            "movq ({dst_ptr}), %r13",
-            "sbbq %r11, %r13",
-            "movq %r13, ({dst_ptr})",
-            "movq %r9, %r8",
-            "leaq 8({src_ptr}), {src_ptr}",
-            "leaq 8({dst_ptr}), {dst_ptr}",
+            "movq {even_extra}, %rcx",                   // %rcx = even_extra
+            "jrcxz 3f",                                  // If 0, skip to final limb (3f)
+            "movq 8({src_ptr}), %r9",                    // Load src[i+1]
+            "shrxq {right_shift}, %r8, %r11",            // %r11 = src[i] >> (64 - shift)
+            "shlxq {left_shift}, %r9, %r12",             // %r12 = src[i+1] << shift
+            "leaq (%r11,%r12), %r11",                    // Merged cross-limb word
+            "movq ({dst_ptr}), %r13",                    // Load dst[i]
+            "sbbq %r11, %r13",                           // Subtract with borrow
+            "movq %r13, ({dst_ptr})",                    // Store updated dst[i]
+            "movq %r9, %r8",                             // Update %r8
+            "leaq 8({src_ptr}), {src_ptr}",              // Advance src by 1 limb
+            "leaq 8({dst_ptr}), {dst_ptr}",              // Advance dst by 1 limb
+
+            // [Final zero-extended top limb]
             "3:",
-            "shrxq {right_shift}, %r8, %r11",
-            "movq ({dst_ptr}), %r13",
-            "sbbq %r11, %r13",
-            "movq %r13, ({dst_ptr})",
-            "setc {borrow_out}",
+            "shrxq {right_shift}, %r8, %r11",            // %r11 = top src limb >> (64 - shift)
+            "movq ({dst_ptr}), %r13",                    // Load top dst limb
+            "sbbq %r11, %r13",                           // Final subtraction with borrow
+            "movq %r13, ({dst_ptr})",                    // Store final dst limb
+            "setc {borrow_out}",                         // Extract final borrow bit (1 if CF=1, else 0)
+
             src_ptr = inout(reg) src_ptr => _,
             dst_ptr = inout(reg) dst_ptr => _,
             inout("rcx") pair_count => _,

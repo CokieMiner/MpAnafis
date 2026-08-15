@@ -1,22 +1,7 @@
 //! `PowerPC64` cross-limb shifted-high subtraction.
 //!
-//! POWER is the best-case target for this kernel: the borrow lives in `XER[CA]`
-//! while compares write a `CR` field, so the loop guard, the `CTR`-driven
-//! `bdnz`, and the shift/merge sequence cannot disturb the chain. One `subfe`
-//! chain therefore spans the whole subtraction with no per-limb borrow
-//! materialization, which is what the portable `overflowing_sub` form forces.
-//!
-//! ```text
-//!   subfic scratch, borrow, 0   // CA = 1 iff borrow == 0 ("no borrow")
-//!   ...
-//!   subfe  dst, shifted, dst    // dst = dst − shifted + CA − 1
-//!   ...
-//!   subfe  out, out, out        // out = CA − 1  (0 or −1)
-//!   neg    out, out             // out = 0 or 1
-//! ```
-//!
-//! The two shifted fragments occupy disjoint bit ranges, so the plain
-//! (non-recording) `or` merges them without touching `CR` or `CA`.
+//! Evaluates `dst -= ((src >> (64 - shift)) | (src[+1] << shift)) + borrow`
+//! using `subfic`/`subfe` borrow chains and non-flag-setting 64-bit shifts (`srd`/`sld`).
 
 use core::arch::asm;
 
@@ -24,15 +9,25 @@ use super::Limb;
 
 /// Subtract a cross-limb shifted source span from `dst`, including `borrow`.
 ///
-/// For every `i < len`, the subtrahend limb is
-/// `(src[i] >> (Limb::BITS - shift)) | (src[i + 1] << shift)`, with the
-/// out-of-range `src[len]` term defined as zero.
+/// For every `i < len`, the subtrahend limb is:
+///
+/// ```text
+///   (src[i] >> (64 - shift)) | (src[i + 1] << shift)
+/// ```
+///
+/// with the out-of-range `src[len]` term defined as zero.
+///
+/// # Microarchitectural Strategy
+///
+/// On PowerPC, the borrow lives in `XER[CA]` while comparisons write `CR` fields.
+/// The loop counter, hardware CTR looping (`bdnz`), and non-recording `srd`/`sld`/`or`
+/// leave `XER[CA]` untouched, allowing an uninterrupted single borrow chain.
 ///
 /// # Safety
 ///
-/// - `dst` and `src` must each cover `len` limbs.
-/// - Their active spans must not overlap.
-/// - `0 < shift < Limb::BITS`.
+/// - `dst` and `src` must each point to valid memory for at least `len` initialized 64-bit limbs.
+/// - `src` and `dst` buffers must not overlap in memory (non-aliasing invariant).
+/// - `0 < shift < 64`.
 /// - `borrow <= 1`.
 #[allow(
     clippy::inline_always,
@@ -58,47 +53,50 @@ pub unsafe fn sub_shifted_high_limbs_unchecked(
 
     let dst_ptr = dst;
     let src_ptr = src;
-    // The final limb is handled outside the loop: the mathematical limb above
-    // it is zero, not an addressable padding limb.
     let paired = len.wrapping_sub(1);
     let left_shift = shift as Limb;
     let right_shift = (Limb::BITS as Limb).wrapping_sub(left_shift);
     let borrow_out: Limb;
 
-    // SAFETY: the caller proves both `len`-limb spans. The loop runs
-    // `len - 1` times and reads `src[i + 1]`, so the last read is `src[len-1]`;
-    // the closing block consumes that limb with a zero high neighbour.
+    // SAFETY:
+    // 1. `dst` is valid for reads and writes of `len` 64-bit `Limb` elements.
+    // 2. `src` is valid for reads of `len` 64-bit `Limb` elements.
+    // 3. Pointer offsets remain within allocated bounds.
+    // 4. Memory spans are non-overlapping.
     unsafe {
         asm!(
-            "ld {prev}, 0({src_ptr})",
-            "subfic {borrow_out}, {borrow}, 0",
-            // Pre-bias dst_ptr so ldu loads the correct word on the first iteration
-            // (must be before the beq so the epilogue sees the bias for len==1 too)
-            "addi {dst_ptr}, {dst_ptr}, -8",
-            "cmpldi {paired}, 0",
-            "beq 1f",
-            "mtctr {paired}",
+            "ld {prev}, 0({src_ptr})",                   // Prime pipeline: load src[0]
+            "subfic {borrow_out}, {borrow}, 0",          // CA = 1 iff borrow == 0 ("no borrow")
+            "addi {dst_ptr}, {dst_ptr}, -8",             // Pre-bias dst_ptr for ldu pre-increment
+            "cmpldi {paired}, 0",                        // Check if len == 1 (paired == 0)
+            "beq 1f",                                    // If len == 1, skip main loop (1f)
+            "mtctr {paired}",                            // Load paired count into hardware CTR register
+
             ".p2align 4",
+            // Main shifted subtraction loop
             "2:",
-            "ldu {next}, 8({src_ptr})",
-            "srd {shifted}, {prev}, {right_shift}",
-            "sld {high}, {next}, {left_shift}",
-            "or {shifted}, {shifted}, {high}",
-            "ldu {minuend}, 8({dst_ptr})",
-            "subfe {minuend}, {shifted}, {minuend}",
-            "std {minuend}, 0({dst_ptr})",
-            "mr {prev}, {next}",
-            "bdnz 2b",
+            "ldu {next}, 8({src_ptr})",                  // Load next src limb and advance pointer (+8)
+            "srd {shifted}, {prev}, {right_shift}",      // shifted = prev >> (64 - shift)
+            "sld {high}, {next}, {left_shift}",          // high = next << shift
+            "or {shifted}, {shifted}, {high}",           // Merge shifted bit fragments
+            "ldu {minuend}, 8({dst_ptr})",               // Load dst[j] and advance pointer (+8)
+            "subfe {minuend}, {shifted}, {minuend}",     // minuend = minuend - shifted + CA - 1
+            "std {minuend}, 0({dst_ptr})",               // Store updated dst[j]
+            "mr {prev}, {next}",                         // prev = next for next iteration
+            "bdnz 2b",                                   // Decrement CTR and branch if != 0
+
+            // Final zero-extended high limb (src[len] is mathematically zero)
             "1:",
-            "srd {shifted}, {prev}, {right_shift}",
-            "ld {minuend}, 8({dst_ptr})",
-            "subfe {minuend}, {shifted}, {minuend}",
-            "std {minuend}, 8({dst_ptr})",
-            "li {borrow_out}, 0",
-            "subfe {borrow_out}, {borrow_out}, {borrow_out}",
-            "neg {borrow_out}, {borrow_out}",
-            // `reg_nonzero` is required wherever a register is a base or an
-            // `addi` source, because PowerPC reads r0 as the literal zero.
+            "srd {shifted}, {prev}, {right_shift}",      // Final high bits from previous limb
+            "ld {minuend}, 8({dst_ptr})",                // Load last dst limb
+            "subfe {minuend}, {shifted}, {minuend}",     // Final subtraction with borrow
+            "std {minuend}, 8({dst_ptr})",               // Store last dst limb
+
+            // Extract borrow: subfe on zero gives (CA - 1), negating gives 0 or 1
+            "li {borrow_out}, 0",                        // borrow_out = 0
+            "subfe {borrow_out}, {borrow_out}, {borrow_out}", // borrow_out = CA - 1 (0 or -1)
+            "neg {borrow_out}, {borrow_out}",            // borrow_out = -(CA - 1) (0 or 1)
+
             src_ptr = inout(reg_nonzero) src_ptr => _,
             dst_ptr = inout(reg_nonzero) dst_ptr => _,
             paired = inout(reg) paired => _,
@@ -113,9 +111,9 @@ pub unsafe fn sub_shifted_high_limbs_unchecked(
             minuend = out(reg) _,
             out("ctr") _,
             out("xer") _,
-            out("cr0") _,
             options(nostack)
         );
     }
+
     borrow_out
 }

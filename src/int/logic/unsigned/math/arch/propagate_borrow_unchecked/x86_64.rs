@@ -1,22 +1,39 @@
 //! `x86_64` borrow propagation kernel (inline assembly).
 //!
 //! Resolves the overwhelmingly common first-limb stop before entering assembly,
-//! then uses CF via `sbbq` in a 4-way unrolled loop for a genuine borrow chain.
+//! then uses fast `subq $1`/`jnc` early-exit propagation for extended borrow chains.
 
 use core::arch::asm;
 
 use super::Limb;
 
-/// Propagate a borrow through a raw limb pointer slice.
+/// Propagate a binary borrow through a raw limb pointer slice.
+///
+/// Computes:
+///
+/// ```text
+///   (borrow_out, dst[0..len]) = dst[0..len] - borrow
+/// ```
+///
+/// # Microarchitectural Strategy
+///
+/// Borrow propagation terminates at the first limb that does not underflow (i.e. where `dst[i] != 0`).
+/// Statistically, $1 - 2^{-64}$ of all borrow propagations stop at limb 0 without entering assembly.
+/// For rare borrow chains traversing multiple zero limbs, the assembly loop uses `subq $1` with
+/// jump-if-not-carry (`jnc`) to break immediately on the first non-underflowing limb.
 ///
 /// # Safety
 ///
-/// `dst` must be valid for reading and writing `len` elements of type `Limb`.
+/// - `dst` must point to a readable and writable buffer of at least `len` initialized 64-bit limbs.
+/// - `borrow` must be a valid binary borrow ($\in \{0, 1\}$).
 #[allow(
     unsafe_code,
     reason = "Hardware inline assembly natively requires unsafe code"
 )]
-#[allow(clippy::inline_always, reason = "Critical for peak performance")]
+#[allow(
+    clippy::inline_always,
+    reason = "Critical for peak performance in borrow propagation hot paths"
+)]
 #[inline(always)]
 pub unsafe fn propagate_borrow_unchecked(dst: *mut Limb, len: usize, mut borrow: Limb) -> Limb {
     debug_assert!(borrow <= 1, "borrow propagation accepts a binary borrow");
@@ -42,43 +59,32 @@ pub unsafe fn propagate_borrow_unchecked(dst: *mut Limb, len: usize, mut borrow:
     // SAFETY: len > 1 proves the one-limb offset remains within the allocation.
     let tail_dst = unsafe { dst.add(1) };
     let tail_len = len.wrapping_sub(1);
-    let chunks = tail_len >> 2;
-    let rem = tail_len & 3;
-    let idx = 0_usize;
     // SAFETY: Caller guarantees `tail_dst` is valid for `tail_len` elements.
     unsafe {
         asm!(
-            "btq $0, {borrow}",
-            "decq {chunks}",
-            "js 1f",
-            ".p2align 4",
-            "2:",
-            "sbbq $0, ({dst}, {idx}, 8)",
-            "sbbq $0, 8({dst}, {idx}, 8)",
-            "sbbq $0, 16({dst}, {idx}, 8)",
-            "sbbq $0, 24({dst}, {idx}, 8)",
-            "jnc 5f",
-            "leaq 4({idx}), {idx}",
-            "decq {chunks}",
-            "jns 2b",
-            "1:",
-            "decq {rem}",
-            "js 5f",
-            ".p2align 4",
-            "3:",
-            "sbbq $0, ({dst}, {idx}, 8)",
-            "jnc 5f",
-            "leaq 1({idx}), {idx}",
-            "decq {rem}",
-            "jns 3b",
-            "5:",
-            "movl $0, {borrow:e}",
-            "adcq {borrow}, {borrow}",
-            borrow = inout(reg) borrow,
-            dst = in(reg) tail_dst,
-            idx = inout(reg) idx => _,
-            chunks = inout(reg) chunks => _,
-            rem = inout(reg) rem => _,
+            "1:",                                        // Loop head label
+            "movq ({dst}), %rax",                        // Load dst[i]
+            "subq $1, %rax",                             // Subtract 1 from limb (0 -> -1 sets CF=1)
+            "movq %rax, ({dst})",                        // Write updated limb back to dst[i]
+            "jnc 2f",                                    // If no borrow occurred (CF=0), borrow absorbed! Exit early
+            "leaq 8({dst}), {dst}",                      // Advance pointer by 8 bytes
+            "decq {len}",                                // Decrement remaining limb count
+            "jnz 1b",                                    // Repeat while len != 0
+
+            // All limbs underflowed from zero to MAX: final borrow out is 1
+            "movq $1, {borrow}",                         // Set borrow out to 1
+            "jmp 3f",                                    // Jump to completion label
+
+            // Early exit: borrow absorbed by non-zero limb
+            "2:",                                        // Early exit label
+            "movq $0, {borrow}",                         // Set borrow out to 0
+
+            // Completion
+            "3:",                                        // Completion label
+            borrow = out(reg) borrow,
+            dst = inout(reg) tail_dst => _,
+            len = inout(reg) tail_len => _,
+            out("rax") _,
             options(nostack, att_syntax)
         );
     }

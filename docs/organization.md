@@ -1,4 +1,4 @@
-# mp-anafis Source Organization
+# MpAnafis Source Organization
 
 This guide describes the repository's current module boundaries. It is a
 maintenance contract: when the code and this document disagree, fix both in the

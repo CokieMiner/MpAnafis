@@ -1,4 +1,4 @@
-//! Tour of the `mp-anafis` API across precision, bitwise,
+//! Tour of the `MpAnafis` API across precision, bitwise,
 //! roots, division modes, serialization, signed arithmetic,
 //! and modular arithmetic.
 //!

@@ -10,10 +10,11 @@
 //! for lack of a backend: RISC-V, `LoongArch`, MIPS, and wasm have no hardware
 //! carry flag at all, so the borrow must be an explicit comparison value, which
 //! is exactly what LLVM already emits; m68k `subx` exists but m68k shifts write
-//! the X flag and break the chain; ARM32 keeps flags through the body but has
+//! the X flag and break the chain; `ARM32` keeps flags through the body but has
 //! no flag-free loop branch, so it would have to spill and reload the borrow
-//! every iteration; SPARC64 would qualify (`subxcc` with `brnz`) but its inline
-//! assembly is not available on stable Rust.
+//! every iteration; `SPARC64` lacks a 64-bit borrow-consuming subtract (`subccc`
+//! only reads `%icc.c`), while 32-bit `SPARC` has `subxcc` but lacks a flag-free
+//! loop branch.
 
 #![allow(
     unsafe_code,

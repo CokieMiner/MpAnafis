@@ -1,4 +1,4 @@
-//! Public API benchmarks comparing `mp-anafis` against Rug/GMP across the
+//! Public API benchmarks comparing `MpAnafis` against Rug/GMP across the
 //! public method surface documented in `docs/int/api-inventory.md`.
 //!
 //! # Layout

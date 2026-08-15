@@ -1,30 +1,37 @@
-//! `s390x` fused dual-row multiply-add kernel.
+//! `s390x` (IBM Z z/Architecture) fused dual-row multiply-add kernel.
+//!
+//! Evaluates two simultaneous multiplication rows (`dst += src * s0 + (src * s1 << 64)`)
+//! using `mlgr` (even/odd register pair `%r2:%r3`) and `algr`/`alcgr` carry propagation.
 
 use core::arch::asm;
 
 use super::Limb;
 
-/// Fused `add_mul_2` kernel for `s390x` (IBM Z).
+/// Fused dual-row multiply-add kernel for `s390x` (IBM Z).
 ///
 /// Computes:
+///
 /// ```text
-/// dst[0..len] += src[0..len] * s0 + c0
-/// dst[1..len+1] += src[0..len] * s1 + c1
+///   dst[0..len] += src[0..len] * s0 + c0
+///   dst[1..len+1] += src[0..len] * s1 + c1
 /// ```
 ///
-/// Utilizes `mlgr` for 64x64->128-bit multiplication (mapped to `%r2:%r3`)
-/// and `algr`/`alcgr` for carry-propagating accumulation.
+/// # Microarchitectural Strategy
+///
+/// `mlgr` requires the multiplicand in `%r3` and stores the 128-bit product in `%r2:%r3`.
+/// The kernel evaluates both multiplication rows (`s0` and `s1`), chains additions using `algr`
+/// (Add Logical) and `alcgr` (Add Logical with Carry), and loops via 1-cycle `brctg`.
 ///
 /// # Safety
 ///
-/// - `dst` must be valid for reads and writes of `len + 1` elements.
-/// - `src` must be valid for reads of `len` elements.
-/// - **Aliasing**: `src[0..len]` must NOT overlap with `dst[1..len+1]`.  The
-///   loop reads `src[j]`, then reads and writes `dst[j]` and `dst[j+1]`,
-///   then advances both pointers by 1 limb.  If `dst` and `src` alias with
-///   offset 1, the read of `src[j+1]` on the next iteration may see a
-///   stale or partially updated value.
-#[allow(clippy::inline_always, reason = "Performance critical inner loop")]
+/// - `dst` must point to a readable and writable buffer of at least `len + 1` initialized 64-bit limbs.
+/// - `src` must point to a readable buffer of at least `len` initialized 64-bit limbs.
+/// - `src` and `dst` buffers must not overlap in memory (non-aliasing invariant).
+/// - `len` must reflect the allocated capacity of both buffers.
+#[allow(
+    clippy::inline_always,
+    reason = "Critical inner loop for 2-row multi-precision Karatsuba and basecase multiplication"
+)]
 #[inline(always)]
 pub unsafe fn add_mul_2_limbs_unchecked(
     dst: *mut Limb,
@@ -41,41 +48,46 @@ pub unsafe fn add_mul_2_limbs_unchecked(
         return (0, 0);
     }
 
-    // SAFETY: deferred to caller per the doc comment above.
+    // SAFETY:
+    // 1. `dst` is valid for reads and writes of `len + 1` 64-bit `Limb` elements.
+    // 2. `src` is valid for reads of `len` 64-bit `Limb` elements.
+    // 3. Pointer advances remain within allocated bounds.
+    // 4. Memory spans are non-overlapping.
     unsafe {
         asm!(
             ".p2align 4",
+            // Main dual-row accumulation loop
             "1:",
-            // Read val = src[0]
-            "lg {val}, 0({src})",
-            // Read dst0 = dst[0]
-            "lg {dst0}, 0({dst})",
-            // Read dst1 = dst[1]
-            "lg {dst1}, 8({dst})",
 
-            // --- s0 chain: dst[j] += val * s0 + c0 ---
-            "lgr %r3, {val}",
-            "mlgr %r2, {s0}",           // r2:r3 = val * s0
-            "algr %r3, {c0}",           // r3 += c0, sets CC
-            "alcgr %r2, {zero}",        // r2 += 0 + CC
-            "algr {dst0}, %r3",         // dst0 += r3, sets CC
-            "alcgr %r2, {zero}",        // r2 += 0 + CC
-            "lgr {c0}, %r2",            // c0 = r2
-            "stg {dst0}, 0({dst})",
+            // [Load Source and Two Destination Limbs]
+            "lg {val}, 0({src})",                        // Load src[j]
+            "lg {dst0}, 0({dst})",                       // Load dst[j]
+            "lg {dst1}, 8({dst})",                       // Load dst[j+1]
 
-            // --- s1 chain: dst[j+1] += val * s1 + c1 ---
-            "lgr %r3, {val}",
-            "mlgr %r2, {s1}",           // r2:r3 = val * s1
-            "algr %r3, {c1}",           // r3 += c1, sets CC
-            "alcgr %r2, {zero}",        // r2 += 0 + CC
-            "algr {dst1}, %r3",         // dst1 += r3, sets CC
-            "alcgr %r2, {zero}",        // r2 += 0 + CC
-            "lgr {c1}, %r2",            // c1 = r2
-            "stg {dst1}, 8({dst})",
+            // [Row 0 Carry Chain: dst[j] += val * s0 + c0]
+            "lgr %r3, {val}",                            // %r3 = src[j]
+            "mlgr %r2, {s0}",                            // %r2:%r3 = %r3 * s0 (128-bit product)
+            "algr %r3, {c0}",                            // %r3 += c0, set Condition Code (CC)
+            "alcgr %r2, {zero}",                         // %r2 += CC carry + 0
+            "algr {dst0}, %r3",                          // dst0 += %r3, set CC
+            "alcgr %r2, {zero}",                         // %r2 += CC carry + 0
+            "lgr {c0}, %r2",                             // c0 = %r2 (row 0 carry)
+            "stg {dst0}, 0({dst})",                      // Store finalized dst[j]
 
-            "la {src}, 8({src})",
-            "la {dst}, 8({dst})",
-            "brctg {len}, 1b",          // len--, loop if != 0
+            // [Row 1 Carry Chain: dst[j+1] += val * s1 + c1]
+            "lgr %r3, {val}",                            // %r3 = src[j]
+            "mlgr %r2, {s1}",                            // %r2:%r3 = %r3 * s1
+            "algr %r3, {c1}",                            // %r3 += c1, set CC
+            "alcgr %r2, {zero}",                         // %r2 += CC carry + 0
+            "algr {dst1}, %r3",                          // dst1 += %r3, set CC
+            "alcgr %r2, {zero}",                         // %r2 += CC carry + 0
+            "lgr {c1}, %r2",                             // c1 = %r2 (row 1 carry)
+            "stg {dst1}, 8({dst})",                      // Store intermediate dst[j+1]
+
+            // Advance pointers and loop via CTR
+            "la {src}, 8({src})",                        // Advance src pointer by 8 bytes
+            "la {dst}, 8({dst})",                        // Advance dst pointer by 8 bytes
+            "brctg {len}, 1b",                           // Decrement len and branch if > 0
 
             c0 = inout(reg) c0,
             c1 = inout(reg) c1,
