@@ -21,14 +21,11 @@ use core::hint::black_box;
 
 use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
 use mp_anafis::tune_api::tier::{
-    Limb,
-    transform::{
-        bench_ssa_mul_forced_plan, bench_ssa_mul_forced_plan_scratch_len, bench_ssa_mul_production,
-        bench_ssa_mul_scratch_len,
-    },
+    Tuner,
+    transform::{SsaGeometryPolicy, SsaScratchPolicy, TransformExecutor},
 };
 
-use crate::shared::operands_pair;
+use crate::shared::{gmp_pair_reference, operands_pair, validate_and_warm_product};
 
 const PROBES: [(usize, usize, u32); 40] = [
     (10000, 7500, 0),
@@ -77,33 +74,26 @@ const PROBES: [(usize, usize, u32); 40] = [
 fn geometry(bencher: divan::Bencher<'_, '_>, probe: (usize, usize, u32)) {
     let (larger_len, smaller_len, exponent) = probe;
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
-    if exponent == 0 {
-        let mut scratch = vec![Limb::MIN; bench_ssa_mul_scratch_len(larger_len, smaller_len)];
-        bencher.bench_local(|| {
-            bench_ssa_mul_production(
-                black_box(&mut destination),
-                black_box(&larger),
-                black_box(&smaller),
-                black_box(&mut scratch),
-            );
-        });
-        return;
-    }
-    let Some(scratch_len) =
-        bench_ssa_mul_forced_plan_scratch_len(larger_len, smaller_len, exponent)
-    else {
+    let geometry = if exponent == 0 {
+        SsaGeometryPolicy::Production
+    } else {
+        SsaGeometryPolicy::ForcedExponent(exponent)
+    };
+    let Some(mut runner) = Tuner::bench_ssa_multiplication(
+        geometry,
+        TransformExecutor::Sequential,
+        SsaScratchPolicy::Reusable,
+        &larger,
+        &smaller,
+    ) else {
         return;
     };
-    let mut scratch = vec![Limb::MIN; scratch_len];
-    bencher.bench_local(|| {
-        bench_ssa_mul_forced_plan(
-            black_box(&mut destination),
-            black_box(&larger),
-            black_box(&smaller),
-            black_box(exponent),
-            black_box(&mut scratch),
-        );
+    let expected = gmp_pair_reference(&larger, &smaller);
+    validate_and_warm_product(&expected, "SSA geometry product", |candidate| {
+        runner.prepare(candidate).run();
     });
+    let mut prepared = runner.prepare(&mut destination);
+    bencher.bench_local(|| black_box(&mut prepared).run());
 }
 
 #[divan::bench(args = PROBES)]

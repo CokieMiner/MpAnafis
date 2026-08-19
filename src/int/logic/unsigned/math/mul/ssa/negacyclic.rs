@@ -183,11 +183,14 @@ impl NegacyclicPlan {
         // initialized limbs, so these prefixes contain the complete data
         // widths. The two coefficients and the product buffer are disjoint
         // partitions of `scratch`.
+        let left_quotient_input = unsafe { left_quotient.get_unchecked(..self.quotient_len) };
+        // SAFETY: the right coefficient has the same complete initialized prefix.
+        let right_quotient_input = unsafe { right_quotient.get_unchecked(..self.quotient_len) };
         Multiplication::execute_plan(
             self.quotient_plan,
             quotient_product,
-            unsafe { left_quotient.get_unchecked(..self.quotient_len) },
-            unsafe { right_quotient.get_unchecked(..self.quotient_len) },
+            left_quotient_input,
+            right_quotient_input,
             work,
         );
         // SAFETY: the quotient product has `2 * quotient_len` limbs and `left`
@@ -205,11 +208,14 @@ impl NegacyclicPlan {
         // initialized limbs, so these prefixes contain the complete data
         // widths. Both prefixes and the product buffer are disjoint scratch
         // partitions.
+        let left_small_input = unsafe { left_small.get_unchecked(..self.block_len) };
+        // SAFETY: the right coefficient has the same complete initialized prefix.
+        let right_small_input = unsafe { right_small.get_unchecked(..self.block_len) };
         Multiplication::execute_plan(
             self.small_plan,
             small_full_product,
-            unsafe { left_small.get_unchecked(..self.block_len) },
-            unsafe { right_small.get_unchecked(..self.block_len) },
+            left_small_input,
+            right_small_input,
             small_tower_scratch,
         );
         // SAFETY: `small_product` is one complete coefficient and the exact

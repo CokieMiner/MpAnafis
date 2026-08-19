@@ -9,21 +9,7 @@ use super::{
 #[cfg(not(target_pointer_width = "16"))]
 use super::{SQR_SSA_THRESHOLD, SSA_THRESHOLD, Ssa};
 
-/// Select the owned-result strategy, including its benchmark-backed fixed
-/// Karatsuba stack specializations.
 impl Multiplication {
-    #[inline]
-    pub fn select_owned_plan(len_a: usize, len_b: usize) -> MulPlan {
-        let production_plan = Self::select_plan(len_a, len_b, TierCeiling::Full);
-        if matches!(production_plan, MulPlan::Schoolbook | MulPlan::Lopsided) {
-            return production_plan;
-        }
-        if len_a == len_b && matches!(len_a, 20 | 32 | 48) {
-            return MulPlan::Karatsuba;
-        }
-        production_plan
-    }
-
     /// Select a multiplication strategy whose conventional tier cannot exceed
     /// `ceiling`.
     ///

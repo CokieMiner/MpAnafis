@@ -8,10 +8,7 @@
 use core::{hint::black_box, mem::size_of};
 
 use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
-use mp_anafis::tune_api::tier::{
-    Limb,
-    state::{MulBenchScratch, bench_lopsided_mul_scratch_len, bench_lopsided_mul_with_scratch},
-};
+use mp_anafis::tune_api::tier::{Limb, Tuner, state::MultiplicationBenchState};
 
 use crate::shared::operands_pair;
 
@@ -121,7 +118,7 @@ fn mp_production(bencher: divan::Bencher, shape: (usize, usize)) {
         .checked_mul(ratio)
         .expect("configured lopsided benchmark width fits usize");
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
-    let mut scratch = MulBenchScratch::default();
+    let mut scratch = MultiplicationBenchState::default();
 
     bencher.bench_local(|| {
         scratch.run(
@@ -143,11 +140,11 @@ fn mp_forced_geometry(bencher: divan::Bencher, shape: (usize, usize, usize, usiz
         .saturating_mul(block_numerator)
         .div_ceil(block_denominator);
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
-    let scratch_len = bench_lopsided_mul_scratch_len(larger_len, smaller_len, block_len);
+    let scratch_len = Tuner::bench_lopsided_mul_scratch_len(larger_len, smaller_len, block_len);
     let mut scratch = vec![Limb::MIN; scratch_len];
 
     bencher.bench_local(|| {
-        bench_lopsided_mul_with_scratch(
+        Tuner::bench_lopsided_mul_with_scratch(
             black_box(&mut destination),
             black_box(&larger),
             black_box(&smaller),

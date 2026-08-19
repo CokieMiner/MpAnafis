@@ -9,7 +9,10 @@ pub struct BenchValidation;
 impl BenchValidation {
     #[track_caller]
     pub fn product(dst: &[Limb], a: &[Limb], b: &[Limb]) {
-        let required = a.len().saturating_add(b.len());
+        let required = a
+            .len()
+            .checked_add(b.len())
+            .expect("benchmark product width overflows usize");
         assert!(
             dst.len() >= required,
             "benchmark destination has {} limbs, but the full product requires {required}",
@@ -19,7 +22,10 @@ impl BenchValidation {
 
     #[track_caller]
     pub fn square(dst: &[Limb], a: &[Limb]) {
-        let required = a.len().saturating_mul(2);
+        let required = a
+            .len()
+            .checked_mul(2)
+            .expect("benchmark square width overflows usize");
         assert!(
             dst.len() >= required,
             "benchmark destination has {} limbs, but the full square requires {required}",

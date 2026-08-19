@@ -81,70 +81,40 @@ impl InternalMpUint {
     #[inline]
     pub fn resize(&mut self, new_len: usize) {
         let current_len = self.limbs().len();
-        if new_len <= current_len {
-            match self.repr {
-                UintRepr::Inline {
-                    ref mut len,
-                    ref mut limbs,
-                } => {
-                    // Zero out the trailing limbs beyond new_len in one shot.
-                    // SAFETY: new_len <= current_len <= INLINE_LIMBS, so new_len..usize::from(*len)
-                    // is within the limbs array bounds.
-                    // SAFETY: new_len <= usize::from(*len) checked above, and
-                    // usize::from(*len) <= INLINE_LIMBS by construction.
-                    let tail = unsafe { limbs.get_unchecked_mut(new_len..usize::from(*len)) };
-                    tail.fill(0);
-                    // SAFETY: `new_len <= current_len <= INLINE_LIMBS`, and
-                    // `INLINE_LIMBS = 4 <= u8::MAX` on every supported target.
-                    *len = unsafe { u8::try_from(new_len).unwrap_unchecked() };
-                }
-                UintRepr::Heap(ref mut vec) => vec.resize(new_len, 0),
-            }
-        } else {
-            // Growing
-            if new_len <= INLINE_LIMBS {
-                match self.repr {
-                    UintRepr::Inline {
-                        ref mut len,
-                        ref mut limbs,
-                    } => {
+        match self.repr {
+            UintRepr::Inline {
+                ref mut len,
+                ref mut limbs,
+            } => {
+                if new_len <= INLINE_LIMBS {
+                    if new_len < current_len {
+                        // Zero out the trailing limbs beyond new_len in one shot.
+                        // SAFETY: new_len < current_len <= INLINE_LIMBS, so new_len..usize::from(*len)
+                        // is within the limbs array bounds.
+                        let tail = unsafe { limbs.get_unchecked_mut(new_len..usize::from(*len)) };
+                        tail.fill(0);
+                    } else if new_len > current_len {
                         // Zero-fill the new limbs in one shot.
-                        // SAFETY: new_len <= INLINE_LIMBS and current_len <= new_len, so
+                        // SAFETY: new_len <= INLINE_LIMBS and current_len < new_len, so
                         // current_len..new_len is within the limbs array bounds.
                         let tail = unsafe { limbs.get_unchecked_mut(current_len..new_len) };
                         tail.fill(0);
-                        // SAFETY: this branch proves
-                        // `new_len <= INLINE_LIMBS = 4 <= u8::MAX`.
-                        *len = unsafe { u8::try_from(new_len).unwrap_unchecked() };
                     }
-                    UintRepr::Heap(ref mut vec) => {
-                        vec.resize(new_len, 0);
-                        let mut limbs = [0; 4];
-                        // SAFETY: new_len <= 4 (checked above) <= INLINE_LIMBS, so
-                        // ..new_len is within the limbs array bounds.
-                        let slice = unsafe { limbs.get_unchecked_mut(..new_len) };
-                        // SAFETY: vec was resized to new_len.
-                        slice.copy_from_slice(unsafe { vec.get_unchecked(..new_len) });
-                        // SAFETY: this branch proves
-                        // `new_len <= INLINE_LIMBS = 4 <= u8::MAX`.
-                        let len = unsafe { u8::try_from(new_len).unwrap_unchecked() };
-                        self.repr = UintRepr::Inline { len, limbs };
-                    }
+                    // SAFETY: `new_len <= INLINE_LIMBS = 4 <= u8::MAX`.
+                    *len = unsafe { u8::try_from(new_len).unwrap_unchecked() };
+                } else {
+                    // Transition Inline -> Heap
+                    let mut vec = Vec::with_capacity(new_len);
+                    // SAFETY: usize::from(*len) <= INLINE_LIMBS, so ..usize::from(*len)
+                    // is within the limbs array bounds.
+                    let slice = unsafe { limbs.get_unchecked(..usize::from(*len)) };
+                    vec.extend_from_slice(slice);
+                    vec.resize(new_len, 0);
+                    self.repr = UintRepr::Heap(vec);
                 }
-            } else {
-                // new_len > 4 -> MUST be Heap
-                match self.repr {
-                    UintRepr::Inline { ref len, ref limbs } => {
-                        let mut vec = Vec::with_capacity(new_len);
-                        // SAFETY: usize::from(*len) <= INLINE_LIMBS, so ..usize::from(*len)
-                        // is within the limbs array bounds.
-                        let slice = unsafe { limbs.get_unchecked(..usize::from(*len)) };
-                        vec.extend_from_slice(slice);
-                        vec.resize(new_len, 0);
-                        self.repr = UintRepr::Heap(vec);
-                    }
-                    UintRepr::Heap(ref mut vec) => vec.resize(new_len, 0),
-                }
+            }
+            UintRepr::Heap(ref mut vec) => {
+                vec.resize(new_len, 0);
             }
         }
     }

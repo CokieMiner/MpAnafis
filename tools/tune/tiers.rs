@@ -14,9 +14,9 @@
 
 use core::cmp::max;
 
-use mp_anafis::tune_api::{formatting, multiplication, squaring};
+use mp_anafis::tune_api::{FormattingAlgorithm, MultiplicationAlgorithm, SquaringAlgorithm};
 
-use crate::{crossovers, harness::CandidateHarness, tuning_profile::TuningProfile};
+use crate::{crossovers, session::TuneSession};
 
 const ITERATIONS: u32 = 5_000;
 const TIER_SIZES: [usize; 22] = [
@@ -49,8 +49,7 @@ struct Candidate<A> {
 fn tune_tower<A: Copy + core::fmt::Debug>(
     base_algo: A,
     candidates: &[Candidate<A>],
-    mut crossover_fn: impl FnMut(A, A, usize, &[usize], &str, u32, u32) -> Option<usize>,
-    margin_ppm: u32,
+    mut crossover_fn: impl FnMut(A, A, usize, &[usize], &str, u32) -> Option<usize>,
 ) -> Vec<usize> {
     let mut thresholds = vec![usize::MAX - 1; candidates.len()];
     // Stack of (candidate_index, algorithm, starting_threshold)
@@ -70,7 +69,6 @@ fn tune_tower<A: Copy + core::fmt::Debug>(
             cand.sizes,
             &dynamic_tag,
             ITERATIONS,
-            margin_ppm,
         ) {
             if c <= reign_start && reign_idx != -1 {
                 println!(
@@ -115,47 +113,41 @@ fn tune_tower<A: Copy + core::fmt::Debug>(
 }
 
 /// Tune the conventional multiplication tower.
-pub fn tune_multiplication(
-    profile: &mut TuningProfile,
-    margin_ppm: u32,
-    harness: &mut CandidateHarness,
-    decisions: &mut Vec<(String, String)>,
-) {
+pub fn tune_multiplication(session: &mut TuneSession) {
     println!("\nMultiplication tiers");
     let candidates = [
         Candidate {
-            algo: multiplication::Algorithm::Karatsuba,
+            algo: MultiplicationAlgorithm::Karatsuba,
             sizes: &TIER_SIZES,
             min_next_start: 16,
         },
         Candidate {
-            algo: multiplication::Algorithm::ToomCook3,
+            algo: MultiplicationAlgorithm::ToomCook3,
             sizes: &TIER_SIZES,
             min_next_start: 64,
         },
         Candidate {
-            algo: multiplication::Algorithm::ToomCook4,
+            algo: MultiplicationAlgorithm::ToomCook4,
             sizes: &TIER_SIZES,
             min_next_start: 128,
         },
         Candidate {
-            algo: multiplication::Algorithm::ToomCook6,
+            algo: MultiplicationAlgorithm::ToomCook6,
             sizes: &LARGE_SIZES,
             min_next_start: 256,
         },
         Candidate {
-            algo: multiplication::Algorithm::ToomCook85,
+            algo: MultiplicationAlgorithm::ToomCook85,
             sizes: &LARGE_SIZES,
             min_next_start: 512,
         },
     ];
     let res = tune_tower(
-        multiplication::Algorithm::Schoolbook,
+        MultiplicationAlgorithm::Schoolbook,
         &candidates,
-        |baseline, candidate, start, sizes, tag, iterations, margin| {
+        |baseline, candidate, start, sizes, tag, iterations| {
             crossovers::multiplication(
-                profile,
-                harness,
+                session,
                 crossovers::Request {
                     baseline,
                     candidate,
@@ -164,15 +156,12 @@ pub fn tune_multiplication(
                     tag,
                     iterations,
                 },
-                margin,
             )
         },
-        margin_ppm,
     );
     record_thresholds(
-        profile,
+        session,
         &res,
-        decisions,
         &[
             ("KARATSUBA_THRESHOLD", "karatsuba"),
             ("TOOM_COOK_THRESHOLD", "toom_cook_3"),
@@ -184,47 +173,41 @@ pub fn tune_multiplication(
 }
 
 /// Tune the conventional squaring tower.
-pub fn tune_squaring(
-    profile: &mut TuningProfile,
-    margin_ppm: u32,
-    harness: &mut CandidateHarness,
-    decisions: &mut Vec<(String, String)>,
-) {
+pub fn tune_squaring(session: &mut TuneSession) {
     println!("\nSquaring tiers");
     let candidates = [
         Candidate {
-            algo: squaring::Algorithm::Karatsuba,
+            algo: SquaringAlgorithm::Karatsuba,
             sizes: &TIER_SIZES,
             min_next_start: 16,
         },
         Candidate {
-            algo: squaring::Algorithm::ToomCook3,
+            algo: SquaringAlgorithm::ToomCook3,
             sizes: &TIER_SIZES,
             min_next_start: 64,
         },
         Candidate {
-            algo: squaring::Algorithm::ToomCook4,
+            algo: SquaringAlgorithm::ToomCook4,
             sizes: &TIER_SIZES,
             min_next_start: 128,
         },
         Candidate {
-            algo: squaring::Algorithm::ToomCook6,
+            algo: SquaringAlgorithm::ToomCook6,
             sizes: &LARGE_SIZES,
             min_next_start: 256,
         },
         Candidate {
-            algo: squaring::Algorithm::ToomCook85,
+            algo: SquaringAlgorithm::ToomCook85,
             sizes: &LARGE_SIZES,
             min_next_start: 512,
         },
     ];
     let res = tune_tower(
-        squaring::Algorithm::Schoolbook,
+        SquaringAlgorithm::Schoolbook,
         &candidates,
-        |baseline, candidate, start, sizes, tag, iterations, margin| {
+        |baseline, candidate, start, sizes, tag, iterations| {
             crossovers::squaring(
-                profile,
-                harness,
+                session,
                 crossovers::Request {
                     baseline,
                     candidate,
@@ -233,15 +216,12 @@ pub fn tune_squaring(
                     tag,
                     iterations,
                 },
-                margin,
             )
         },
-        margin_ppm,
     );
     record_thresholds(
-        profile,
+        session,
         &res,
-        decisions,
         &[
             ("SQR_KARATSUBA_THRESHOLD", "sqr_karatsuba"),
             ("SQR_TOOM_COOK_THRESHOLD", "sqr_toom_cook_3"),
@@ -254,159 +234,143 @@ pub fn tune_squaring(
 
 /// Tune the Toom-8.5 to SSA crossovers, multiplication and squaring
 /// separately, after the compiled constants are final.
-pub fn tune_transforms(
-    profile: &mut TuningProfile,
-    margin_ppm: u32,
-    harness: &mut CandidateHarness,
-    decisions: &mut Vec<(String, String)>,
-) {
+pub fn tune_transforms(session: &mut TuneSession) {
     println!("\nTransform tiers");
     #[cfg(not(target_pointer_width = "16"))]
     {
-        let mul_start = max(512, profile.toom_cook_85.min(usize::MAX - 2));
+        let mul_start = max(512, session.profile.toom_cook_85.min(usize::MAX - 2));
         let ssa_mul = crossovers::multiplication(
-            profile,
-            harness,
+            session,
             crossovers::Request {
-                baseline: multiplication::Algorithm::ToomCook85,
-                candidate: multiplication::Algorithm::Ssa,
+                baseline: MultiplicationAlgorithm::ToomCook85,
+                candidate: MultiplicationAlgorithm::SsaForced,
                 start: mul_start,
                 sizes: &LARGE_SIZES,
                 tag: "Toom-Cook 8.5 -> SSA multiplication",
                 iterations: ITERATIONS,
             },
-            margin_ppm,
         );
-        let sqr_start = max(512, profile.sqr_toom_cook_85.min(usize::MAX - 2));
+        let sqr_start = max(512, session.profile.sqr_toom_cook_85.min(usize::MAX - 2));
         let ssa_sqr = crossovers::squaring(
-            profile,
-            harness,
+            session,
             crossovers::Request {
-                baseline: squaring::Algorithm::ToomCook85,
-                candidate: squaring::Algorithm::Ssa,
+                baseline: SquaringAlgorithm::ToomCook85,
+                candidate: SquaringAlgorithm::SsaForced,
                 start: sqr_start,
                 sizes: &LARGE_SIZES,
                 tag: "Toom-Cook 8.5 -> SSA square",
                 iterations: ITERATIONS,
             },
-            margin_ppm,
         );
         // The multiplication and squaring crossovers are separate tuning
         // questions: on the measured profile the squaring one sits 25% below
         // the multiplication one, and merging them with max() throws the
         // squaring measurement away. Each field takes its own answer.
-        profile.ssa = ssa_mul.unwrap_or(usize::MAX - 1);
-        profile.sqr_ssa = ssa_sqr.unwrap_or(usize::MAX - 1);
-        decisions.push(("SSA_THRESHOLD".to_owned(), format!("{}", profile.ssa)));
-        decisions.push((
+        // Zero is the profile-level disabled value. The intermediate-tier
+        // sentinel is reserved for shadowing a conventional Toom tier and
+        // must not leak into the transform crossover fields.
+        session.profile.ssa = ssa_mul.unwrap_or(0);
+        session.profile.sqr_ssa = ssa_sqr.unwrap_or(0);
+        session.record(
+            "SSA_THRESHOLD".to_owned(),
+            format!("{}", session.profile.ssa),
+        );
+        session.record(
             "SQR_SSA_THRESHOLD".to_owned(),
-            format!("{}", profile.sqr_ssa),
-        ));
+            format!("{}", session.profile.sqr_ssa),
+        );
     }
 }
 
 /// Tune the schoolbook-to-recursive formatting crossover.
-pub fn tune_radix_formatting(
-    profile: &mut TuningProfile,
-    margin_ppm: u32,
-    harness: &mut CandidateHarness,
-    decisions: &mut Vec<(String, String)>,
-) {
+pub fn tune_radix_formatting(session: &mut TuneSession) {
     println!("\nRadix formatting crossovers");
 
-    let mut tune_one = |radix: u32,
-                        fallback: usize,
-                        inner_harness: &mut CandidateHarness|
-     -> Result<usize, String> {
-        let tag = format!("Schoolbook -> Recursive formatting (radix {radix})");
-        let result = crossovers::formatting(
-            &*profile,
-            inner_harness,
-            radix,
-            crossovers::Request {
-                baseline: formatting::Algorithm::Schoolbook,
-                candidate: formatting::Algorithm::Recursive,
-                start: 4,
-                sizes: &FORMAT_SIZES,
-                tag: &tag,
-                iterations: ITERATIONS,
-            },
-            margin_ppm,
-        )?;
-        Ok(result.unwrap_or(fallback))
-    };
+    let mut tune_one =
+        |radix: u32, fallback: usize, inner_session: &mut TuneSession| -> Result<usize, String> {
+            let tag = format!("Schoolbook -> Recursive formatting (radix {radix})");
+            let result = crossovers::formatting(
+                inner_session,
+                radix,
+                crossovers::Request {
+                    baseline: FormattingAlgorithm::Schoolbook,
+                    candidate: FormattingAlgorithm::Recursive,
+                    start: 4,
+                    sizes: &FORMAT_SIZES,
+                    tag: &tag,
+                    iterations: ITERATIONS,
+                },
+            )?;
+            Ok(result.unwrap_or(fallback))
+        };
 
-    let mut cross_10 = tune_one(10, profile.radix_decimal_recursive, harness)
+    let mut cross_10 = tune_one(10, session.profile.radix_decimal_recursive, session)
         .expect("failed to tune radix 10 formatting");
     cross_10 = validate_group(
-        profile,
-        harness,
+        session,
         cross_10,
-        margin_ppm,
         10..=10,
-        profile.radix_decimal_recursive,
+        session.profile.radix_decimal_recursive,
         &mut tune_one,
     )
     .expect("failed during decimal formatting validation");
 
     // Small group: radices 3..=9
     let mut small_threshold = max(
-        tune_one(3, profile.radix_small_recursive, harness).expect("failed to tune radix 3"),
-        tune_one(9, profile.radix_small_recursive, harness).expect("failed to tune radix 9"),
+        tune_one(3, session.profile.radix_small_recursive, session)
+            .expect("failed to tune radix 3"),
+        tune_one(9, session.profile.radix_small_recursive, session)
+            .expect("failed to tune radix 9"),
     );
     small_threshold = validate_group(
-        profile,
-        harness,
+        session,
         small_threshold,
-        margin_ppm,
         3..=9,
-        profile.radix_small_recursive,
+        session.profile.radix_small_recursive,
         &mut tune_one,
     )
     .expect("failed during small radix formatting validation");
 
     // Large group: radices 11..=36
     let mut large_threshold = max(
-        tune_one(11, profile.radix_large_recursive, harness).expect("failed to tune radix 11"),
-        tune_one(36, profile.radix_large_recursive, harness).expect("failed to tune radix 36"),
+        tune_one(11, session.profile.radix_large_recursive, session)
+            .expect("failed to tune radix 11"),
+        tune_one(36, session.profile.radix_large_recursive, session)
+            .expect("failed to tune radix 36"),
     );
     large_threshold = validate_group(
-        profile,
-        harness,
+        session,
         large_threshold,
-        margin_ppm,
         11..=36,
-        profile.radix_large_recursive,
+        session.profile.radix_large_recursive,
         &mut tune_one,
     )
     .expect("failed during large radix formatting validation");
 
-    profile.radix_decimal_recursive = cross_10;
-    profile.radix_small_recursive = small_threshold;
-    profile.radix_large_recursive = large_threshold;
+    session.profile.radix_decimal_recursive = cross_10;
+    session.profile.radix_small_recursive = small_threshold;
+    session.profile.radix_large_recursive = large_threshold;
 
-    decisions.push((
+    session.record(
         "RADIX_DECIMAL_RECURSIVE_THRESHOLD".to_owned(),
-        format!("{}", profile.radix_decimal_recursive),
-    ));
-    decisions.push((
+        format!("{}", session.profile.radix_decimal_recursive),
+    );
+    session.record(
         "RADIX_SMALL_RECURSIVE_THRESHOLD".to_owned(),
-        format!("{}", profile.radix_small_recursive),
-    ));
-    decisions.push((
+        format!("{}", session.profile.radix_small_recursive),
+    );
+    session.record(
         "RADIX_LARGE_RECURSIVE_THRESHOLD".to_owned(),
-        format!("{}", profile.radix_large_recursive),
-    ));
+        format!("{}", session.profile.radix_large_recursive),
+    );
 }
 
 fn validate_group(
-    profile: &TuningProfile,
-    harness: &mut CandidateHarness,
+    session: &mut TuneSession,
     mut threshold: usize,
-    margin_ppm: u32,
     radices: core::ops::RangeInclusive<u32>,
     fallback: usize,
-    tune_one: &mut impl FnMut(u32, usize, &mut CandidateHarness) -> Result<usize, String>,
+    tune_one: &mut impl FnMut(u32, usize, &mut TuneSession) -> Result<usize, String>,
 ) -> Result<usize, String> {
     loop {
         let mut failed_radix = None;
@@ -427,15 +391,16 @@ fn validate_group(
                     quality: crate::measure::ProbeQuality::Precise,
                     iterations: ITERATIONS,
                 };
-                let Some((baseline_time, candidate_time)) =
-                    harness.score_formatting_pair(profile, spec)
+                let Some((baseline_time, candidate_time)) = session
+                    .harness
+                    .score_formatting_pair(&session.profile, spec)
                 else {
                     return Err(format!("Could not validate formatting radix {radix}"));
                 };
                 if !crate::measure::confidently_faster_nanos(
                     candidate_time,
                     baseline_time,
-                    margin_ppm,
+                    session.margin_ppm,
                 ) {
                     failed_radix = Some(radix);
                     break;
@@ -446,7 +411,7 @@ fn validate_group(
             }
         }
         if let Some(radix) = failed_radix {
-            let new_cross = tune_one(radix, fallback, harness)?;
+            let new_cross = tune_one(radix, fallback, session)?;
             if new_cross <= threshold {
                 println!(
                     "Formatting validation for radix {radix} failed at {threshold}, \
@@ -463,26 +428,21 @@ fn validate_group(
 }
 
 /// Write tuned thresholds back to the profile and record the decision.
-fn record_thresholds(
-    profile: &mut TuningProfile,
-    results: &[usize],
-    decisions: &mut Vec<(String, String)>,
-    fields: &[(&str, &str)],
-) {
+fn record_thresholds(session: &mut TuneSession, results: &[usize], fields: &[(&str, &str)]) {
     for (slot, (name, field)) in results.iter().zip(fields) {
         match *field {
-            "karatsuba" => profile.karatsuba = *slot,
-            "toom_cook_3" => profile.toom_cook_3 = *slot,
-            "toom_cook_4" => profile.toom_cook_4 = *slot,
-            "toom_cook_6" => profile.toom_cook_6 = *slot,
-            "toom_cook_85" => profile.toom_cook_85 = *slot,
-            "sqr_karatsuba" => profile.sqr_karatsuba = *slot,
-            "sqr_toom_cook_3" => profile.sqr_toom_cook_3 = *slot,
-            "sqr_toom_cook_4" => profile.sqr_toom_cook_4 = *slot,
-            "sqr_toom_cook_6" => profile.sqr_toom_cook_6 = *slot,
-            "sqr_toom_cook_85" => profile.sqr_toom_cook_85 = *slot,
+            "karatsuba" => session.profile.karatsuba = *slot,
+            "toom_cook_3" => session.profile.toom_cook_3 = *slot,
+            "toom_cook_4" => session.profile.toom_cook_4 = *slot,
+            "toom_cook_6" => session.profile.toom_cook_6 = *slot,
+            "toom_cook_85" => session.profile.toom_cook_85 = *slot,
+            "sqr_karatsuba" => session.profile.sqr_karatsuba = *slot,
+            "sqr_toom_cook_3" => session.profile.sqr_toom_cook_3 = *slot,
+            "sqr_toom_cook_4" => session.profile.sqr_toom_cook_4 = *slot,
+            "sqr_toom_cook_6" => session.profile.sqr_toom_cook_6 = *slot,
+            "sqr_toom_cook_85" => session.profile.sqr_toom_cook_85 = *slot,
             _ => {}
         }
-        decisions.push(((*name).to_owned(), slot.to_string()));
+        session.record((*name).to_owned(), slot.to_string());
     }
 }

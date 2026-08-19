@@ -41,6 +41,18 @@ macro_rules! select_arch_kernel {
             $item
         )*
     };
+    (@import_limb ntt_monty_u32) => {};
+    (@import_limb ntt_digits_u32) => {};
+    (@import_limb $other:ident) => {
+        use super::Limb;
+    };
+    (@import_kernel_types NttMontyKernel) => {
+        use super::kernels::NttMontyKernels;
+    };
+    (@import_kernel_types NttDigitsKernel) => {
+        use super::kernels::NttDigitsKernels;
+    };
+    (@import_kernel_types $other:ident) => {};
     (
         function: $function:ident;
         surface: direct;
@@ -80,7 +92,9 @@ macro_rules! select_arch_kernel {
         fallback_imports: [$($fallback_import:ident),* $(,)?];
         test_backends: [$($test_alias:ident => $test_backend:ident),* $(,)?];
     ) => {
-        use super::{Limb, kernels::$kernel};
+        use super::kernels::$kernel;
+        select_arch_kernel!(@import_kernel_types $kernel);
+        select_arch_kernel!(@import_limb $function);
         $(
             select_arch_kernel!(
                 @backend $function, $kernel, $backend, $availability

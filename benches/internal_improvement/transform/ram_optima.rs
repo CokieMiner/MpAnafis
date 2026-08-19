@@ -12,14 +12,11 @@
 use core::hint::black_box;
 
 use mp_anafis::tune_api::tier::{
-    Limb,
-    transform::{
-        bench_ssa_mul_forced_plan, bench_ssa_mul_forced_plan_scratch_len,
-        bench_ssa_mul_scratch_len, bench_ssa_mul_with_scratch,
-    },
+    Tuner,
+    transform::{SsaGeometryPolicy, SsaScratchPolicy, TransformExecutor},
 };
 
-use crate::shared::operands_pair;
+use crate::shared::{gmp_equal_reference, operands_pair, validate_and_warm_product};
 
 /// `(operand limbs, forced exponent)`; exponent zero lets the planner choose.
 ///
@@ -73,29 +70,24 @@ const PROBES: [(usize, u32); 35] = [
 fn transform(bencher: divan::Bencher<'_, '_>, probe: (usize, u32)) {
     let (len, exponent) = probe;
     let (larger, smaller, mut destination) = operands_pair(len, len);
-    if exponent == 0 {
-        let mut scratch = vec![Limb::MIN; bench_ssa_mul_scratch_len(len, len)];
-        bencher.bench_local(|| {
-            bench_ssa_mul_with_scratch(
-                black_box(&mut destination),
-                black_box(&larger),
-                black_box(&smaller),
-                black_box(&mut scratch),
-            );
-        });
-        return;
-    }
-    let Some(scratch_len) = bench_ssa_mul_forced_plan_scratch_len(len, len, exponent) else {
+    let geometry = if exponent == 0 {
+        SsaGeometryPolicy::Forced
+    } else {
+        SsaGeometryPolicy::ForcedExponent(exponent)
+    };
+    let Some(mut runner) = Tuner::bench_ssa_multiplication(
+        geometry,
+        TransformExecutor::Sequential,
+        SsaScratchPolicy::Reusable,
+        &larger,
+        &smaller,
+    ) else {
         return;
     };
-    let mut scratch = vec![Limb::MIN; scratch_len];
-    bencher.bench_local(|| {
-        bench_ssa_mul_forced_plan(
-            black_box(&mut destination),
-            black_box(&larger),
-            black_box(&smaller),
-            black_box(exponent),
-            black_box(&mut scratch),
-        );
+    let expected = gmp_equal_reference(&larger, &smaller);
+    validate_and_warm_product(&expected, "SSA RAM-geometry product", |candidate| {
+        runner.prepare(candidate).run();
     });
+    let mut prepared = runner.prepare(&mut destination);
+    bencher.bench_local(|| black_box(&mut prepared).run());
 }

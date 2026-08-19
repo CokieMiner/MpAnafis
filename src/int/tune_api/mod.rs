@@ -1,7 +1,7 @@
 //! Feature-gated tuning and raw-tier benchmark facade.
 //!
-//! Each arithmetic family owns a reusable [`Tuner`](multiplication::Tuner).
-//! Raw slice functions for the Divan benchmark remain isolated in [`tier`].
+//! One internal [`Tuner`] namespace owns the reusable arithmetic runners.
+//! Raw slice benchmark operations remain isolated in [`tier`].
 
 #![doc(hidden)]
 #![allow(
@@ -11,21 +11,25 @@
 
 use super::{
     ArchKernels, DivScratch, Division, FormatCache, InternalMpUint, Karatsuba, Lopsided,
-    LowProduct, MulScratch, Multiplication, Ntt, Schoolbook, ScratchBuffer, Ssa, Toom3, Toom4,
-    Toom6, Toom8, Toom32, Toom43, TransformBench, TransformChoice,
+    LowProduct, MulScratch, Multiplication, Ntt, NttMultiplicationPlan, Schoolbook, ScratchBuffer,
+    Ssa, SsaMultiplicationPlan, SsaSquaringPlan, Toom3, Toom4, Toom6, Toom8, Toom32, Toom43,
+    TransformBench, TransformChoice, TransformPlan,
 };
 
-/// Reusable division crossover tuner.
-pub mod division;
-/// Reusable formatting crossover tuner.
-pub mod formatting;
-/// Reusable multiplication crossover tuner.
-pub mod multiplication;
-/// Reusable squaring crossover tuner.
-pub mod squaring;
+mod division;
+mod formatting;
+mod multiplication;
+mod namespace;
+mod squaring;
 
 /// Raw tier runners used only by the dedicated multiplication benchmark.
 #[doc(hidden)]
 pub mod tier;
+
+pub use division::{DivisionAlgorithm, DivisionRunner};
+pub use formatting::{FormattingAlgorithm, FormattingRunner};
+pub use multiplication::{MultiplicationAlgorithm, MultiplicationRunner, PreparedMultiplication};
+pub use namespace::Tuner;
+pub use squaring::{PreparedSquaring, SquaringAlgorithm, SquaringRunner};
 
 pub use super::Limb;

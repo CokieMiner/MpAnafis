@@ -28,8 +28,8 @@ products, transform backends, scratch ownership, dispatch, and tuning.
 
 | Family | Status | Role |
 |---|---|---|
-| Schoolbook | production | Quadratic basecase; architecture kernels own the hot limb loops. |
-| Karatsuba / Toom-2 | production | First subquadratic balanced tier and recursive child tier. |
+| Schoolbook | production | Quadratic basecase; architecture kernels own the hot limb loops (`mul_basecase_unchecked`, `mul_2_limbs_unchecked`, `add_mul_2_limbs_unchecked`). |
+| Karatsuba / Toom-2 | production | First subquadratic balanced tier and recursive child tier; stack scratch buffer for shallow depths. |
 | Toom-3 | production | Five point products; also retained where higher splits collapse. |
 | Toom-4 | production | Seven point products for the middle balanced range. |
 | Toom-6 / Toom-6.5 | production | Balanced six-way and adjacent half-step unbalanced split. |
@@ -37,8 +37,8 @@ products, transform backends, scratch ownership, dispatch, and tuning.
 | Toom-3×2 | production | Fractional split for selected ratios from 3:2 toward 3:1. |
 | Toom-4×3 | production | Fractional split for selected ratios from 4:3 toward 2:1. |
 | Lopsided blocking | production | Partitions a long operand into blocks that land on an efficient balanced tier. |
-| Low product | production | Computes only the required low limbs for consumers that do not need a full product. |
-| Schönhage-Strassen (SSA) | production | Exact large multiplication over Fermat rings, including a separate square path. |
+| Low product | production | Computes only the required low limbs for consumers (division, Barrett reduction, reciprocal iteration). |
+| Schönhage-Strassen (SSA) | production | Exact large multiplication over Fermat rings $2^N + 1$, including dedicated squaring, memoized scratch bounds, and optional multithreaded pointwise products. |
 | Multi-prime NTT | incomplete, disabled | Exact one-, two-, or three-prime convolution; registered for tests and tuning work only. |
 
 The production selector offers large transforms before conventional shape
@@ -50,7 +50,7 @@ The conventional tower is mature, not exhausted. Generic interpolation and
 scratch work now tends to produce memory wins or low-single-digit timing
 changes. Larger gains require one of three things:
 
-1. a better large-product algorithm class;
+1. a better large-product algorithm class (such as Multi-Prime NTT);
 2. a benchmark-proven missing operand shape; or
 3. a genuinely faster architecture kernel.
 
@@ -209,6 +209,18 @@ Nussbaumer transforms replace expensive modular root computations with recursive
 polynomial decompositions, acting effectively as bit-shifts. This must be implemented
 as the primary fallback for the "Valley of Death" (131K - 262K bits) on architectures
 that lack AVX, ensuring we close the final performance gap against GMP on all hardware.
+
+### 4.9 Public API & Specification Parity
+
+The core multiplication engine supports the full public API defined in `docs/int/spec.md`.
+To achieve complete specification parity, the following public multiplication methods
+are prioritized for integration across `MpUint` and `MpInt`:
+
+1. **`widening_mul` / `try_widening_mul`**: Double-width product returning `(MpUint, MpUint)`
+   representing the lower and upper words.
+2. **`carrying_mul` / `try_carrying_mul`**: Double-width product with an additive carry parameter.
+3. **`carrying_mul_add`**: Double-width multiply-accumulate with two additive terms.
+4. **`mul_2exp`**: Direct shift-multiplication by $2^n$ ($self \times 2^n$) paired with power-of-two division methods.
 
 ## 5. Research catalogue
 

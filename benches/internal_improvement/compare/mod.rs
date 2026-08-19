@@ -15,10 +15,15 @@
 //!   our own `ntt` path. Comparing only against GMP at the top of the tower
 //!   measures us against an algorithm that is no longer state of the art.
 //!
-//! Both are pinned to a single thread so the comparison stays core-for-core.
+//! GMP remains serial. FLINT has a one-worker production row and, when Mp's
+//! feature-selected executor reports more than one worker, a production row at
+//! that exact worker budget. Mp executor, geometry, and workspace comparisons
+//! live in `transform_matrix`, with every dimension encoded in its case label.
 
 pub mod addition;
 pub mod balanced;
+pub mod direct;
 pub mod flint;
 pub mod low_product;
+pub mod transform_matrix;
 pub mod unbalanced;

@@ -17,6 +17,12 @@ impl MpUint {
     )]
     #[inline(always)]
     pub fn assign_add(&mut self, a: &Self, b: &Self) {
+        if self.precision.is_unlimited() && a.precision.is_unlimited() && b.precision.is_unlimited()
+        {
+            self.value.assign_sum(&a.value, &b.value);
+            self.debug_assert_valid();
+            return;
+        }
         self.precision = a.precision.combine_for_binary_op(b.precision);
         self.value.assign_sum(&a.value, &b.value);
         if let Some(bits) = self.precision.significant_bits() {
@@ -97,6 +103,15 @@ impl MpUint {
     )]
     #[inline(always)]
     pub fn assign_sub(&mut self, a: &Self, b: &Self) -> bool {
+        if self.precision.is_unlimited() && a.precision.is_unlimited() && b.precision.is_unlimited()
+        {
+            let underflow = self.value.assign_difference(&a.value, &b.value);
+            if underflow {
+                self.value.clear();
+            }
+            self.debug_assert_valid();
+            return underflow;
+        }
         self.precision = a.precision.combine_for_binary_op(b.precision);
         let underflow = self.value.assign_difference(&a.value, &b.value);
         if underflow {

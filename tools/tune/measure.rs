@@ -170,7 +170,7 @@ pub fn acceptance_margin(noise_cv: f64) -> u32 {
 /// True when `candidate` beats `baseline` by at least `margin_ppm` ppm.
 #[must_use]
 pub fn confidently_faster_nanos(candidate: u128, baseline: u128, margin_ppm: u32) -> bool {
-    let factor = u128::from(1_000_000_u32.wrapping_sub(margin_ppm));
+    let factor = u128::from(1_000_000_u32.saturating_sub(margin_ppm));
     candidate.saturating_mul(1_000_000) < baseline.saturating_mul(factor)
 }
 

@@ -79,6 +79,9 @@ impl InternalMpUint {
     /// `x^2 <= self`.
     #[must_use]
     pub fn isqrt(&self) -> Self {
+        if let Some(root) = SqrtScratch::isqrt_inline(self) {
+            return root;
+        }
         let mut scratch = SqrtScratch::default();
         self.sqrt_with_scratch_mode(&mut scratch, false).0
     }
@@ -98,6 +101,9 @@ impl InternalMpUint {
         need_remainder: bool,
     ) -> (Self, Self) {
         let len = self.limbs().len();
+        if !need_remainder && len <= 4 {
+            return (scratch.isqrt_basecase(self), Self::zero());
+        }
         if len <= 2 {
             if need_remainder {
                 return scratch.sqrt_rem_basecase(self);
@@ -113,12 +119,16 @@ impl InternalMpUint {
             shift_bits = shift_bits.wrapping_sub(1);
         }
 
-        let mut n = self.clone();
-        if shift_bits > 0 {
+        let (s, r) = if shift_bits == 0 {
+            scratch.sqrt_rem_recursive(self, need_remainder)
+        } else {
+            let mut n = scratch.get_temp();
+            n.clone_from(self);
             n.shl_assign(shift_bits);
-        }
-
-        let (s, r) = scratch.sqrt_rem_recursive(&n, need_remainder);
+            let res = scratch.sqrt_rem_recursive(&n, need_remainder);
+            scratch.return_temp(n);
+            res
+        };
 
         if shift_bits == 0 {
             return (s, r);
@@ -126,12 +136,14 @@ impl InternalMpUint {
 
         let sh = shift_bits >> 1;
 
-        let mut s_ret = s.clone();
-        s_ret.shr_assign(sh);
-
         if !need_remainder {
+            let mut s_ret = s;
+            s_ret.shr_assign(sh);
             return (s_ret, Self::zero());
         }
+
+        let mut s_ret = s.clone();
+        s_ret.shr_assign(sh);
 
         let mut s_shifted = scratch.get_temp();
         s_shifted.clone_from(&s_ret);

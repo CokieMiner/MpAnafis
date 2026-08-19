@@ -28,8 +28,6 @@
 //! Portable — these follow from the algorithm's structure, so they change which
 //! geometries are *reachable*, not which one is fastest:
 //!
-//! - `plan::TOP_LEVEL_SEARCH_RADIUS`, `plan::NESTED_SEARCH_RADIUS` — how far the
-//!   exponent search looks either side of the analytic centre.
 //! - `plan::MAX_COST_RECURSION_DEPTH` — a termination bound on the cost model.
 //! - `SSA_BNM1_BASECASE_LIMBS` — where `mul_mod_bnm1` stops splitting. Also a
 //!   *correctness* input: [`SsaPlan::crt_half_width`] only emits half-widths whose
@@ -50,12 +48,6 @@
 //!   to one limb of multiplication. That ratio is exactly what varies by target.
 //! - `SSA_BASECASE_COST_WEIGHT_16THS` — fits the planner's lower-tower model
 //!   between `n^1.5` and `n^1.75`; faster Toom kernels favor the lower end.
-//! - `SSA_GEOMETRY_EXPONENTS` — exact measured exponents for power-of-two ring
-//!   widths. Zero entries delegate to the portable recursive cost model.
-//! - `SSA_SQRT2_TWIST_PASSES` — planner penalty for a half-step geometry.
-//! - `SSA_FOUR_STEP_MIN_LOG` — where the cache-blocked four-step layout starts
-//!   paying for its transposes. A cache-size question.
-//! - `SSA_TRANSPOSE_TILE_LIMBS` — the transpose tile's cache working-set budget.
 //! - `SSA_DIRECT_SHIFT_MAX_LIMBS` — coefficient width below which an
 //!   in-place shift beats staging through scratch.
 //! - `SSA_THRESHOLD` — where the tower switches to SSA at all.
@@ -68,10 +60,8 @@
 use super::{
     Addition, ArchKernels, LIMB_BITS, Limb, MulPlan, Multiplication, SSA_BASE_MODULUS_BITS,
     SSA_BASECASE_COST_WEIGHT_16THS, SSA_BNM1_BASECASE_LIMBS, SSA_COEFFICIENT_VISIT_OVERHEAD,
-    SSA_DIRECT_SHIFT_MAX_LIMBS, SSA_FOUR_STEP_MIN_LOG, SSA_GEOMETRY_EXPONENTS,
-    SSA_NEGACYCLIC_FACTOR3_THRESHOLD, SSA_NEGACYCLIC_FACTOR5_THRESHOLD,
-    SSA_NESTED_COST_PENALTY_16THS, SSA_SQRT2_TWIST_PASSES, SSA_TRANSPOSE_TILE_LIMBS, SharedEval,
-    TierCeiling,
+    SSA_DIRECT_SHIFT_MAX_LIMBS, SSA_NEGACYCLIC_FACTOR3_THRESHOLD, SSA_NEGACYCLIC_FACTOR5_THRESHOLD,
+    SSA_NESTED_COST_PENALTY_16THS, SharedEval, TierCeiling,
 };
 
 // Every submodule reaches its siblings' namespaces through `super::`, so this is
@@ -93,9 +83,13 @@ mod crt;
 mod entry;
 mod negacyclic;
 mod plan;
+#[cfg(not(target_pointer_width = "16"))]
+mod prepared;
 mod product;
 mod reconstruct;
 mod ring;
+#[cfg(not(target_pointer_width = "16"))]
+mod square_plan;
 mod transform;
 
 #[cfg(test)]
@@ -113,5 +107,9 @@ pub use entry::{Ssa, TransformChoice};
 pub use plan::FftPlan;
 #[cfg(not(target_pointer_width = "16"))]
 pub use plan::SsaPlan;
+#[cfg(not(target_pointer_width = "16"))]
+pub use prepared::SsaMultiplicationPlan;
 pub use ring::SsaRing;
+#[cfg(not(target_pointer_width = "16"))]
+pub use square_plan::SsaSquaringPlan;
 pub use transform::SsaTransform;

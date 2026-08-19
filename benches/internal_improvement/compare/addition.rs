@@ -19,10 +19,7 @@
 use core::hint::black_box;
 
 use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
-use mp_anafis::tune_api::tier::{
-    Limb,
-    algorithms::{bench_add_limbs, bench_sub_limbs},
-};
+use mp_anafis::tune_api::tier::{Limb, Tuner};
 
 use crate::shared::{SCALING_SIZES, TOWER_SIZES, operands_pair};
 
@@ -38,7 +35,7 @@ const fn assert_one_limb_width() {
 fn mp(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (mut dst, src, _unused) = operands_pair(len, len);
     bencher.bench_local(|| {
-        let _carry = bench_add_limbs(black_box(&mut dst), black_box(&src));
+        let _carry = Tuner::bench_add_limbs(black_box(&mut dst), black_box(&src));
         let _output = black_box(&dst);
     });
 }
@@ -85,7 +82,7 @@ fn gmp_wide(bencher: divan::Bencher<'_, '_>, len: usize) {
 fn mp_sub(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (mut dst, src, _unused) = operands_pair(len, len);
     bencher.bench_local(|| {
-        let _borrow = bench_sub_limbs(black_box(&mut dst), black_box(&src));
+        let _borrow = Tuner::bench_sub_limbs(black_box(&mut dst), black_box(&src));
         let _output = black_box(&dst);
     });
 }
@@ -126,7 +123,7 @@ fn gmp_sub(bencher: divan::Bencher<'_, '_>, len: usize) {
 fn mp_bias_control(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (mut dst, src, _unused) = operands_pair(len, len);
     bencher.bench_local(|| {
-        let _carry = bench_add_limbs(black_box(&mut dst), black_box(&src));
+        let _carry = Tuner::bench_add_limbs(black_box(&mut dst), black_box(&src));
         let _output = black_box(&dst);
     });
 }

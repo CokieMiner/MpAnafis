@@ -22,13 +22,13 @@
 use core::hint::black_box;
 
 use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
-use mp_anafis::tune_api::tier::{Limb, state::MulBenchScratch};
+use mp_anafis::tune_api::tier::{Limb, state::MultiplicationBenchState};
 
 use crate::{
     compare::flint::{
-        FlintLimb, FlintSize, assert_compatible_limb_width, flint_mpn_mul, pin_to_one_thread,
+        FlintLimb, FlintSize, FlintThreadBudget, assert_compatible_limb_width, flint_mpn_mul,
     },
-    shared::{HUGE_SHAPES, SHAPES, operands_pair},
+    shared::{HUGE_SHAPES, SHAPES, gmp_pair_reference, operands_pair, validate_and_warm_product},
 };
 
 /// Asserts the limb widths all three arms are indexed by agree.
@@ -44,7 +44,11 @@ const fn assert_one_limb_width() {
 fn mp(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
     let (larger_len, smaller_len) = shape;
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
-    let mut reusable = MulBenchScratch::default();
+    let mut reusable = MultiplicationBenchState::default();
+    let expected = gmp_pair_reference(&larger, &smaller);
+    validate_and_warm_product(&expected, "Mp unbalanced production product", |probe| {
+        reusable.run(probe, &larger, &smaller);
+    });
     bencher.bench_local(|| {
         reusable.run(
             black_box(&mut destination),
@@ -55,12 +59,28 @@ fn mp(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
 }
 
 #[divan::bench(args = SHAPES)]
-fn gmp(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
+fn gmp_production_serial(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
     const { assert_one_limb_width() }
     let (larger_len, smaller_len) = shape;
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
     let larger_count = size_t::try_from(larger_len).expect("width fits a GMP size");
     let smaller_count = size_t::try_from(smaller_len).expect("width fits a GMP size");
+    let mut expected = vec![Limb::MIN; larger_len.saturating_add(smaller_len)];
+    let mut oracle = MultiplicationBenchState::default();
+    oracle.run(&mut expected, &larger, &smaller);
+    validate_and_warm_product(&expected, "GMP unbalanced product", |probe| {
+        // SAFETY: the probe and both inputs are independent, initialized spans
+        // of their exact counts and the probe holds the complete product.
+        unsafe {
+            let _high_limb = gmp::mpn_mul(
+                probe.as_mut_ptr().cast::<limb_t>(),
+                larger.as_ptr().cast::<limb_t>(),
+                larger_count,
+                smaller.as_ptr().cast::<limb_t>(),
+                smaller_count,
+            );
+        }
+    });
     bencher.bench_local(|| {
         // SAFETY: the three vectors are independently allocated and disjoint,
         // `larger` and `smaller` hold exactly their stated limb counts with the
@@ -80,37 +100,27 @@ fn gmp(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
 }
 
 #[divan::bench(args = SHAPES)]
-fn flint(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
+fn flint_production_serial(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
     const { assert_one_limb_width() }
-    pin_to_one_thread();
+    let _threads = FlintThreadBudget::new(1);
     let (larger_len, smaller_len) = shape;
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
     let larger_count = FlintSize::try_from(larger_len).expect("width fits a FLINT size");
     let smaller_count = FlintSize::try_from(smaller_len).expect("width fits a FLINT size");
-
-    let mut expected = vec![Limb::MIN; destination.len()];
-    // SAFETY: as in the timed block below, with `expected` in place of
-    // `destination`; both hold `larger_len + smaller_len` limbs.
-    unsafe {
-        let _gmp_high = gmp::mpn_mul(
-            expected.as_mut_ptr().cast::<limb_t>(),
-            larger.as_ptr().cast::<limb_t>(),
-            size_t::try_from(larger_len).expect("width fits a GMP size"),
-            smaller.as_ptr().cast::<limb_t>(),
-            size_t::try_from(smaller_len).expect("width fits a GMP size"),
-        );
-        let _flint_high = flint_mpn_mul(
-            destination.as_mut_ptr().cast::<FlintLimb>(),
-            larger.as_ptr().cast::<FlintLimb>(),
-            larger_count,
-            smaller.as_ptr().cast::<FlintLimb>(),
-            smaller_count,
-        );
-    }
-    assert_eq!(
-        destination, expected,
-        "FLINT multiplication disagrees with GMP"
-    );
+    let expected = gmp_pair_reference(&larger, &smaller);
+    validate_and_warm_product(&expected, "FLINT unbalanced production product", |probe| {
+        // SAFETY: the probe and both inputs are independent, initialized spans
+        // of their exact counts and the probe holds the complete product.
+        unsafe {
+            let _high_limb = flint_mpn_mul(
+                probe.as_mut_ptr().cast::<FlintLimb>(),
+                larger.as_ptr().cast::<FlintLimb>(),
+                larger_count,
+                smaller.as_ptr().cast::<FlintLimb>(),
+                smaller_count,
+            );
+        }
+    });
 
     bencher.bench_local(|| {
         // SAFETY: the three vectors are independently allocated and disjoint,
@@ -138,7 +148,11 @@ fn flint(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
 fn mp_huge(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
     let (larger_len, smaller_len) = shape;
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
-    let mut reusable = MulBenchScratch::default();
+    let mut reusable = MultiplicationBenchState::default();
+    let expected = gmp_pair_reference(&larger, &smaller);
+    validate_and_warm_product(&expected, "Mp huge unbalanced product", |probe| {
+        reusable.run(probe, &larger, &smaller);
+    });
     bencher.bench_local(|| {
         reusable.run(
             black_box(&mut destination),
@@ -149,12 +163,28 @@ fn mp_huge(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
 }
 
 #[divan::bench(args = HUGE_SHAPES, sample_count = 3, sample_size = 1)]
-fn gmp_huge(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
+fn gmp_production_serial_huge(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
     const { assert_one_limb_width() }
     let (larger_len, smaller_len) = shape;
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
     let larger_count = size_t::try_from(larger_len).expect("width fits a GMP size");
     let smaller_count = size_t::try_from(smaller_len).expect("width fits a GMP size");
+    let mut expected = vec![Limb::MIN; larger_len.saturating_add(smaller_len)];
+    let mut oracle = MultiplicationBenchState::default();
+    oracle.run(&mut expected, &larger, &smaller);
+    validate_and_warm_product(&expected, "GMP huge unbalanced product", |probe| {
+        // SAFETY: the probe and both inputs are independent, initialized spans
+        // of their exact counts and the probe holds the complete product.
+        unsafe {
+            let _high_limb = gmp::mpn_mul(
+                probe.as_mut_ptr().cast::<limb_t>(),
+                larger.as_ptr().cast::<limb_t>(),
+                larger_count,
+                smaller.as_ptr().cast::<limb_t>(),
+                smaller_count,
+            );
+        }
+    });
     bencher.bench_local(|| {
         // SAFETY: as in `gmp` above.
         let _high = unsafe {
@@ -171,13 +201,27 @@ fn gmp_huge(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
 }
 
 #[divan::bench(args = HUGE_SHAPES, sample_count = 3, sample_size = 1)]
-fn flint_huge(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
+fn flint_production_serial_huge(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
     const { assert_one_limb_width() }
-    pin_to_one_thread();
+    let _threads = FlintThreadBudget::new(1);
     let (larger_len, smaller_len) = shape;
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
     let larger_count = FlintSize::try_from(larger_len).expect("width fits a FLINT size");
     let smaller_count = FlintSize::try_from(smaller_len).expect("width fits a FLINT size");
+    let expected = gmp_pair_reference(&larger, &smaller);
+    validate_and_warm_product(&expected, "FLINT huge unbalanced product", |probe| {
+        // SAFETY: the probe and both inputs are independent, initialized spans
+        // of their exact counts and the probe holds the complete product.
+        unsafe {
+            let _high_limb = flint_mpn_mul(
+                probe.as_mut_ptr().cast::<FlintLimb>(),
+                larger.as_ptr().cast::<FlintLimb>(),
+                larger_count,
+                smaller.as_ptr().cast::<FlintLimb>(),
+                smaller_count,
+            );
+        }
+    });
     bencher.bench_local(|| {
         // SAFETY: as in `flint` above.
         let _high = unsafe {

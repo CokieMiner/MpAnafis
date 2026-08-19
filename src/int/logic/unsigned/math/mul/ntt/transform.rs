@@ -1,58 +1,250 @@
 //! The multi-prime NTT driver: split, forward transforms, pointwise, inverse.
-use alloc::{vec, vec::Vec};
 
-use super::{LIMB_BITS, Limb, PRIME_U128};
+use alloc::vec;
 
-// The planner minimizes transform work across one Goldilocks prime, two 31-bit
-// primes, or three 31-bit primes while proving the coefficient range exactly.
-const ONE_PRIME_DIGIT_BITS: [u32; 9] = [23, 22, 21, 20, 19, 18, 17, 16, 15];
-const TWO_PRIME_DIGIT_BITS: [u32; 6] = [20, 19, 18, 17, 16, 15];
-const THREE_PRIME_DIGIT_BITS: u32 = 31;
-// The fixed roots support at most 2^26 points. `None` is the correct cap on a
-// narrower target because every representable allocation is then below 2^26.
-const MAX_TRANSFORM_LEN: Option<usize> = 1_usize.checked_shl(26);
+use crate::parallel::ParallelExecutor;
 
-pub const MODULI: [Modulus; 3] = [
-    Modulus {
-        prime: 2_013_265_921,
-        primitive_root: 31,
-        neg_inverse: 2_013_265_919,
-        radix_squared: 1_172_168_163,
-    },
-    Modulus {
-        prime: 1_811_939_329,
-        primitive_root: 13,
-        neg_inverse: 1_811_939_327,
-        radix_squared: 959_408_210,
-    },
-    Modulus {
-        prime: 469_762_049,
-        primitive_root: 3,
-        neg_inverse: 469_762_047,
-        radix_squared: 460_175_152,
-    },
-];
-
-#[derive(Clone, Copy, Debug)]
-pub struct Modulus {
-    pub prime: u32,
-    pub primitive_root: u32,
-    pub neg_inverse: u32,
-    pub radix_squared: u32,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct TransformPlan {
-    pub digit_bits: u32,
-    pub modulus_count: usize,
-}
+use super::{LIMB_BITS, Limb, MODULI, NttMultiplicationPlan, TransformPlan};
 
 /// Namespace for the exact multi-prime number-theoretic transform tier.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Ntt;
 
+/// Disjoint per-modulus storage used while a transform plan is executing.
+///
+/// Each modulus receives its own output, scratch, and twiddle span. This is
+/// the ownership boundary that lets an executor join independent transforms
+/// without raw pointers or shared mutable state. The workspace is only built
+/// for two- and three-prime plans; the one-prime plan has a separate Goldilocks
+/// workspace because it has no second or third modulus span.
+pub struct PrimeWorkspace<'workspace> {
+    outputs: &'workspace mut [u32],
+    workers: &'workspace mut [u32],
+    twiddles: &'workspace mut [u32],
+    digits_out: &'workspace mut [u32],
+    transform_len: usize,
+    modulus_count: usize,
+}
+
+impl<'workspace> PrimeWorkspace<'workspace> {
+    /// Creates disjoint views over one validated multi-prime layout.
+    pub const fn new(
+        outputs: &'workspace mut [u32],
+        workers: &'workspace mut [u32],
+        twiddles: &'workspace mut [u32],
+        digits_out: &'workspace mut [u32],
+        transform_len: usize,
+        modulus_count: usize,
+    ) -> Self {
+        PrimeWorkspace {
+            outputs,
+            workers,
+            twiddles,
+            digits_out,
+            transform_len,
+            modulus_count,
+        }
+    }
+
+    fn square<E: ParallelExecutor>(&mut self, digits_a: &[u32], executor: &E) {
+        // This workspace is constructed only for two- or three-prime plans;
+        // the one-prime path uses its dedicated Goldilocks workspace below.
+        debug_assert!(
+            (2..=3).contains(&self.modulus_count),
+            "prime workspace requires two or three moduli"
+        );
+        let (first, output_tail_after_first) = self.outputs.split_at_mut(self.transform_len);
+        let (second, output_tail_after_second) =
+            output_tail_after_first.split_at_mut(self.transform_len);
+        let twiddle_len = self.transform_len.div_ceil(2);
+        let (twiddle_first, rest_twiddles) = self.twiddles.split_at_mut(twiddle_len);
+        let (twiddle_second, twiddle_third) = rest_twiddles.split_at_mut(twiddle_len);
+
+        if self.modulus_count == 2 {
+            executor.join(
+                || {
+                    Ntt::square_mod_slice_with_executor(
+                        first,
+                        digits_a,
+                        MODULI[0],
+                        twiddle_first,
+                        executor,
+                    );
+                },
+                || {
+                    Ntt::square_mod_slice_with_executor(
+                        second,
+                        digits_a,
+                        MODULI[1],
+                        twiddle_second,
+                        executor,
+                    );
+                },
+            );
+            return;
+        }
+
+        let (third, _) = output_tail_after_second.split_at_mut(self.transform_len);
+        executor.join(
+            || {
+                Ntt::square_mod_slice_with_executor(
+                    first,
+                    digits_a,
+                    MODULI[0],
+                    twiddle_first,
+                    executor,
+                );
+            },
+            || {
+                executor.join(
+                    || {
+                        Ntt::square_mod_slice_with_executor(
+                            second,
+                            digits_a,
+                            MODULI[1],
+                            twiddle_second,
+                            executor,
+                        );
+                    },
+                    || {
+                        Ntt::square_mod_slice_with_executor(
+                            third,
+                            digits_a,
+                            MODULI[2],
+                            twiddle_third,
+                            executor,
+                        );
+                    },
+                );
+            },
+        );
+    }
+
+    pub fn multiply<E: ParallelExecutor>(
+        &mut self,
+        digits_a: &[u32],
+        digits_b: &[u32],
+        executor: &E,
+    ) {
+        // This workspace is constructed only for two- or three-prime plans;
+        // the one-prime path uses its dedicated Goldilocks workspace below.
+        debug_assert!(
+            (2..=3).contains(&self.modulus_count),
+            "prime workspace requires two or three moduli"
+        );
+        let (first, output_tail_after_first) = self.outputs.split_at_mut(self.transform_len);
+        let (second, output_tail_after_second) =
+            output_tail_after_first.split_at_mut(self.transform_len);
+        let (scratch_first, rest_workers) = self.workers.split_at_mut(self.transform_len);
+        let (scratch_second, scratch_rest) = rest_workers.split_at_mut(self.transform_len);
+        let twiddle_len = self.transform_len.div_ceil(2);
+        let (twiddle_first, rest_twiddles) = self.twiddles.split_at_mut(twiddle_len);
+        let (twiddle_second, twiddle_third) = rest_twiddles.split_at_mut(twiddle_len);
+
+        if self.modulus_count == 2 {
+            executor.join(
+                || {
+                    Ntt::convolve_mod_slice_with_executor(
+                        first,
+                        scratch_first,
+                        digits_a,
+                        digits_b,
+                        MODULI[0],
+                        twiddle_first,
+                        executor,
+                    );
+                },
+                || {
+                    Ntt::convolve_mod_slice_with_executor(
+                        second,
+                        scratch_second,
+                        digits_a,
+                        digits_b,
+                        MODULI[1],
+                        twiddle_second,
+                        executor,
+                    );
+                },
+            );
+            return;
+        }
+
+        let (third, _) = output_tail_after_second.split_at_mut(self.transform_len);
+        let (scratch_third, _) = scratch_rest.split_at_mut(self.transform_len);
+        executor.join(
+            || {
+                Ntt::convolve_mod_slice_with_executor(
+                    first,
+                    scratch_first,
+                    digits_a,
+                    digits_b,
+                    MODULI[0],
+                    twiddle_first,
+                    executor,
+                );
+            },
+            || {
+                executor.join(
+                    || {
+                        Ntt::convolve_mod_slice_with_executor(
+                            second,
+                            scratch_second,
+                            digits_a,
+                            digits_b,
+                            MODULI[1],
+                            twiddle_second,
+                            executor,
+                        );
+                    },
+                    || {
+                        Ntt::convolve_mod_slice_with_executor(
+                            third,
+                            scratch_third,
+                            digits_a,
+                            digits_b,
+                            MODULI[2],
+                            twiddle_third,
+                            executor,
+                        );
+                    },
+                );
+            },
+        );
+    }
+
+    pub fn reconstruct_two(&mut self, convolution_len: usize, digit_bits: u32) -> &[u32] {
+        let (first, rest_outputs) = self.outputs.split_at(self.transform_len);
+        let (second, _) = rest_outputs.split_at(self.transform_len);
+        // SAFETY: the transform planner proves convolution_len <= transform_len.
+        let first_slice = unsafe { first.get_unchecked(..convolution_len) };
+        // SAFETY: the transform planner proves convolution_len <= transform_len.
+        let second_slice = unsafe { second.get_unchecked(..convolution_len) };
+        let count =
+            Ntt::reconstruct_two_slices(self.digits_out, first_slice, second_slice, digit_bits);
+        // SAFETY: CRT reconstruction returns at most the supplied output width.
+        unsafe { self.digits_out.get_unchecked(..count) }
+    }
+
+    pub fn reconstruct_three(&mut self, convolution_len: usize, digit_bits: u32) -> &[u32] {
+        let (first, rest_outputs) = self.outputs.split_at(self.transform_len);
+        let (second, third) = rest_outputs.split_at(self.transform_len);
+        let count = Ntt::reconstruct_three_slices(
+            self.digits_out,
+            // SAFETY: the transform planner proves convolution_len <= transform_len.
+            unsafe { first.get_unchecked(..convolution_len) },
+            // SAFETY: the transform planner proves convolution_len <= transform_len.
+            unsafe { second.get_unchecked(..convolution_len) },
+            // SAFETY: the transform planner proves convolution_len <= transform_len.
+            unsafe { third.get_unchecked(..convolution_len) },
+            digit_bits,
+        );
+        // SAFETY: CRT reconstruction returns at most the supplied output width.
+        unsafe { self.digits_out.get_unchecked(..count) }
+    }
+}
+
 impl Ntt {
-    /// Whether [`Self::try_mul`] can compute a product of these operand widths.
+    /// Whether the executor-aware NTT entry point can compute these widths.
     ///
     /// The capability counterpart of [`Ssa::admits_mul`](super::super::Ssa::admits_mul):
     /// it reports whether the fixed prime set carries a transform long enough for
@@ -62,436 +254,163 @@ impl Ntt {
         if len_a == 0 || len_b == 0 {
             return true;
         }
-        choose_transform_plan(len_a, len_b).is_some_and(|plan| {
-            estimated_transform_len(len_a, len_b, plan.digit_bits).is_some_and(|transform_len| {
-                MAX_TRANSFORM_LEN.is_none_or(|max_len| transform_len <= max_len)
-                    && coefficient_range_fits(transform_len, plan.digit_bits, plan.modulus_count)
-            })
+        Self::choose_transform_plan(len_a, len_b).is_some_and(|plan| {
+            Self::estimated_transform_len(len_a, len_b, plan.digit_bits).is_some_and(
+                |transform_len| {
+                    Self::MAX_TRANSFORM_LEN.is_none_or(|max_len| transform_len <= max_len)
+                        && Self::coefficient_range_fits(
+                            transform_len,
+                            plan.digit_bits,
+                            plan.modulus_count,
+                        )
+                },
+            )
         })
     }
 
-    /// Multiply two limb slices using an exact multi-prime NTT convolution.
-    ///
-    /// Returns `false` only when the required transform exceeds the roots supported
-    /// by the fixed prime set; callers can then retain the preceding Toom tier.
-    pub fn try_mul(dst: &mut [Limb], a: &[Limb], b: &[Limb]) -> bool {
-        if a.is_empty() || b.is_empty() {
+    /// Square using the supplied synchronous execution policy.
+    pub fn try_sqr_with_executor<E: ParallelExecutor>(
+        dst: &mut [Limb],
+        a: &[Limb],
+        plan: TransformPlan,
+        executor: &E,
+    ) -> bool {
+        if !plan.is_valid() {
+            return false;
+        }
+        if a.is_empty() {
             dst.fill(0);
             return true;
         }
-        let Some(plan) = choose_transform_plan(a.len(), b.len()) else {
+        let Some(capacity_a) = digit_capacity(a.len(), plan.digit_bits) else {
             return false;
         };
-        Self::try_mul_with_plan(dst, a, b, plan)
-    }
-
-    /// Multiply with an explicitly selected digit width and modulus count.
-    ///
-    /// This entry point is re-exported only by the feature-gated benchmark facade;
-    /// production dispatch always uses [`choose_transform_plan`].
-    #[cfg(feature = "_internal-tune")]
-    pub fn try_mul_with_forced_plan(
-        dst: &mut [Limb],
-        a: &[Limb],
-        b: &[Limb],
-        digit_bits: u32,
-        modulus_count: usize,
-    ) -> bool {
-        if !(1..=31).contains(&digit_bits) || !(1..=MODULI.len()).contains(&modulus_count) {
+        let Some(max_transform_len) = transform_capacity(capacity_a, capacity_a) else {
+            return false;
+        };
+        if Self::MAX_TRANSFORM_LEN.is_some_and(|max_len| max_transform_len > max_len) {
             return false;
         }
-        Self::try_mul_with_plan(
-            dst,
-            a,
-            b,
-            TransformPlan {
-                digit_bits,
-                modulus_count,
-            },
-        )
-    }
 
-    pub fn try_mul_with_plan(
-        dst: &mut [Limb],
-        a: &[Limb],
-        b: &[Limb],
-        plan: TransformPlan,
-    ) -> bool {
-        if a.is_empty() || b.is_empty() {
-            dst.fill(0);
-            return true;
-        }
-        let digits_a = limbs_to_digits(a, plan.digit_bits);
-        let digits_b = limbs_to_digits(b, plan.digit_bits);
-        if digits_a.is_empty() || digits_b.is_empty() {
-            dst.fill(0);
-            return true;
-        }
-        let Some(convolution_len) = digits_a
-            .len()
-            .checked_add(digits_b.len())
-            .and_then(|sum| sum.checked_sub(1))
+        let twiddle_len = max_transform_len.div_ceil(2);
+        let Some(prime_workspace_len) = max_transform_len.checked_mul(plan.modulus_count) else {
+            return false;
+        };
+        let Some(twiddle_workspace) = twiddle_len.checked_mul(plan.modulus_count) else {
+            return false;
+        };
+        let Some(scratch_len) = capacity_a
+            .checked_add(prime_workspace_len)
+            .and_then(|total| total.checked_add(max_transform_len))
+            .and_then(|total| total.checked_add(max_transform_len))
+            .and_then(|total| total.checked_add(twiddle_workspace))
         else {
+            return false;
+        };
+        let mut scratch_u32 = vec![0_u32; scratch_len];
+        let (buf_a, rest_all) = scratch_u32.split_at_mut(capacity_a);
+        let (rest_transforms, scratch_tail) = rest_all.split_at_mut(prime_workspace_len);
+        let (workers, digit_tail) = scratch_tail.split_at_mut(max_transform_len);
+        let (digits_out, twiddle_buf) = digit_tail.split_at_mut(max_transform_len);
+
+        // SAFETY: validated capacities reserve every possible digit for `a`.
+        let len_a = unsafe { Self::limbs_to_digits_into(buf_a, a, plan.digit_bits) };
+        if len_a == 0 {
+            dst.fill(0);
+            return true;
+        }
+        // SAFETY: len_a <= buf_a.len() returned by limbs_to_digits_into.
+        let digits_a = unsafe { buf_a.get_unchecked(..len_a) };
+
+        let Some(convolution_len) = len_a.checked_mul(2).and_then(|sum| sum.checked_sub(1)) else {
             return false;
         };
         let Some(transform_len) = convolution_len.checked_next_power_of_two() else {
             return false;
         };
-        if MAX_TRANSFORM_LEN.is_some_and(|max_len| transform_len > max_len)
-            || !coefficient_range_fits(transform_len, plan.digit_bits, plan.modulus_count)
-        {
+        if !Self::coefficient_range_fits(transform_len, plan.digit_bits, plan.modulus_count) {
             return false;
         }
 
         if plan.modulus_count == 1 {
-            let digits = Self::multiply_digits(
-                &digits_a,
-                &digits_b,
+            let Some(single_scratch_len) = transform_len.checked_mul(2) else {
+                return false;
+            };
+            let mut scratch_u64 = vec![0_u64; single_scratch_len];
+            let (single_output, _) = rest_transforms.split_at_mut(transform_len);
+            let count = Self::square_digits_into(
+                single_output,
+                digits_a,
                 convolution_len,
                 transform_len,
                 plan.digit_bits,
+                &mut scratch_u64,
+                executor,
             );
-            digits_to_limbs(dst, &digits, plan.digit_bits);
+            // SAFETY: count <= single_output.len().
+            let valid_digits = unsafe { single_output.get_unchecked(..count) };
+            // SAFETY: the destination is the validated product width and the
+            // reconstructed digits fit that width.
+            unsafe {
+                Self::digits_to_limbs(dst, valid_digits, plan.digit_bits);
+            }
             return true;
         }
 
-        let mut right_scratch = vec![0; transform_len];
-        let mut first = Vec::with_capacity(transform_len);
-        convolve_mod_into(
-            &mut first,
-            &mut right_scratch,
-            &digits_a,
-            &digits_b,
-            convolution_len,
+        let mut prime_workspace = PrimeWorkspace::new(
+            rest_transforms,
+            workers,
+            twiddle_buf,
+            digits_out,
             transform_len,
-            MODULI[0],
+            plan.modulus_count,
         );
-        let mut second = Vec::with_capacity(transform_len);
-        convolve_mod_into(
-            &mut second,
-            &mut right_scratch,
-            &digits_a,
-            &digits_b,
-            convolution_len,
-            transform_len,
-            MODULI[1],
-        );
-        if plan.modulus_count == 2 {
-            Self::reconstruct_two_into(&mut right_scratch, &first, &second, plan.digit_bits);
+        prime_workspace.square(digits_a, executor);
+        let valid_digits = if plan.modulus_count == 2 {
+            prime_workspace.reconstruct_two(convolution_len, plan.digit_bits)
         } else {
-            let mut third = Vec::with_capacity(transform_len);
-            convolve_mod_into(
-                &mut third,
-                &mut right_scratch,
-                &digits_a,
-                &digits_b,
-                convolution_len,
-                transform_len,
-                MODULI[2],
-            );
-            Self::reconstruct_three_into(
-                &mut right_scratch,
-                &first,
-                &second,
-                &third,
-                plan.digit_bits,
-            );
+            prime_workspace.reconstruct_three(convolution_len, plan.digit_bits)
+        };
+        // SAFETY: the destination is the validated product width and the
+        // reconstructed digits fit that width.
+        unsafe {
+            Self::digits_to_limbs(dst, valid_digits, plan.digit_bits);
         }
-        digits_to_limbs(dst, &right_scratch, plan.digit_bits);
+        true
+    }
+
+    /// Multiply using the supplied synchronous execution policy.
+    pub fn try_mul_with_executor<E: ParallelExecutor>(
+        dst: &mut [Limb],
+        a: &[Limb],
+        b: &[Limb],
+        plan: TransformPlan,
+        executor: &E,
+    ) -> bool {
+        let Some(prepared) = NttMultiplicationPlan::try_new(a, b, plan) else {
+            return false;
+        };
+        if dst.len() < prepared.destination_len() {
+            return false;
+        }
+        // SAFETY: this boundary checked the complete destination width and the
+        // prepared plan owns the immutable operand/geometry proof.
+        unsafe { prepared.run_allocating(dst, executor) }
         true
     }
 }
 
-fn choose_transform_plan(len_a: usize, len_b: usize) -> Option<TransformPlan> {
-    let three_prime_len = estimated_transform_len(len_a, len_b, THREE_PRIME_DIGIT_BITS)?;
-    let three_prime_work = three_prime_len.checked_mul(3)?;
-    let mut best_work = three_prime_work;
-    let mut best_bits = THREE_PRIME_DIGIT_BITS;
-    let mut best_count = 3;
-    for digit_bits in ONE_PRIME_DIGIT_BITS {
-        let transform_len = estimated_transform_len(len_a, len_b, digit_bits)?;
-        if transform_len < best_work && coefficient_range_fits(transform_len, digit_bits, 1) {
-            best_work = transform_len;
-            best_bits = digit_bits;
-            best_count = 1;
-        }
-    }
-    let mut best_two_bits = 0;
-    for digit_bits in TWO_PRIME_DIGIT_BITS {
-        let transform_len = estimated_transform_len(len_a, len_b, digit_bits)?;
-        let transform_work = transform_len.checked_mul(2)?;
-        if transform_work < best_work && coefficient_range_fits(transform_len, digit_bits, 2) {
-            best_work = transform_work;
-            best_two_bits = digit_bits;
-        }
-    }
-    if best_two_bits != 0 {
-        best_bits = best_two_bits;
-        best_count = 2;
-    }
-    Some(TransformPlan {
-        digit_bits: best_bits,
-        modulus_count: best_count,
-    })
+pub fn digit_capacity(limb_len: usize, digit_bits: u32) -> Option<usize> {
+    let digit_width = usize::try_from(digit_bits).ok()?;
+    limb_len
+        .checked_mul(LIMB_BITS)
+        .map(|bits| bits.div_ceil(digit_width))
+        .and_then(|digits| digits.checked_add(1))
 }
 
-fn estimated_transform_len(len_a: usize, len_b: usize, digit_bits: u32) -> Option<usize> {
-    // SAFETY: digit_bits is a configured u32 constant, always fits in usize.
-    let digit_bits_usize = unsafe { usize::try_from(digit_bits).unwrap_unchecked() };
-    let digits_a = len_a.checked_mul(LIMB_BITS)?.div_ceil(digit_bits_usize);
-    let digits_b = len_b.checked_mul(LIMB_BITS)?.div_ceil(digit_bits_usize);
-    digits_a
-        .checked_add(digits_b)
-        .and_then(|sum| sum.checked_sub(1))?
-        .checked_next_power_of_two()
-}
-
-fn coefficient_range_fits(transform_len: usize, digit_bits: u32, count: usize) -> bool {
-    let digit_bound = (1_u128 << digit_bits).wrapping_sub(1);
-    // A convolution coefficient contains at most transform_len products, each
-    // at most (base-1)^2. These configured bounds stay below 2^90.
-    // SAFETY: transform_len ≤ 2^26, fits in u128.
-    let coefficient_bound = unsafe { u128::try_from(transform_len).unwrap_unchecked() }
-        .wrapping_mul(digit_bound)
-        .wrapping_mul(digit_bound);
-    let mut crt_range = if count == 1 { PRIME_U128 } else { 1_u128 };
-    if count > 1 {
-        for modulus in MODULI.iter().take(count) {
-            crt_range = crt_range.wrapping_mul(u128::from(modulus.prime));
-        }
-    }
-    coefficient_bound < crt_range
-}
-
-fn convolve_mod_into(
-    left: &mut Vec<u32>,
-    right: &mut [u32],
-    a: &[u32],
-    b: &[u32],
-    convolution_len: usize,
-    transform_len: usize,
-    modulus: Modulus,
-) {
-    left.clear();
-    left.resize(transform_len, 0);
-    right.fill(0);
-    for (dst, src) in left.iter_mut().zip(a) {
-        *dst = src.rem_euclid(modulus.prime);
-    }
-    for (dst, src) in right.iter_mut().zip(b) {
-        *dst = src.rem_euclid(modulus.prime);
-    }
-    forward_transform_pair(left, right, modulus);
-    for (left_value, right_value) in left.iter_mut().zip(right.iter()) {
-        *left_value = montgomery_mul(*left_value, *right_value, modulus);
-    }
-    inverse_transform(left, modulus);
-    left.truncate(convolution_len);
-}
-
-fn forward_transform_pair(left: &mut [u32], right: &mut [u32], modulus: Modulus) {
-    for (left_value, right_value) in left.iter_mut().zip(right.iter_mut()) {
-        *left_value = to_montgomery(*left_value, modulus);
-        *right_value = to_montgomery(*right_value, modulus);
-    }
-    let root = to_montgomery(modulus.primitive_root, modulus);
-    // DIF emits bit-reversed frequency order. Both operands use the same
-    // order, so pointwise products align and the inverse DIT can consume that
-    // order directly without any permutation pass.
-    let mut block_len = left.len();
-    while block_len >= 2 {
-        // SAFETY: block_len is bounded by transform length ≤ 2^28, fits in u32.
-        let exponent = modulus
-            .prime
-            .wrapping_sub(1)
-            .div_euclid(unsafe { u32::try_from(block_len).unwrap_unchecked() });
-        let block_root = montgomery_pow(root, exponent, modulus);
-        let half_len = block_len >> 1;
-        for (left_block, right_block) in left
-            .chunks_exact_mut(block_len)
-            .zip(right.chunks_exact_mut(block_len))
-        {
-            let (left_low, left_high) = left_block.split_at_mut(half_len);
-            let (right_low, right_high) = right_block.split_at_mut(half_len);
-            let mut twiddle = to_montgomery(1, modulus);
-            for ((left_low_value, left_high_value), (right_low_value, right_high_value)) in left_low
-                .iter_mut()
-                .zip(left_high)
-                .zip(right_low.iter_mut().zip(right_high))
-            {
-                let left_lower = *left_low_value;
-                let left_upper = *left_high_value;
-                *left_low_value = add_mod(left_lower, left_upper, modulus.prime);
-                *left_high_value = montgomery_mul(
-                    sub_mod(left_lower, left_upper, modulus.prime),
-                    twiddle,
-                    modulus,
-                );
-
-                let right_lower = *right_low_value;
-                let right_upper = *right_high_value;
-                *right_low_value = add_mod(right_lower, right_upper, modulus.prime);
-                *right_high_value = montgomery_mul(
-                    sub_mod(right_lower, right_upper, modulus.prime),
-                    twiddle,
-                    modulus,
-                );
-                twiddle = montgomery_mul(twiddle, block_root, modulus);
-            }
-        }
-        block_len >>= 1;
-    }
-}
-
-fn inverse_transform(values: &mut [u32], modulus: Modulus) {
-    let root = montgomery_pow(
-        to_montgomery(modulus.primitive_root, modulus),
-        modulus.prime.wrapping_sub(2),
-        modulus,
-    );
-    let mut block_len = 2;
-    while block_len <= values.len() {
-        // SAFETY: block_len is bounded by transform length ≤ 2^28, fits in u32.
-        let exponent = modulus
-            .prime
-            .wrapping_sub(1)
-            .div_euclid(unsafe { u32::try_from(block_len).unwrap_unchecked() });
-        let block_root = montgomery_pow(root, exponent, modulus);
-        let half_len = block_len >> 1;
-        for block in values.chunks_exact_mut(block_len) {
-            let (low, high) = block.split_at_mut(half_len);
-            let mut twiddle = to_montgomery(1, modulus);
-            for (low_value, high_value) in low.iter_mut().zip(high) {
-                let upper = montgomery_mul(*high_value, twiddle, modulus);
-                let lower = *low_value;
-                *low_value = add_mod(lower, upper, modulus.prime);
-                *high_value = sub_mod(lower, upper, modulus.prime);
-                twiddle = montgomery_mul(twiddle, block_root, modulus);
-            }
-        }
-        block_len = block_len.wrapping_mul(2);
-    }
-    let inverse_len = montgomery_pow(
-        to_montgomery(
-            // SAFETY: values.len() ≤ transform length ≤ 2^28, always fits in u32.
-            unsafe { u32::try_from(values.len()).unwrap_unchecked() },
-            modulus,
-        ),
-        modulus.prime.wrapping_sub(2),
-        modulus,
-    );
-    for value in values {
-        *value = montgomery_mul(montgomery_mul(*value, inverse_len, modulus), 1, modulus);
-    }
-}
-
-fn limbs_to_digits(limbs: &[Limb], digit_bits: u32) -> Vec<u32> {
-    let digit_mask = (1_u128 << digit_bits).wrapping_sub(1);
-    // SAFETY: digit_bits is a configured u32 constant ≤ usize::BITS, always fits.
-    let capacity = limbs
-        .len()
-        .wrapping_mul(LIMB_BITS)
-        .div_ceil(unsafe { usize::try_from(digit_bits).unwrap_unchecked() });
-    let mut digits = Vec::with_capacity(capacity);
-    let mut accumulator = 0_u128;
-    let mut available_bits = 0_u32;
-    for limb in limbs {
-        // SAFETY: Limb (u64/u32/u16) always fits in u128.
-        accumulator |= unsafe { u128::try_from(*limb).unwrap_unchecked() } << available_bits;
-        available_bits = available_bits.wrapping_add(Limb::BITS);
-        while available_bits >= digit_bits {
-            // SAFETY: mask limits the result to digit_bits ≤ 32, always fits in u32.
-            digits.push(unsafe { u32::try_from(accumulator & digit_mask).unwrap_unchecked() });
-            accumulator >>= digit_bits;
-            available_bits = available_bits.wrapping_sub(digit_bits);
-        }
-    }
-    if available_bits != 0 {
-        // SAFETY: available_bits < digit_bits ≤ 32, so accumulator < 2^32, fits in u32.
-        digits.push(unsafe { u32::try_from(accumulator).unwrap_unchecked() });
-    }
-    while digits.last().copied() == Some(0) {
-        let _ = digits.pop();
-    }
-    digits
-}
-
-fn digits_to_limbs(dst: &mut [Limb], digits: &[u32], digit_bits: u32) {
-    dst.fill(0);
-    let limb_mask = (1_u128 << Limb::BITS).wrapping_sub(1);
-    let mut limbs = dst.iter_mut();
-    let mut accumulator = 0_u128;
-    let mut available_bits = 0_u32;
-    for digit in digits {
-        accumulator |= u128::from(*digit) << available_bits;
-        available_bits = available_bits.wrapping_add(digit_bits);
-        if available_bits >= Limb::BITS {
-            if let Some(limb) = limbs.next() {
-                // SAFETY: limb_mask masks to Limb::BITS, always fits in Limb.
-                *limb = unsafe { Limb::try_from(accumulator & limb_mask).unwrap_unchecked() };
-            }
-            accumulator >>= Limb::BITS;
-            available_bits = available_bits.wrapping_sub(Limb::BITS);
-        }
-    }
-    if available_bits != 0
-        && let Some(limb) = limbs.next()
-    {
-        // SAFETY: available_bits < Limb::BITS, so accumulator < 2^Limb::BITS, fits in Limb.
-        *limb = unsafe { Limb::try_from(accumulator).unwrap_unchecked() };
-    }
-}
-
-fn montgomery_pow(mut base: u32, mut exponent: u32, modulus: Modulus) -> u32 {
-    let mut result = to_montgomery(1, modulus);
-    while exponent != 0 {
-        if exponent & 1 != 0 {
-            result = montgomery_mul(result, base, modulus);
-        }
-        base = montgomery_mul(base, base, modulus);
-        exponent >>= 1;
-    }
-    result
-}
-
-fn to_montgomery(value: u32, modulus: Modulus) -> u32 {
-    montgomery_mul(value, modulus.radix_squared, modulus)
-}
-
-#[allow(
-    clippy::as_conversions,
-    clippy::cast_possible_truncation,
-    reason = "Montgomery reduction intentionally extracts the low radix word; REDC then proves the quotient is below 2p < 2^32"
-)]
-fn montgomery_mul(a: u32, b: u32, modulus: Modulus) -> u32 {
-    let product = u64::from(a).wrapping_mul(u64::from(b));
-    let factor = (product as u32).wrapping_mul(modulus.neg_inverse);
-    let reduced = product
-        .wrapping_add(u64::from(factor).wrapping_mul(u64::from(modulus.prime)))
-        .wrapping_shr(32);
-    // Montgomery REDC yields a value below 2p; p < 2^31 therefore proves
-    // reduced < 2^32 and the conversion is exact.
-    let reduced_u32 = reduced as u32;
-    if reduced_u32 >= modulus.prime {
-        reduced_u32.wrapping_sub(modulus.prime)
-    } else {
-        reduced_u32
-    }
-}
-
-const fn add_mod(a: u32, b: u32, modulus: u32) -> u32 {
-    let sum = a.wrapping_add(b);
-    if sum >= modulus {
-        sum.wrapping_sub(modulus)
-    } else {
-        sum
-    }
-}
-
-const fn sub_mod(a: u32, b: u32, modulus: u32) -> u32 {
-    if a >= b {
-        a.wrapping_sub(b)
-    } else {
-        modulus.wrapping_sub(b.wrapping_sub(a))
-    }
+pub fn transform_capacity(capacity_a: usize, capacity_b: usize) -> Option<usize> {
+    capacity_a
+        .checked_add(capacity_b)
+        .and_then(|sum| sum.checked_sub(1))
+        .and_then(usize::checked_next_power_of_two)
 }

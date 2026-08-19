@@ -134,6 +134,26 @@ pub const SCALING_SIZES: [usize; 9] = [
     1_024, 2_048, 4_096, 8_192, 16_384, 32_768, 65_536, 131_072, 262_144,
 ];
 
+/// Dense sampling ladder from 256 limbs (16 Kibit) up to 65,536 limbs (4 Mibit).
+pub const DENSE_COMPARE_SIZES: [usize; 28] = [
+    256, 384, 512, 640, 768, 896, 1_024, 1_280, 1_536, 1_792, 2_048, 2_560, 3_072, 3_584, 4_096,
+    5_120, 6_144, 7_168, 8_192, 10_240, 12_288, 14_336, 16_384, 20_480, 24_576, 32_768, 49_152,
+    65_536,
+];
+
+/// Continuation of dense sampling for NTT from 98,304 limbs (6 Mibit) up to 8,388,608 limbs (512 Mibit).
+pub const DENSE_COMPARE_NTT_HUGE_SIZES: [usize; 14] = [
+    98_304, 131_072, 196_608, 262_144, 393_216, 524_288, 786_432, 1_048_576, 1_572_864, 2_097_152,
+    3_145_728, 4_194_304, 6_291_456, 8_388_608,
+];
+
+/// Continuation of dense sampling from 98,304 limbs (6 Mibit) up to 33,554,432 limbs (2 Gibit).
+pub const DENSE_COMPARE_HUGE_SIZES: [usize; 19] = [
+    98_304, 131_072, 196_608, 262_144, 393_216, 524_288, 786_432, 1_048_576, 1_572_864, 2_097_152,
+    3_145_728, 4_194_304, 6_291_456, 8_388_608, 16_777_216, 20_971_520, 25_165_824, 29_360_128,
+    33_554_432,
+];
+
 /// The continuation of `SCALING_SIZES` past the point where one product costs
 /// enough that divan's default sampling would run for hours.
 ///

@@ -18,15 +18,14 @@ use super::{
 use super::{
     SQR_SSA_THRESHOLD, SSA_BASE_MODULUS_BITS, SSA_BASECASE_COST_WEIGHT_16THS,
     SSA_BNM1_BASECASE_LIMBS, SSA_COEFFICIENT_VISIT_OVERHEAD, SSA_DIRECT_SHIFT_MAX_LIMBS,
-    SSA_FOUR_STEP_MIN_LOG, SSA_GEOMETRY_EXPONENTS, SSA_NEGACYCLIC_FACTOR3_THRESHOLD,
-    SSA_NEGACYCLIC_FACTOR5_THRESHOLD, SSA_NESTED_COST_PENALTY_16THS, SSA_SQRT2_TWIST_PASSES,
-    SSA_THRESHOLD, SSA_TRANSPOSE_TILE_LIMBS,
+    SSA_NEGACYCLIC_FACTOR3_THRESHOLD, SSA_NEGACYCLIC_FACTOR5_THRESHOLD,
+    SSA_NESTED_COST_PENALTY_16THS, SSA_THRESHOLD,
 };
 
 use recursive::Recursive;
 use shared::{AddMulKernel, SharedEval};
 #[cfg(all(feature = "_internal-tune", not(target_pointer_width = "16")))]
-use ssa::{FftPlan, SsaCrt, SsaPlan, SsaRing, SsaTransform};
+use ssa::{FftPlan, SsaCrt, SsaRing, SsaTransform};
 
 mod basecase;
 mod dispatch;
@@ -56,8 +55,12 @@ pub use karatsuba::Karatsuba;
 pub use lopsided::Lopsided;
 pub use low::LowProduct;
 pub use ntt::Ntt;
+#[cfg(feature = "_internal-tune")]
+pub use ntt::{NttMultiplicationPlan, TransformPlan};
 #[cfg(not(target_pointer_width = "16"))]
 pub use ssa::{Ssa, TransformChoice};
+#[cfg(all(feature = "_internal-tune", not(target_pointer_width = "16")))]
+pub use ssa::{SsaMultiplicationPlan, SsaSquaringPlan};
 pub use toom3::Toom3;
 pub use toom4::Toom4;
 pub use toom6::Toom6;

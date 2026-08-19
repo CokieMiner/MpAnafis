@@ -18,10 +18,7 @@
 use core::hint::black_box;
 
 use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
-use mp_anafis::tune_api::tier::{
-    Limb,
-    state::{MulBenchScratch, bench_lopsided_mul_scratch_len, bench_lopsided_mul_with_scratch},
-};
+use mp_anafis::tune_api::tier::{Limb, Tuner, state::MultiplicationBenchState};
 
 use crate::shared::operands_pair;
 
@@ -37,7 +34,7 @@ const SHAPES: [(usize, usize); 5] = [
 fn dispatched(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
     let (larger_len, smaller_len) = shape;
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
-    let mut reusable = MulBenchScratch::default();
+    let mut reusable = MultiplicationBenchState::default();
     bencher.bench_local(|| {
         reusable.run(
             black_box(&mut destination),
@@ -65,9 +62,9 @@ fn blocked(bencher: divan::Bencher<'_, '_>, shape: (usize, usize), block_len: us
     let (larger_len, smaller_len) = shape;
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
     let mut scratch =
-        vec![Limb::MIN; bench_lopsided_mul_scratch_len(larger_len, smaller_len, block_len)];
+        vec![Limb::MIN; Tuner::bench_lopsided_mul_scratch_len(larger_len, smaller_len, block_len)];
     bencher.bench_local(|| {
-        bench_lopsided_mul_with_scratch(
+        Tuner::bench_lopsided_mul_with_scratch(
             black_box(&mut destination),
             black_box(&larger),
             black_box(&smaller),

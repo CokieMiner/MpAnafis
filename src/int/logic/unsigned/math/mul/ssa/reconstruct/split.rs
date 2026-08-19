@@ -136,6 +136,101 @@ impl SsaCoefficients {
         true
     }
 
+    /// Splits an operand, applies an even half-bit pre-twist, and computes the
+    /// first DIF butterfly stage across both matrix halves in a single pass.
+    ///
+    /// When the active operand digits occupy at most the lower half of the transform
+    /// length (`transform_len / 2`), the upper matrix half starts at zero. The first
+    /// DIF butterfly stage is therefore `(low, high) = (low, low * w^j)`.
+    ///
+    /// This method extracts chunk `j`, computes `low = chunk * theta^j`, and computes
+    /// `high = low * w^j = chunk * (theta^j * w^j)`, writing directly to both halves
+    /// of the matrix in one streaming pass. This avoids writing zeros to the high half
+    /// and eliminates a complete DRAM read-and-rewrite pass of the matrix.
+    ///
+    /// Returns `false` when `twist_step_half` is odd, `transform_len < 2`, or `matrix`
+    /// is undersized.
+    ///
+    /// # Safety
+    ///
+    /// `matrix` contains at least `transform_len * SsaRing::coeff_limbs(inner_bits)` limbs,
+    /// and `scratch` is a disjoint coefficient-sized buffer.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Internal FFT staging requires explicit operand, matrix, geometry, and scratch buffers"
+    )]
+    pub unsafe fn split_twisted_and_stage1_dif(
+        src: &[Limb],
+        matrix: &mut [Limb],
+        transform_len: usize,
+        chunk_bits: usize,
+        inner_bits: usize,
+        twist_step_half: usize,
+        omega_shift: usize,
+        scratch: &mut [Limb],
+    ) -> bool {
+        if !twist_step_half.is_multiple_of(2) || transform_len < 2 {
+            return false;
+        }
+
+        let layout = SplitLayout::new(chunk_bits, inner_bits);
+        debug_assert!(scratch.len() >= layout.cl, "split scratch is undersized");
+        let period = inner_bits.wrapping_mul(2);
+        let whole_step = twist_step_half.wrapping_shr(1);
+        let half_len = transform_len >> 1;
+        let half_matrix_len = half_len.wrapping_mul(layout.cl);
+
+        if matrix.len() < transform_len.wrapping_mul(layout.cl) {
+            return false;
+        }
+
+        let (low_matrix, high_matrix) = matrix.split_at_mut(half_matrix_len);
+
+        // SAFETY: this function's contract guarantees one complete scratch coefficient.
+        let stage = unsafe { scratch.get_unchecked_mut(..layout.cl) };
+        let mut low_shift = 0_usize;
+        let mut twiddle_shift = 0_usize;
+
+        for (index, (low_slot, high_slot)) in low_matrix
+            .chunks_exact_mut(layout.cl)
+            .zip(high_matrix.chunks_exact_mut(layout.cl))
+            .enumerate()
+        {
+            stage.fill(0);
+            // SAFETY: stage is one complete zeroed coefficient.
+            unsafe {
+                extract_chunk(src, stage, index, layout);
+            }
+
+            if low_shift == 0 {
+                low_slot.copy_from_slice(stage);
+            } else {
+                // SAFETY: stage is canonical, and low_slot and stage are disjoint
+                // complete coefficients in the same Fermat ring.
+                unsafe {
+                    SsaRing::shift_from(low_slot, stage, low_shift, inner_bits);
+                }
+            }
+
+            let high_shift =
+                SsaRing::reduce_mod_period(low_shift.wrapping_add(twiddle_shift), period);
+            if high_shift == 0 {
+                high_slot.copy_from_slice(stage);
+            } else {
+                // SAFETY: stage is canonical, and high_slot and stage are disjoint
+                // complete coefficients in the same Fermat ring.
+                unsafe {
+                    SsaRing::shift_from(high_slot, stage, high_shift, inner_bits);
+                }
+            }
+
+            low_shift = SsaRing::reduce_mod_period(low_shift.wrapping_add(whole_step), period);
+            twiddle_shift =
+                SsaRing::reduce_mod_period(twiddle_shift.wrapping_add(omega_shift), period);
+        }
+        true
+    }
+
     /// Folds the high accumulator limbs into the low half using `2^mod_bits = -1`.
     ///
     /// # Safety
@@ -167,10 +262,10 @@ impl SsaCoefficients {
 
         let sub_count = high_len.min(ml_outer);
         // SAFETY: sub_count <= ml_outer <= outer_cl <= dst.len().
-        let borrow =
-            Addition::sub_slice_in_place(unsafe { dst.get_unchecked_mut(..sub_count) }, unsafe {
-                high_copy.get_unchecked(..sub_count)
-            });
+        let low = unsafe { dst.get_unchecked_mut(..sub_count) };
+        // SAFETY: sub_count <= high_len == high_copy.len().
+        let high = unsafe { high_copy.get_unchecked(..sub_count) };
+        let borrow = Addition::sub_slice_in_place(low, high);
 
         // SAFETY: sub_count <= ml_outer <= dst.len().
         let final_borrow = borrow != 0

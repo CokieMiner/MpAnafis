@@ -37,6 +37,19 @@ impl InternalMpUint {
             return self.clone();
         }
 
+        if let [u0] = *self.limbs() {
+            let mut unused = Self::zero();
+            let rem = Division::div_rem_1::<false>(other.limbs(), u0, &mut unused);
+            let ans = Gcd::gcd_limb(u0, rem);
+            return Self::from_limb(ans);
+        }
+        if let [v0] = *other.limbs() {
+            let mut unused = Self::zero();
+            let rem = Division::div_rem_1::<false>(self.limbs(), v0, &mut unused);
+            let ans = Gcd::gcd_limb(v0, rem);
+            return Self::from_limb(ans);
+        }
+
         let shift = min(self.trailing_zeros(), other.trailing_zeros());
         let mut u = self.clone();
         let mut v = other.clone();

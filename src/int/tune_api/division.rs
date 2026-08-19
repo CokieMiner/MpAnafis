@@ -7,7 +7,7 @@ use super::{DivScratch, Division, InternalMpUint, Limb};
 /// Algorithms for multi-precision division.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
-pub enum Algorithm {
+pub enum DivisionAlgorithm {
     /// Configured production dispatcher.
     Production,
     /// Knuth's Algorithm D basecase.
@@ -19,7 +19,7 @@ pub enum Algorithm {
 }
 
 /// Pre-allocated state for comparing division algorithms.
-pub struct Tuner {
+pub struct DivisionRunner {
     num: InternalMpUint,
     den: InternalMpUint,
     q: InternalMpUint,
@@ -27,20 +27,22 @@ pub struct Tuner {
     scratch: DivScratch,
 }
 
-impl Debug for Tuner {
+impl Debug for DivisionRunner {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
-        formatter.debug_struct("Tuner").finish_non_exhaustive()
+        formatter
+            .debug_struct("DivisionRunner")
+            .finish_non_exhaustive()
     }
 }
 
-impl Tuner {
+impl DivisionRunner {
     /// Create a benchmark pair from raw limbs, allocating only here.
     ///
     /// # Panics
     ///
     /// Panics if `den` represents zero.
     #[must_use]
-    pub fn new(num: &[Limb], den: &[Limb]) -> Self {
+    pub(crate) fn new(num: &[Limb], den: &[Limb]) -> Self {
         assert!(
             den.iter().any(|&limb| limb != 0),
             "division tuner denominator is zero"
@@ -61,30 +63,30 @@ impl Tuner {
     }
 
     /// Executes the specified division algorithm.
-    pub fn run(&mut self, algorithm: Algorithm) {
+    pub fn run(&mut self, algorithm: DivisionAlgorithm) {
         match algorithm {
-            Algorithm::Production => Division::div_rem_into(
+            DivisionAlgorithm::Production => Division::div_rem_into(
                 &self.num,
                 &self.den,
                 &mut self.q,
                 &mut self.r,
                 &mut self.scratch,
             ),
-            Algorithm::AlgorithmD => Division::algorithm_d(
+            DivisionAlgorithm::AlgorithmD => Division::algorithm_d(
                 &self.num,
                 &self.den,
                 &mut self.q,
                 &mut self.r,
                 &mut self.scratch,
             ),
-            Algorithm::BurnikelZiegler => Division::burnikel_ziegler(
+            DivisionAlgorithm::BurnikelZiegler => Division::burnikel_ziegler(
                 &self.num,
                 &self.den,
                 &mut self.q,
                 &mut self.r,
                 &mut self.scratch,
             ),
-            Algorithm::NewtonRaphson => Division::newton(
+            DivisionAlgorithm::NewtonRaphson => Division::newton(
                 &self.num,
                 &self.den,
                 &mut self.q,

@@ -356,7 +356,6 @@ fn divrem_2by1_reciprocal(u1: Limb, u0: Limb, d: Limb, v: Limb) -> (Limb, Limb) 
 mod tests {
     use super::*;
 
-    use alloc::vec;
     use proptest::prelude::*;
 
     use crate::int::types::LIMB_BITS;
@@ -375,10 +374,10 @@ mod tests {
             const DIVISOR: u128 = 10_000_000_000_000_000_000;
 
             let dividend = u128::from(high).wrapping_shl(64).wrapping_add(u128::from(low));
-            let mut value = InternalMpUint::from_limbs(vec![
+            let mut value = InternalMpUint::from_limbs_2(
                 usize::try_from(low).expect("u64 fits in usize on 64-bit targets"),
                 usize::try_from(high).expect("u64 fits in usize on 64-bit targets"),
-            ]);
+            );
             let remainder = div_rem_decimal_chunk(&mut value);
 
             prop_assert_eq!(
@@ -411,7 +410,7 @@ mod tests {
             mid in any::<Limb>(),
             high in any::<Limb>(),
         ) {
-            let original = InternalMpUint::from_limbs(vec![low, mid, high]);
+            let original = InternalMpUint::from_limbs_4(low, mid, high, 0);
             let mut value = original.clone();
             let remainder = div_rem_decimal_chunk(&mut value);
             let divisor = InternalMpUint::from_limb(DECIMAL_CHUNK_DIVISOR);
@@ -447,7 +446,7 @@ mod tests {
         let mut shifted_value = exact;
         shifted_value.shl_assign(LIMB_BITS);
         let shifted_remainder = div_rem_decimal_chunk(&mut shifted_value);
-        assert_eq!(shifted_value, InternalMpUint::from_limbs(alloc::vec![0, 1]));
+        assert_eq!(shifted_value, InternalMpUint::from_limbs_2(0, 1));
         assert_eq!(shifted_remainder, 0);
     }
 }

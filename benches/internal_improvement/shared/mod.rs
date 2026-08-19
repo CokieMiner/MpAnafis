@@ -6,5 +6,7 @@
 pub mod operands;
 pub mod sizes;
 
-pub use operands::{operand, operands, operands_pair};
+#[cfg(feature = "_internal-tune")]
+pub use operands::{gmp_equal_reference, gmp_pair_reference};
+pub use operands::{operand, operands, operands_pair, validate_and_warm_product};
 pub use sizes::*;

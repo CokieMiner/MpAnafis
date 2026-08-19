@@ -13,24 +13,29 @@
 use core::hint::black_box;
 
 use mp_anafis::tune_api::tier::{
-    Limb,
-    transform::{bench_ssa_mul_scratch_len, bench_ssa_mul_with_scratch},
+    Tuner,
+    transform::{SsaGeometryPolicy, SsaScratchPolicy, TransformExecutor},
 };
 
-use crate::shared::operands_pair;
+use crate::shared::{gmp_pair_reference, operands_pair, validate_and_warm_product};
 
 const WIDTHS: [usize; 6] = [8_192, 32_769, 131_073, 262_145, 524_289, 1_048_577];
 
 #[divan::bench(args = WIDTHS)]
 fn forced_transform(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (larger, smaller, mut destination) = operands_pair(len, len);
-    let mut scratch = vec![Limb::MIN; bench_ssa_mul_scratch_len(len, len)];
-    bencher.bench_local(|| {
-        bench_ssa_mul_with_scratch(
-            black_box(&mut destination),
-            black_box(&larger),
-            black_box(&smaller),
-            black_box(&mut scratch),
-        );
+    let mut runner = Tuner::bench_ssa_multiplication(
+        SsaGeometryPolicy::Forced,
+        TransformExecutor::Sequential,
+        SsaScratchPolicy::Reusable,
+        &larger,
+        &smaller,
+    )
+    .expect("forced SSA geometry is valid");
+    let expected = gmp_pair_reference(&larger, &smaller);
+    validate_and_warm_product(&expected, "forced SSA base-modulus product", |probe| {
+        runner.prepare(probe).run();
     });
+    let mut prepared = runner.prepare(&mut destination);
+    bencher.bench_local(|| black_box(&mut prepared).run());
 }

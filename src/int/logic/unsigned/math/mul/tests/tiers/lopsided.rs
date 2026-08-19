@@ -3,7 +3,10 @@ use alloc::{vec, vec::Vec};
 use proptest::prelude::*;
 
 use super::*;
-use crate::int::logic::math::mul::{KARATSUBA_THRESHOLD, Schoolbook};
+use crate::{
+    int::logic::math::mul::{KARATSUBA_THRESHOLD, Schoolbook},
+    parallel::SequentialExecutor,
+};
 
 fn lopsided_operands() -> impl Strategy<Value = (Vec<Limb>, Vec<Limb>, Limb)> {
     let minimum_len = KARATSUBA_THRESHOLD.max(2);
@@ -64,12 +67,14 @@ proptest! {
             Lopsided::mul_forced_scratch_len(larger.len(), smaller.len(), forced_block_len);
         let mut forced_scratch = vec![Limb::MIN; forced_scratch_len];
         actual.fill(dirty_limb.wrapping_add(2));
+        let executor = SequentialExecutor;
         Lopsided::mul_forced(
             &mut actual,
             &larger,
             &smaller,
             &mut forced_scratch,
             forced_block_len,
+            &executor,
         );
         prop_assert_eq!(actual, expected);
     }

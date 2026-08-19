@@ -18,7 +18,9 @@ pub use unsigned::math;
 #[cfg(feature = "_internal-tune")]
 pub use unsigned::{
     ArchKernels, DivScratch, Division, FormatCache, Karatsuba, Lopsided, LowProduct, MulScratch,
-    Multiplication, Ntt, Schoolbook, ScratchBuffer, Ssa, Toom3, Toom4, Toom6, Toom8, Toom32,
-    Toom43, TransformBench, TransformChoice,
+    Multiplication, Ntt, NttMultiplicationPlan, Schoolbook, ScratchBuffer, Ssa, Toom3, Toom4,
+    Toom6, Toom8, Toom32, Toom43, TransformBench, TransformChoice, TransformPlan,
 };
 pub use unsigned::{InternalMpUint, UintRepr};
+#[cfg(all(feature = "_internal-tune", not(target_pointer_width = "16")))]
+pub use unsigned::{SsaMultiplicationPlan, SsaSquaringPlan};

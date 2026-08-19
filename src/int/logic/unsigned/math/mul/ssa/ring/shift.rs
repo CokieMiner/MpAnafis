@@ -9,20 +9,9 @@
     reason = "Unrolled hybrid shift loops use raw slice chunks"
 )]
 
-use super::{Addition, LIMB_BITS, Limb, SSA_DIRECT_SHIFT_MAX_LIMBS, SsaCarry, SsaRing};
-
-/// Widest run of limbs the shift loops process in their unrolled four-at-a-time
-/// form before falling back to the plain limb-at-a-time loop.
-///
-/// The unrolled form keeps four independent shift chains in flight, which pays
-/// while the run stays cache-resident and stops paying once it does not. Two
-/// thousand forty-eight limbs is 16 KiB on a 64-bit target, so the crossover sits
-/// near a typical L1 capacity — it is a hardware-sensitive value that has not yet
-/// been moved into the generated tuning profile.
-///
-/// Shared with [`shift_from`](super::shift_from), whose two branch loops make the
-/// same trade on the same runs.
-pub const UNROLLED_SHIFT_MAX_LIMBS: usize = 2048;
+use super::{
+    Addition, ArchKernels, LIMB_BITS, Limb, SSA_DIRECT_SHIFT_MAX_LIMBS, SsaCarry, SsaRing,
+};
 
 impl SsaRing {
     /// Computes `dst = dst * 2^shift mod (2^n + 1)` in-place.
@@ -36,8 +25,13 @@ impl SsaRing {
     /// temporary buffer.
     ///
     /// # Safety
+    /// - `mod_bits` is nonzero and `2 * mod_bits` fits in `usize`.
     /// - `dst.len() >= SsaRing::coeff_limbs(mod_bits)`.
     /// - `scratch.len() >= SsaRing::coeff_limbs(mod_bits)`.
+    /// - The active `dst` prefix contains a canonical Fermat-ring residue.
+    /// - The active `dst` and `scratch` prefixes are disjoint. Exact or partial
+    ///   overlap is forbidden because the original residue is staged in
+    ///   `scratch` while `dst` is overwritten.
     pub unsafe fn shift(dst: &mut [Limb], shift: usize, mod_bits: usize, scratch: &mut [Limb]) {
         let ml = Self::mod_limbs(mod_bits);
         let cl = ml.wrapping_add(1);
@@ -119,52 +113,17 @@ impl SsaRing {
             // SAFETY: these two ranges contain low_len limbs and do not overlap.
             unsafe { dst.get_unchecked_mut(whole_limbs..ml) }
                 .copy_from_slice(unsafe { scratch.get_unchecked(..low_len) });
-        } else if low_len < UNROLLED_SHIFT_MAX_LIMBS {
-            let right_shift = Limb::BITS.wrapping_sub(bit_shift);
-            let mut carry = 0;
-            // SAFETY: low_len <= ml <= scratch.len().
-            let (chunks, remainder) = unsafe { scratch.get_unchecked(..low_len) }.as_chunks::<4>();
-            let mut dst_target = whole_limbs;
-            for chunk in chunks {
-                let [s0, s1, s2, s3] = *chunk;
-
-                let shifted0 = s0.wrapping_shl(bit_shift) | carry;
-                let shifted1 = s1.wrapping_shl(bit_shift) | s0.wrapping_shr(right_shift);
-                let shifted2 = s2.wrapping_shl(bit_shift) | s1.wrapping_shr(right_shift);
-                let shifted3 = s3.wrapping_shl(bit_shift) | s2.wrapping_shr(right_shift);
-
-                // SAFETY: dst_target + 3 < whole_limbs + low_len = ml.
-                unsafe {
-                    *dst.get_unchecked_mut(dst_target) = shifted0;
-                    *dst.get_unchecked_mut(dst_target.wrapping_add(1)) = shifted1;
-                    *dst.get_unchecked_mut(dst_target.wrapping_add(2)) = shifted2;
-                    *dst.get_unchecked_mut(dst_target.wrapping_add(3)) = shifted3;
-                }
-                carry = s3.wrapping_shr(right_shift);
-                dst_target = dst_target.wrapping_add(4);
-            }
-            for &source in remainder {
-                let shifted = source.wrapping_shl(bit_shift) | carry;
-                // SAFETY: dst_target < whole_limbs + low_len = ml.
-                unsafe {
-                    *dst.get_unchecked_mut(dst_target) = shifted;
-                }
-                carry = source.wrapping_shr(right_shift);
-                dst_target = dst_target.wrapping_add(1);
-            }
         } else {
-            let right_shift = Limb::BITS.wrapping_sub(bit_shift);
-            let mut carry = 0;
-            for index in 0..low_len {
-                // SAFETY: index < low_len <= ml <= scratch.len().
-                let source = unsafe { *scratch.get_unchecked(index) };
-                let shifted = source.wrapping_shl(bit_shift) | carry;
-                // SAFETY: whole_limbs + index < whole_limbs + low_len = ml.
-                unsafe {
-                    *dst.get_unchecked_mut(whole_limbs.wrapping_add(index)) = shifted;
-                }
-                carry = source.wrapping_shr(right_shift);
-            }
+            // SAFETY: low_len <= ml, whole_limbs + low_len = ml, dst has cl > ml limbs,
+            // scratch has cl > ml limbs, 0 < bit_shift < LIMB_BITS, and spans are non-overlapping.
+            let _ = unsafe {
+                ArchKernels::lshift_into_unchecked(
+                    dst.as_mut_ptr().add(whole_limbs),
+                    scratch.as_ptr(),
+                    low_len,
+                    bit_shift,
+                )
+            };
         }
         // SAFETY: ml < cl <= dst.len().
         unsafe {
@@ -303,11 +262,11 @@ unsafe fn subtract_discarded_high(
     }
     // The high part occupies only high_len limbs. Subtract that active prefix,
     // then propagate its borrow through the untouched high destination limbs.
-    // SAFETY: both ranges contain exactly high_len <= ml limbs.
-    let borrow =
-        Addition::sub_slice_in_place(unsafe { dst.get_unchecked_mut(..high_len) }, unsafe {
-            scratch.get_unchecked(..high_len)
-        });
+    // SAFETY: dst contains exactly high_len <= ml writable data limbs here.
+    let low = unsafe { dst.get_unchecked_mut(..high_len) };
+    // SAFETY: scratch contains the matching initialized high_len-limb prefix.
+    let high = unsafe { scratch.get_unchecked(..high_len) };
+    let borrow = Addition::sub_slice_in_place(low, high);
     // SAFETY: high_len <= ml < dst.len().
     let final_borrow =
         borrow != 0 && SsaCarry::propagate_borrow(unsafe { dst.get_unchecked_mut(high_len..ml) });

@@ -4,7 +4,7 @@ use super::{
     ArchKernels, BarrettDomain, BarrettScratch, DoubleLimb, INLINE_LIMBS, InternalMpUint,
     KARATSUBA_THRESHOLD, LIMB_BITS, LIMB_BYTES, Limb, MulScratch,
     RADIX_DECIMAL_RECURSIVE_THRESHOLD, RADIX_LARGE_RECURSIVE_THRESHOLD,
-    RADIX_SMALL_RECURSIVE_THRESHOLD, UintRepr,
+    RADIX_SMALL_RECURSIVE_THRESHOLD,
 };
 
 use decimal::{div_rem_small, write_decimal_chunks};

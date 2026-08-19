@@ -15,24 +15,35 @@ impl InternalMpUint {
         if exp == 0 {
             return Self::one();
         }
-        let mut result = Self::zero();
-        let mut started = false;
-        let mut temp = Self::zero();
+        if exp == 1 || base_val.is_zero() || base_val.is_one() {
+            return base_val.clone();
+        }
+        if exp == 2 {
+            return base_val.square();
+        }
+
+        let exp_bits = 32_u32.wrapping_sub(exp.leading_zeros());
+        // A limb count is an upper bound on the number of initialized limbs,
+        // not a bit count.  In particular, `2^n` has one source limb but
+        // needs only ceil(n / LIMB_BITS) result limbs.  If the exact estimate
+        // cannot be represented, leave growth to the normal incremental storage
+        // path instead of turning an overflowing size calculation into a
+        // potentially enormous reservation.
+        let expected_limbs =
+            estimated_pow_limbs(base_val.significant_bits(), exp).unwrap_or_default();
+        let mut result = Self::with_capacity(expected_limbs);
+        result.clone_from(base_val);
+
+        let mut temp = Self::with_capacity(expected_limbs);
         let mut scratch = MulScratch::default();
 
-        for i in (0..32).rev() {
-            if started {
-                temp.assign_product_with_scratch(&result, &result, &mut scratch);
-                swap(&mut result, &mut temp);
-            }
+        for i in (0..exp_bits.wrapping_sub(1)).rev() {
+            temp.assign_square_with_scratch(&result, &mut scratch);
+            swap(&mut result, &mut temp);
+
             if (exp >> i) & 1 == 1 {
-                if started {
-                    temp.assign_product_with_scratch(&result, base_val, &mut scratch);
-                    swap(&mut result, &mut temp);
-                } else {
-                    result.clone_from(base_val);
-                    started = true;
-                }
+                temp.assign_product_with_scratch(&result, base_val, &mut scratch);
+                swap(&mut result, &mut temp);
             }
         }
         result
@@ -353,6 +364,34 @@ fn get_bit(limbs: &[Limb], bit_idx: usize) -> usize {
         .map_or(0, |&val| (val >> bit_offset) & 1)
 }
 
+/// Returns the exact limb upper bound for `base^exp`, when it fits in `usize`.
+///
+/// The calculation is arranged as quotient/remainder arithmetic rather than
+/// `significant_bits * exp`: the latter can overflow even when a caller only
+/// needs the conservative lazy-growth fallback.  Splitting the exponent at
+/// `LIMB_BITS` also keeps this valid on targets where `u32` is wider than
+/// `usize`.
+fn estimated_pow_limbs(significant_bits: usize, exp: u32) -> Option<usize> {
+    if significant_bits == 0 || exp == 0 {
+        return Some(0);
+    }
+
+    let exp_usize = usize::try_from(exp).ok()?;
+    let full_limbs = significant_bits.div_euclid(LIMB_BITS);
+    let partial_bits = significant_bits.rem_euclid(LIMB_BITS);
+    let exponent_limbs = exp_usize.div_euclid(LIMB_BITS);
+    let exponent_bits = exp_usize.rem_euclid(LIMB_BITS);
+
+    // `full_limbs * exp` is the whole-limb portion of
+    // floor(significant_bits * exp / LIMB_BITS).  The checked operations
+    // prove that no failed size computation reaches `with_capacity`.
+    let whole = full_limbs.checked_mul(exp_usize)?;
+    let partial_whole = partial_bits.checked_mul(exponent_limbs)?;
+    let partial_product = partial_bits.checked_mul(exponent_bits)?;
+    let partial = partial_whole.checked_add(partial_product.div_ceil(LIMB_BITS))?;
+    whole.checked_add(partial)
+}
+
 const fn select_window_size(bits: usize) -> u32 {
     if bits <= 64 {
         3
@@ -362,5 +401,29 @@ const fn select_window_size(bits: usize) -> u32 {
         5
     } else {
         6
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LIMB_BITS, estimated_pow_limbs};
+
+    #[test]
+    fn pow_capacity_uses_significant_bits_not_source_limb_count() {
+        // A one-limb value with one significant bit used to reserve one limb
+        // per exponent. The upper bound needs one limb per LIMB_BITS bits.
+        assert_eq!(
+            estimated_pow_limbs(1, 128),
+            Some(128_usize.div_ceil(LIMB_BITS))
+        );
+        assert_eq!(
+            estimated_pow_limbs(63, 128),
+            Some((63_usize * 128).div_ceil(LIMB_BITS))
+        );
+    }
+
+    #[test]
+    fn pow_capacity_overflow_falls_back_to_lazy_growth() {
+        assert_eq!(estimated_pow_limbs(usize::MAX, u32::MAX), None);
     }
 }

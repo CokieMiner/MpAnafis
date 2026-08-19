@@ -10,11 +10,13 @@ select_arch_kernel! {
     kernel: AddSubFromKernel;
     surface: selector;
     backends: [];
-    x86_64: [fallback, adx];
+    x86_64: [fallback, avx2, adx];
     powerpc64: [];
     special_coverage: [
         all(target_arch = "x86_64", target_pointer_width = "64"),
     ];
     fallback_imports: [];
-    test_backends: [];
+    test_backends: [
+        add_sub_from_limbs_unchecked_avx2_test => x86_64_avx2,
+    ];
 }

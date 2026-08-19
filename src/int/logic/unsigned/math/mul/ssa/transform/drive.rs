@@ -1,5 +1,7 @@
 //! End-to-end multiplication and squaring orchestration for SSA.
 
+use crate::parallel::ParallelExecutor;
+
 use super::{FftPlan, Limb, SSA_BASE_MODULUS_BITS, SsaCoefficients, SsaPointwise, SsaRing};
 
 /// Namespace for SSA transform operations and layout.
@@ -19,11 +21,14 @@ impl SsaTransform {
     /// for `modulus_bits` — an exponent that does not divide this ring width simply
     /// cannot be expressed here.
     ///
+    /// The executor only forks disjoint matrix and twiddle-scratch borrows, so
+    /// callers can select sequential, Rayon, or an application-owned policy.
+    ///
     /// # Safety
     /// - `dst` has at least `SsaRing::coeff_limbs(modulus_bits)` limbs.
-    /// - Each operand either has that complete guarded width, or has exactly
-    ///   `SsaRing::mod_limbs(modulus_bits)` limbs with an implicit zero guard and a nonzero
-    ///   exact width supplied through `significant_bits`.
+    /// - Both operands have the same layout: either each has that complete guarded width,
+    ///   or each has exactly `SsaRing::mod_limbs(modulus_bits)` limbs with an implicit zero
+    ///   guard and nonzero exact widths supplied through `significant_bits`.
     /// - Values in `significant_bits`, when present, are upper bounds on the
     ///   represented operands' exact significant widths.
     /// - `forced_plan`, when present, was built for this exact `modulus_bits`, and
@@ -33,7 +38,7 @@ impl SsaTransform {
         clippy::too_many_arguments,
         reason = "FFT orchestration linear pass"
     )]
-    pub unsafe fn fft_mul_mod_slices(
+    pub unsafe fn fft_mul_mod_slices_with_executor<E: ParallelExecutor>(
         dst: &mut [Limb],
         left: &[Limb],
         right: &[Limb],
@@ -41,10 +46,17 @@ impl SsaTransform {
         significant_bits: Option<(usize, usize)>,
         force_transform: bool,
         forced_plan: Option<&FftPlan>,
+        executor: &E,
         scratch: &mut [Limb],
     ) {
         let ml = SsaRing::mod_limbs(modulus_bits);
-        let guarded_operands = left.len() > ml && right.len() > ml;
+        let left_guarded = left.len() > ml;
+        let right_guarded = right.len() > ml;
+        debug_assert_eq!(
+            left_guarded, right_guarded,
+            "SSA operands must both include the guard limb or both omit it"
+        );
+        let guarded_operands = left_guarded;
         if guarded_operands {
             // SAFETY: both operands include the complete guard limb in this branch.
             if unsafe {
@@ -95,106 +107,187 @@ impl SsaTransform {
         // sizes its buffer from the same plan, so this never re-allocates; the
         // assertion catches a mis-sized caller in debug and test builds rather than
         // hiding an allocation in the hot path.
+        let slots = plan.parallel_slots(executor.parallelism().get());
+        let Some(twiddle_len) = plan.inner_cl.checked_mul(slots) else {
+            debug_assert!(false, "validated twiddle arena size overflowed");
+            return;
+        };
         debug_assert!(
-            scratch.len() >= plan.transform_mul_scratch(),
-            "SSA transform scratch is undersized; size it with transform_mul_scratch"
+            scratch.len() >= plan.transform_mul_scratch_for_slots(slots),
+            "SSA transform scratch is undersized: mod {}, inner {}, len {}, have {}, need {}, slots {}",
+            plan.modulus_bits,
+            plan.inner_bits,
+            plan.transform_len,
+            scratch.len(),
+            plan.transform_mul_scratch_for_slots(slots),
+            slots
         );
 
-        // Partition caller scratch: [left] [right] [transpose] [twiddle] [product] [recon]
+        // Partition caller scratch: [left] [right] [left twiddles] [right twiddles]
+        // [pointwise leaf arenas] [reconstruction]. Each twiddle and pointwise
+        // arena is divided by its recursion into disjoint coefficient-aligned
+        // child ranges.
         let (left_matrix, after_left) = scratch.split_at_mut(plan.mat_limbs);
         let (right_matrix, after_right) = after_left.split_at_mut(plan.mat_limbs);
-        let (transpose_scratch, after_trans) = after_right.split_at_mut(plan.trans_len);
-        let (twiddle_scratch, after_twid) = after_trans.split_at_mut(plan.inner_cl.wrapping_mul(2));
-        let (product_scratch, recon_scratch) = after_twid.split_at_mut(plan.prod_scratch_size);
-        twiddle_scratch.fill(0);
+        let (left_twiddle, after_left_twiddle) = after_right.split_at_mut(twiddle_len);
+        let (right_twiddle, after_right_twiddle) = after_left_twiddle.split_at_mut(twiddle_len);
+        let (product_scratch, recon_scratch) =
+            after_right_twiddle.split_at_mut(plan.pointwise_scratch_for_parallelism(slots));
+        left_twiddle.fill(0);
+        right_twiddle.fill(0);
 
-        // A whole-bit twist can be applied while splitting, so each matrix is
-        // written once instead of split and then rewritten in a second RAM pass.
-        // SAFETY: both matrices have the plan's complete layout and the twiddle
-        // buffer is disjoint and contains at least one complete coefficient.
-        let fused_twist = unsafe {
-            SsaCoefficients::split_twisted(
-                left,
-                left_matrix,
-                plan.transform_len,
-                plan.chunk_bits,
-                plan.inner_bits,
-                plan.twist_step_half,
-                twiddle_scratch,
-            ) && SsaCoefficients::split_twisted(
-                right,
-                right_matrix,
-                plan.transform_len,
-                plan.chunk_bits,
-                plan.inner_bits,
-                plan.twist_step_half,
-                twiddle_scratch,
-            )
+        // A whole-bit twist and stage 1 DIF butterfly can be applied while splitting,
+        // so each matrix is written once directly with stage 1 completed.
+        let fused_left_stage1 = if left_upper_half_zero {
+            // SAFETY: left_matrix is partitioned with plan.mat_limbs and left_twiddle
+            // has the plan's executor-specific twiddle arena.
+            unsafe {
+                SsaCoefficients::split_twisted_and_stage1_dif(
+                    left,
+                    left_matrix,
+                    plan.transform_len,
+                    plan.chunk_bits,
+                    plan.inner_bits,
+                    plan.twist_step_half,
+                    plan.omega_shift,
+                    left_twiddle,
+                )
+            }
+        } else {
+            false
         };
-        if !fused_twist {
-            for (operand, matrix) in [(left, &mut *left_matrix), (right, &mut *right_matrix)] {
+        if !fused_left_stage1 {
+            // SAFETY: left_matrix has plan.mat_limbs and left_twiddle is disjoint.
+            let fused_twist = unsafe {
+                SsaCoefficients::split_twisted(
+                    left,
+                    left_matrix,
+                    plan.transform_len,
+                    plan.chunk_bits,
+                    plan.inner_bits,
+                    plan.twist_step_half,
+                    left_twiddle,
+                )
+            };
+            if !fused_twist {
                 SsaCoefficients::split(
-                    operand,
-                    matrix,
+                    left,
+                    left_matrix,
                     plan.transform_len,
                     plan.chunk_bits,
                     plan.inner_bits,
                 );
-            }
-            // SAFETY: both matrices were just filled with transform_len complete
-            // coefficients and twiddle_scratch is disjoint from them.
-            unsafe {
-                apply_forward_twist(left_matrix, Some(right_matrix), &plan, twiddle_scratch);
+                // SAFETY: left_matrix has plan.mat_limbs complete coefficients and
+                // left_twiddle is disjoint.
+                unsafe {
+                    apply_forward_twist(left_matrix, None, &plan, left_twiddle);
+                }
             }
         }
 
-        // SAFETY: matrices correctly sized, twiddle_scratch has inner_cl limbs.
-        unsafe {
-            Self::fft_in_place(
-                left_matrix,
-                plan.transform_len,
-                plan.omega_shift,
-                plan.inner_bits,
-                false,
-                left_upper_half_zero,
-                twiddle_scratch,
-                transpose_scratch,
-            );
-            Self::fft_in_place(
-                right_matrix,
-                plan.transform_len,
-                plan.omega_shift,
-                plan.inner_bits,
-                false,
-                right_upper_half_zero,
-                twiddle_scratch,
-                transpose_scratch,
-            );
+        let fused_right_stage1 = if right_upper_half_zero {
+            // SAFETY: right_matrix is partitioned with plan.mat_limbs and right_twiddle
+            // has the plan's executor-specific twiddle arena.
+            unsafe {
+                SsaCoefficients::split_twisted_and_stage1_dif(
+                    right,
+                    right_matrix,
+                    plan.transform_len,
+                    plan.chunk_bits,
+                    plan.inner_bits,
+                    plan.twist_step_half,
+                    plan.omega_shift,
+                    right_twiddle,
+                )
+            }
+        } else {
+            false
+        };
+        if !fused_right_stage1 {
+            // SAFETY: right_matrix has plan.mat_limbs and right_twiddle is disjoint.
+            let fused_twist = unsafe {
+                SsaCoefficients::split_twisted(
+                    right,
+                    right_matrix,
+                    plan.transform_len,
+                    plan.chunk_bits,
+                    plan.inner_bits,
+                    plan.twist_step_half,
+                    right_twiddle,
+                )
+            };
+            if !fused_twist {
+                SsaCoefficients::split(
+                    right,
+                    right_matrix,
+                    plan.transform_len,
+                    plan.chunk_bits,
+                    plan.inner_bits,
+                );
+                // SAFETY: right_matrix has plan.mat_limbs complete coefficients and
+                // right_twiddle is disjoint.
+                unsafe {
+                    apply_forward_twist(right_matrix, None, &plan, right_twiddle);
+                }
+            }
         }
+
+        let ((), ()) = executor.join(
+            || {
+                // SAFETY: the left matrix and the first twiddle span are disjoint,
+                // complete plan-sized partitions owned by this closure.
+                unsafe {
+                    run_forward_fft(
+                        left_matrix,
+                        left_twiddle,
+                        &plan,
+                        fused_left_stage1,
+                        left_upper_half_zero,
+                        executor,
+                    );
+                }
+            },
+            || {
+                // SAFETY: the right matrix and its private twiddle span are disjoint,
+                // complete plan-sized partitions owned by this closure.
+                unsafe {
+                    run_forward_fft(
+                        right_matrix,
+                        right_twiddle,
+                        &plan,
+                        fused_right_stage1,
+                        right_upper_half_zero,
+                        executor,
+                    );
+                }
+            },
+        );
 
         // ── Pointwise products ───────────────────────────────────────────────
-        // SAFETY: the matrices are perfectly sized for exactly transform_len entries.
+        // SAFETY: the matrices are perfectly sized for the complete transform.
         unsafe {
-            SsaPointwise::pointwise_multiply(
+            SsaPointwise::pointwise_multiply_with_executor(
                 left_matrix,
                 right_matrix,
                 plan.transform_len,
                 plan.inner_bits,
+                executor,
                 product_scratch,
             );
         }
 
-        // SAFETY: matrices correctly sized, twiddle_scratch has inner_cl limbs.
+        // SAFETY: matrices correctly sized, and the left twiddle arena is
+        // disjoint and sized for the transform recursion.
         unsafe {
-            Self::fft_in_place(
+            Self::fft_in_place_with_executor(
                 left_matrix,
                 plan.transform_len,
                 plan.omega_shift,
                 plan.inner_bits,
                 true,
                 false,
-                twiddle_scratch,
-                transpose_scratch,
+                executor,
+                left_twiddle,
             );
         }
 
@@ -208,7 +301,7 @@ impl SsaTransform {
             modulus_bits,
             dst,
             recon_scratch,
-            Some((plan.inverse_twist(), twiddle_scratch)),
+            Some((plan.inverse_twist(), left_twiddle)),
         );
 
         // SAFETY: dst has cl limbs, modulus_bits matches.
@@ -217,16 +310,24 @@ impl SsaTransform {
         }
     }
 
-    /// Core recursive FFT squaring: one forward transform instead of two.
+    /// Core recursive FFT squaring using the supplied synchronous executor.
+    ///
+    /// The square pointwise pass remains sequential because its recursive product
+    /// scratch is one shared buffer. The forward and inverse transform sweeps use
+    /// the supplied executor and their own disjoint twiddle arena.
     ///
     /// # Safety
-    /// `dst` and `a` each have at least `SsaRing::coeff_limbs(modulus_bits)` limbs and are
-    /// disjoint, and `scratch` is sized from the plan this ring width selects.
-    pub unsafe fn fft_sqr_mod_slices(
+    /// `dst` and `a` have complete coefficient widths for `modulus_bits`, and
+    /// `scratch` is sized from the selected plan and executor parallelism.
+    /// When supplied, `forced_plan` was built for this exact modulus width and
+    /// its executor-sized scratch geometry.
+    pub unsafe fn fft_sqr_mod_slices_with_executor<E: ParallelExecutor>(
         dst: &mut [Limb],
         a: &[Limb],
         modulus_bits: usize,
         force_transform: bool,
+        forced_plan: Option<&FftPlan>,
+        executor: &E,
         scratch: &mut [Limb],
     ) {
         let ml = SsaRing::mod_limbs(modulus_bits);
@@ -247,17 +348,24 @@ impl SsaTransform {
             return;
         }
 
-        let plan = FftPlan::new(modulus_bits);
+        let plan = forced_plan
+            .copied()
+            .unwrap_or_else(|| FftPlan::new(modulus_bits));
+        let slots = plan.parallel_slots(executor.parallelism().get());
+        let Some(twiddle_len) = plan.inner_cl.checked_mul(slots) else {
+            debug_assert!(false, "validated square twiddle arena size overflowed");
+            return;
+        };
         debug_assert!(
-            scratch.len() >= plan.transform_sqr_scratch(),
-            "SSA square scratch is undersized; size it with transform_sqr_scratch"
+            scratch.len() >= plan.transform_sqr_scratch_for_slots(slots),
+            "SSA square scratch is undersized for the executor's twiddle slots"
         );
 
+        // Partition caller scratch: [matrix] [twiddles] [square] [reconstruction].
         let (matrix, after_matrix) = scratch.split_at_mut(plan.mat_limbs);
-        let (transpose_scratch, after_transpose) = after_matrix.split_at_mut(plan.trans_len);
-        let (twiddle_scratch, after_twiddle) =
-            after_transpose.split_at_mut(plan.inner_cl.wrapping_mul(2));
-        let (sqr_scratch, recon_scratch) = after_twiddle.split_at_mut(plan.sqr_scratch_size);
+        let (twiddle_scratch, after_twiddle) = after_matrix.split_at_mut(twiddle_len);
+        let (sqr_scratch, recon_scratch) =
+            after_twiddle.split_at_mut(plan.square_scratch_for_slots(slots));
         twiddle_scratch.fill(0);
 
         // SAFETY: matrix and twiddle scratch are complete, disjoint plan-sized spans.
@@ -288,26 +396,32 @@ impl SsaTransform {
 
         // SAFETY: all matrix and scratch spans were partitioned from the plan.
         unsafe {
-            Self::fft_in_place(
+            Self::fft_in_place_with_executor(
                 matrix,
                 plan.transform_len,
                 plan.omega_shift,
                 plan.inner_bits,
                 false,
                 false,
+                executor,
                 twiddle_scratch,
-                transpose_scratch,
             );
-            pointwise_square(matrix, plan.transform_len, plan.inner_bits, sqr_scratch);
-            Self::fft_in_place(
+            pointwise_square(
+                matrix,
+                plan.transform_len,
+                plan.inner_bits,
+                executor,
+                sqr_scratch,
+            );
+            Self::fft_in_place_with_executor(
                 matrix,
                 plan.transform_len,
                 plan.omega_shift,
                 plan.inner_bits,
                 true,
                 false,
+                executor,
                 twiddle_scratch,
-                transpose_scratch,
             );
         }
 
@@ -367,15 +481,59 @@ unsafe fn apply_forward_twist(
 
 // ── Private helper functions ─────────────────────────────────────────────────
 
+/// Runs one complete forward FFT after operand staging.
+///
+/// # Safety
+/// `matrix` is a complete transform matrix and `twiddle` is a disjoint scratch
+/// span sized for `plan`; the fused-stage flag and upper-half flag describe the
+/// exact staging operation that produced `matrix`.
+unsafe fn run_forward_fft<E: ParallelExecutor>(
+    matrix: &mut [Limb],
+    twiddle: &mut [Limb],
+    plan: &FftPlan,
+    fused_stage1: bool,
+    upper_half_zero: bool,
+    executor: &E,
+) {
+    if fused_stage1 {
+        // SAFETY: the caller proves the complete matrix and disjoint twiddle span.
+        unsafe {
+            SsaTransform::fft_in_place_from_stage2_with_executor(
+                matrix,
+                plan.transform_len,
+                plan.omega_shift,
+                plan.inner_bits,
+                executor,
+                twiddle,
+            );
+        }
+    } else {
+        // SAFETY: the caller proves the complete matrix and disjoint twiddle span.
+        unsafe {
+            SsaTransform::fft_in_place_with_executor(
+                matrix,
+                plan.transform_len,
+                plan.omega_shift,
+                plan.inner_bits,
+                false,
+                upper_half_zero,
+                executor,
+                twiddle,
+            );
+        }
+    }
+}
+
 /// Squares every coefficient of a transformed matrix in place.
 ///
 /// # Safety
 /// `matrix` holds `transform_len` complete `SsaRing::coeff_limbs(mod_bits)`-limb
 /// coefficients and `sqr_scratch` is sized from the same plan.
-unsafe fn pointwise_square(
+unsafe fn pointwise_square<E: ParallelExecutor>(
     matrix: &mut [Limb],
     transform_len: usize,
     mod_bits: usize,
+    executor: &E,
     sqr_scratch: &mut [Limb],
 ) {
     let cl = SsaRing::coeff_limbs(mod_bits);
@@ -387,7 +545,7 @@ unsafe fn pointwise_square(
         // SAFETY: slot and scratch are complete disjoint coefficients.
         unsafe {
             SsaRing::normalize(slot, mod_bits);
-            fermat_sqr_into(result, slot, mod_bits, mul_scratch);
+            fermat_sqr_into(result, slot, mod_bits, executor, mul_scratch);
         }
         slot.copy_from_slice(result);
     }
@@ -398,10 +556,11 @@ unsafe fn pointwise_square(
 /// # Safety
 /// `dst` and `value` are disjoint complete coefficients and `mul_scratch` is
 /// sized for the path this ring width takes.
-unsafe fn fermat_sqr_into(
+unsafe fn fermat_sqr_into<E: ParallelExecutor>(
     dst: &mut [Limb],
     value: &[Limb],
     mod_bits: usize,
+    executor: &E,
     mul_scratch: &mut [Limb],
 ) {
     let ml = SsaRing::mod_limbs(mod_bits);
@@ -422,19 +581,26 @@ unsafe fn fermat_sqr_into(
     } else {
         // Recurse into the squaring driver, not the product one. An inner ring
         // above the basecase width has its own transform, and handing it to
-        // `fft_mul_mod_slices` with two aliased operands ran two forward
+        // `fft_sqr_mod_slices_with_executor` with two aliased operands ran two forward
         // transforms over identical data — losing the square's discount at
         // exactly the widths where the pointwise stage nests, which since the
         // inner-ring rounding fix is every RAM-resident size.
         //
-        // The scratch is sized for the product recursion by `from_geometry`,
-        // and a squaring transform holds one coefficient matrix where a product
-        // holds two, so it is a strict over-allocation rather than a shortfall.
+        // The caller-owned scratch is sized from the same plan; a squaring
+        // transform holds one coefficient matrix where a product holds two.
         //
         // SAFETY: the operand is one complete coefficient disjoint from `dst`,
         // and `mul_scratch` exceeds this ring's squaring layout.
         unsafe {
-            SsaTransform::fft_sqr_mod_slices(dst, value, mod_bits, false, mul_scratch);
+            SsaTransform::fft_sqr_mod_slices_with_executor(
+                dst,
+                value,
+                mod_bits,
+                false,
+                None,
+                executor,
+                mul_scratch,
+            );
         }
     }
 }

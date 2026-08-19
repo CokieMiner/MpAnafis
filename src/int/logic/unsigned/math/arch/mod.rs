@@ -29,15 +29,7 @@ use super::{DoubleLimb, LIMB_BITS, Limb};
         target_feature = "avx2"
     ))
 ))]
-use x86_runtime::{X86Backend, selected_x86_backend};
-#[cfg(all(
-    feature = "std",
-    not(miri),
-    target_arch = "x86_64",
-    target_pointer_width = "64",
-    not(target_feature = "avx2")
-))]
-use x86_runtime::{X86SimdTier, selected_x86_simd_tier};
+use x86_runtime::selected_x86_backend;
 
 #[macro_use]
 mod backend_providers;
@@ -61,6 +53,8 @@ mod lshift_unchecked;
 mod monty_redc_unchecked;
 mod mul_2_limbs_unchecked;
 mod mul_basecase_unchecked;
+mod ntt_digits_u32;
+mod ntt_monty_u32;
 mod propagate_borrow_unchecked;
 mod propagate_carry_unchecked;
 mod rshift_into_unchecked;
@@ -87,3 +81,23 @@ mod x86_runtime;
 mod tests;
 
 pub use kernels::ArchKernels;
+#[cfg(all(
+    feature = "std",
+    not(miri),
+    target_arch = "x86_64",
+    target_pointer_width = "64",
+    not(all(
+        target_feature = "adx",
+        target_feature = "bmi2",
+        target_feature = "avx2"
+    ))
+))]
+pub use x86_runtime::X86Backend;
+#[cfg(all(
+    feature = "std",
+    not(miri),
+    target_arch = "x86_64",
+    target_pointer_width = "64",
+    not(target_feature = "avx2")
+))]
+pub use x86_runtime::{X86SimdTier, selected_x86_simd_tier};

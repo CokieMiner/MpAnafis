@@ -21,62 +21,17 @@
     reason = "Benchmark entry points forward into validated SSA transform kernels"
 )]
 
-use alloc::vec::Vec;
+use alloc::vec;
 
-use super::{FftPlan, LIMB_BITS, Limb, SsaCrt, SsaPlan, SsaRing, SsaTransform};
+use crate::parallel::SequentialExecutor;
+
+use super::{FftPlan, LIMB_BITS, Limb, SsaCrt, SsaRing, SsaTransform};
 
 /// Namespace for forced transform benchmark entry points.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TransformBench;
 
 impl TransformBench {
-    /// Collect the exact inner ring widths visited by the planner up to a limit.
-    pub fn collect_ssa_inner_rings(max_modulus_bits: usize) -> Vec<usize> {
-        let mut widths = Vec::new();
-        let mut current = 256;
-        while current <= max_modulus_bits {
-            let plan = SsaPlan::best_exponent(current, 0);
-            if let Some((_, geometry)) = plan {
-                let inner = geometry.inner_bits;
-                if !widths.contains(&inner) {
-                    widths.push(inner);
-                }
-            }
-            current = current.saturating_add(256);
-        }
-        widths.sort_unstable();
-        widths
-    }
-
-    /// Scratch required when forcing a specific transform exponent.
-    ///
-    /// Returns `None` if the requested geometry is invalid for these operand sizes.
-    pub fn ssa_mul_scratch_len_for_plan(
-        len_a: usize,
-        len_b: usize,
-        transform_exponent: u32,
-    ) -> Option<usize> {
-        let half_width = SsaPlan::crt_half_width_for_operands(len_a, len_b)?;
-        let ring_bits = half_width.checked_mul(LIMB_BITS)?;
-        let ring_scratch =
-            FftPlan::try_forced(ring_bits, transform_exponent)?.transform_mul_scratch();
-        Some(SsaCrt::layout_len(half_width, ring_scratch))
-    }
-
-    /// The top-level `modulus_bits` used for SSA multiplication of the given lengths.
-    pub fn ssa_mul_modulus_bits(len_a: usize, len_b: usize) -> Option<usize> {
-        let half_width = SsaPlan::crt_half_width_for_operands(len_a, len_b)?;
-        let ring_bits = half_width.checked_mul(LIMB_BITS)?;
-        Some(ring_bits)
-    }
-
-    /// The top-level `modulus_bits` used for SSA squaring of the given length.
-    pub fn ssa_sqr_modulus_bits(len: usize) -> Option<usize> {
-        let half_width = SsaPlan::crt_half_width_for_operands(len, len)?;
-        let ring_bits = half_width.checked_mul(LIMB_BITS)?;
-        Some(ring_bits)
-    }
-
     /// Multiply two full-width residues modulo `2^(len * LIMB_BITS) + 1`.
     ///
     /// `transform_exponent` selects between the planner's geometry and a forced one;
@@ -148,11 +103,12 @@ impl TransformBench {
         *unsafe { right_padded.get_unchecked_mut(ml) } = 0;
 
         let mut product = vec![0; cl];
+        let executor = SequentialExecutor;
         // SAFETY: every buffer is exactly `cl` limbs, the ring scratch is sized from
         // the same geometry that is passed in, and a forced plan was built for this
         // exact `modulus_bits` above.
         unsafe {
-            SsaTransform::fft_mul_mod_slices(
+            SsaTransform::fft_mul_mod_slices_with_executor(
                 &mut product,
                 left_padded,
                 right_padded,
@@ -160,6 +116,7 @@ impl TransformBench {
                 None,
                 forced_plan.is_some(),
                 forced_plan.as_ref(),
+                &executor,
                 ring_scratch,
             );
         }
@@ -174,10 +131,11 @@ impl TransformBench {
 
     /// The `B^n - 1` half of the top-level CRT split, on its own.
     ///
-    /// Production only ever reaches this from inside [`Ssa::try_mul`](super::Ssa::try_mul), where its
+    /// Production only ever reaches this from inside
+    /// [`Ssa::try_mul_with_executor`](super::Ssa::try_mul_with_executor), where its
     /// cost is entangled with the Fermat half beside it. Exposing it lets the tuner
     /// measure the Mersenne recursion's own crossover.
     pub fn ssa_mul_mod_bnm1(dst: &mut [Limb], a: &[Limb], b: &[Limb], scratch: &mut [Limb]) {
-        SsaCrt::mul_mod_bnm1(dst, a, b, scratch);
+        SsaCrt::mul_mod_bnm1(dst, a, b, scratch, &SequentialExecutor);
     }
 }

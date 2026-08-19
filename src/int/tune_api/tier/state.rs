@@ -1,55 +1,51 @@
 //! Reusable state and lopsided multiplication benchmark entry points.
 
-use super::{BenchValidation, Limb, Lopsided, LowProduct, MulScratch, Multiplication};
+use crate::parallel::{DefaultExecutor, SequentialExecutor};
+
+use super::{BenchValidation, Limb, Lopsided, LowProduct, MulScratch, Multiplication, Tuner};
 
 /// Reusable state for the configured multiplication dispatcher.
 #[derive(Debug, Default)]
-pub struct MulBenchScratch {
+pub struct MultiplicationBenchState {
     scratch: MulScratch,
 }
 
-impl MulBenchScratch {
+impl MultiplicationBenchState {
     /// Executes the configured multiplication tower with reusable state.
     #[inline]
     pub fn run(&mut self, dst: &mut [Limb], a: &[Limb], b: &[Limb]) {
-        debug_assert!(
+        assert!(
             !a.is_empty() && !b.is_empty(),
             "reused multiplication operands must be nonempty"
         );
-        debug_assert!(
-            dst.len() >= a.len().saturating_add(b.len()),
-            "reused multiplication destination is shorter than the product"
-        );
+        BenchValidation::product(dst, a, b);
         Multiplication::mul_limbs_with_scratch(a, b, dst, &mut self.scratch);
     }
 }
 
 /// Reusable state for the configured squaring dispatcher.
 #[derive(Debug, Default)]
-pub struct SquareBenchScratch {
+pub struct SquaringBenchState {
     scratch: MulScratch,
 }
 
-impl SquareBenchScratch {
+impl SquaringBenchState {
     /// Executes the configured squaring tower with reusable state.
     #[inline]
     pub fn run(&mut self, dst: &mut [Limb], a: &[Limb]) {
-        debug_assert!(!a.is_empty(), "reused squaring operand must be nonempty");
-        debug_assert!(
-            dst.len() >= a.len().saturating_mul(2),
-            "reused squaring destination is shorter than the square"
-        );
+        assert!(!a.is_empty(), "reused squaring operand must be nonempty");
+        BenchValidation::square(dst, a);
         Multiplication::sqr_limbs_with_scratch(a, dst, &mut self.scratch);
     }
 }
 
 /// Reusable state for equal-width truncated low-product benchmarks.
 #[derive(Debug, Default)]
-pub struct MulloBenchScratch {
+pub struct LowProductBenchState {
     scratch: MulScratch,
 }
 
-impl MulloBenchScratch {
+impl LowProductBenchState {
     /// Computes the triangular basecase low product directly.
     #[allow(
         unsafe_code,
@@ -78,57 +74,61 @@ impl MulloBenchScratch {
 }
 
 /// Executes the configured tower with one pooled scratch lease.
-pub fn bench_mul_tower_pooled(dst: &mut [Limb], a: &[Limb], b: &[Limb]) {
-    BenchValidation::product(dst, a, b);
-    let mut scratch = MulScratch::default();
-    Multiplication::mul_limbs_with_scratch(a, b, dst, &mut scratch);
-}
+impl Tuner {
+    pub fn bench_mul_tower_pooled(dst: &mut [Limb], a: &[Limb], b: &[Limb]) {
+        BenchValidation::product(dst, a, b);
+        let mut scratch = MulScratch::default();
+        Multiplication::mul_limbs_with_scratch(a, b, dst, &mut scratch);
+    }
 
-/// Returns exact scratch for blocked multiplication with a forced block width.
-#[must_use]
-pub fn bench_lopsided_mul_scratch_len(len_a: usize, len_b: usize, block_len: usize) -> usize {
-    assert!(block_len != 0, "lopsided benchmark block width is zero");
-    Lopsided::mul_forced_scratch_len(len_a, len_b, block_len)
-}
+    /// Returns exact scratch for blocked multiplication with a forced block width.
+    #[must_use]
+    pub fn bench_lopsided_mul_scratch_len(len_a: usize, len_b: usize, block_len: usize) -> usize {
+        assert!(block_len != 0, "lopsided benchmark block width is zero");
+        Lopsided::mul_forced_scratch_len(len_a, len_b, block_len)
+    }
 
-/// Executes blocked multiplication with a forced block width and caller scratch.
-pub fn bench_lopsided_mul_with_scratch(
-    dst: &mut [Limb],
-    a: &[Limb],
-    b: &[Limb],
-    block_len: usize,
-    scratch: &mut [Limb],
-) {
-    BenchValidation::product(dst, a, b);
-    assert!(block_len != 0, "lopsided benchmark block width is zero");
-    BenchValidation::scratch(
-        scratch,
-        Lopsided::mul_forced_scratch_len(a.len(), b.len(), block_len),
-    );
-    Lopsided::mul_forced(dst, a, b, scratch, block_len);
-}
+    /// Executes blocked multiplication with a forced block width and caller scratch.
+    pub fn bench_lopsided_mul_with_scratch(
+        dst: &mut [Limb],
+        a: &[Limb],
+        b: &[Limb],
+        block_len: usize,
+        scratch: &mut [Limb],
+    ) {
+        BenchValidation::product(dst, a, b);
+        assert!(block_len != 0, "lopsided benchmark block width is zero");
+        BenchValidation::scratch(
+            scratch,
+            Lopsided::mul_forced_scratch_len(a.len(), b.len(), block_len),
+        );
+        let executor = SequentialExecutor;
+        Lopsided::mul_forced(dst, a, b, scratch, block_len, &executor);
+    }
 
-/// Returns exact scratch for blocked multiplication at its production width.
-#[must_use]
-pub fn bench_lopsided_mul_production_scratch_len(len_a: usize, len_b: usize) -> usize {
-    let smaller_len = len_a.min(len_b);
-    let larger_len = len_a.max(len_b);
-    Lopsided::mul_forced_scratch_len(len_a, len_b, Lopsided::block_len(larger_len, smaller_len))
-}
+    /// Returns exact scratch for blocked multiplication at its production width.
+    #[must_use]
+    pub fn bench_lopsided_mul_production_scratch_len(len_a: usize, len_b: usize) -> usize {
+        let smaller_len = len_a.min(len_b);
+        let larger_len = len_a.max(len_b);
+        Lopsided::mul_forced_scratch_len(len_a, len_b, Lopsided::block_len(larger_len, smaller_len))
+    }
 
-/// Executes blocked multiplication with the production block width.
-pub fn bench_lopsided_mul_production(
-    dst: &mut [Limb],
-    a: &[Limb],
-    b: &[Limb],
-    scratch: &mut [Limb],
-) {
-    BenchValidation::product(dst, a, b);
-    BenchValidation::scratch(
-        scratch,
-        bench_lopsided_mul_production_scratch_len(a.len(), b.len()),
-    );
-    Lopsided::mul(dst, a, b, scratch);
+    /// Executes blocked multiplication with the production block width.
+    pub fn bench_lopsided_mul_production(
+        dst: &mut [Limb],
+        a: &[Limb],
+        b: &[Limb],
+        scratch: &mut [Limb],
+    ) {
+        BenchValidation::product(dst, a, b);
+        BenchValidation::scratch(
+            scratch,
+            Self::bench_lopsided_mul_production_scratch_len(a.len(), b.len()),
+        );
+        let executor = DefaultExecutor::default();
+        Lopsided::mul(dst, a, b, scratch, &executor);
+    }
 }
 
 fn assert_low_product_buffers(dst: &[Limb], a: &[Limb], b: &[Limb]) {

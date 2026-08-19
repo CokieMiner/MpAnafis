@@ -163,7 +163,7 @@ impl InternalMpUint {
         // SAFETY: the limb dispatcher fills the complete result slice before it is read.
         let result = unsafe { self.ensure_capacity_set_len_get_limbs(res_len) };
         Multiplication::mul_limbs_with_scratch(a_limbs, b_limbs, result, scratch);
-        self.normalize();
+        self.trim_product_guard(res_len);
     }
 
     /// Computes `self = a * a` using a caller-owned scratch pool.
@@ -185,7 +185,7 @@ impl InternalMpUint {
         // SAFETY: the limb dispatcher fills the complete result slice before it is read.
         let result = unsafe { self.ensure_capacity_set_len_get_limbs(res_len) };
         Multiplication::sqr_limbs_with_scratch(a_limbs, result, scratch);
-        self.normalize();
+        self.trim_product_guard(res_len);
     }
 
     /// Multiplies in place by `other`.
@@ -288,13 +288,10 @@ impl InternalMpUint {
         }
     }
 
-    /// Writes `a * b` into `self`, where both operands are nonzero and normalized
-    /// and neither aliases `self`.
+    /// Writes a nonzero product.
     ///
     /// Nonzero normalized `m`- and `n`-limb operands have a product of at least
-    /// `m + n - 1` limbs, so only the highest allocated limb can be zero. That is
-    /// the whole normalization argument, and it is identical for the allocating and
-    /// the destination-reusing entry points.
+    /// `m + n - 1` limbs, so only the highest allocated limb can be zero.
     #[allow(
         clippy::uninit_vec,
         reason = "Scratch buffer written before read by Karatsuba/Toom-Cook"
@@ -307,11 +304,10 @@ impl InternalMpUint {
         self.trim_product_guard(result_len);
     }
 
-    /// Writes `a * a` into `self`, where `a` is nonzero, normalized, and does not
-    /// alias `self`.
+    /// Writes a nonzero square.
     ///
-    /// A nonzero normalized `n`-limb value has a square of `2n` or `2n - 1` limbs,
-    /// the same one-limb slack [`Self::write_nonzero_product`] relies on.
+    /// A nonzero normalized `n`-limb value has a square of `2n` or `2n - 1`
+    /// limbs, so at most one high guard limb can be zero.
     #[allow(
         clippy::uninit_vec,
         reason = "Scratch buffer written before read by Karatsuba/Toom-Cook"
@@ -479,15 +475,11 @@ impl Multiplication {
     }
 }
 
-/// Multiplies two nonzero operands into `result`, selecting and running the plan.
-///
-/// Extracted so the allocating and destination-reusing entry points share one
-/// copy of the scratch policy; the two differ only in where `result` comes from,
-/// and a second copy would drift the moment a tier's scratch rule moved.
+/// Runs a nonzero product.
 fn multiply_nonzero_owned(a_limbs: &[Limb], b_limbs: &[Limb], result: &mut [Limb]) {
     let a_len = a_limbs.len();
     let b_len = b_limbs.len();
-    let plan = Multiplication::select_owned_plan(a_len, b_len);
+    let plan = Multiplication::select_plan(a_len, b_len, TierCeiling::Full);
     if plan == MulPlan::Schoolbook {
         Multiplication::execute_plan(plan, result, a_limbs, b_limbs, &mut []);
         return;
@@ -535,10 +527,6 @@ fn multiply_nonzero_owned(a_limbs: &[Limb], b_limbs: &[Limb], result: &mut [Limb
 }
 
 /// Squares a nonzero operand into `result`, selecting and running the plan.
-///
-/// The squaring counterpart of [`multiply_nonzero_owned`], and shared by its two
-/// entry points for the same reason.
-#[inline]
 fn square_nonzero_owned(a_limbs: &[Limb], result: &mut [Limb]) {
     let a_len = a_limbs.len();
     let plan = Multiplication::select_square_plan(a_len, TierCeiling::Full);

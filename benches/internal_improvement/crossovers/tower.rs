@@ -2,15 +2,7 @@
 
 use core::hint::black_box;
 
-use mp_anafis::tune_api::tier::{
-    Limb,
-    algorithms::{
-        bench_karatsuba_mul_scratch_len, bench_karatsuba_mul_with_scratch, bench_schoolbook_mul,
-        bench_toom_cook_3_forced_scratch_len, bench_toom_cook_3_mul_forced_with_scratch,
-        bench_toom_cook_4_mul_forced_with_scratch, bench_toom_cook_4_scratch_len,
-    },
-    state::{MulBenchScratch, bench_mul_tower_pooled},
-};
+use mp_anafis::tune_api::tier::{Limb, Tuner, state::MultiplicationBenchState};
 
 use crate::shared::{
     BASECASE_CROSSOVER_SIZES, BASECASE_ROW_SIZES, BASECASE_WIDTH_SIZES, LOWER_CHILD_SIZES,
@@ -26,7 +18,7 @@ use crate::shared::{
 fn basecase_width_schoolbook(bencher: divan::Bencher, len: usize) {
     let (left, right, mut destination) = operands(len);
     bencher.bench_local(|| {
-        bench_schoolbook_mul(
+        Tuner::bench_schoolbook_mul(
             black_box(&mut destination),
             black_box(&left),
             black_box(&right),
@@ -41,7 +33,7 @@ fn basecase_width_schoolbook(bencher: divan::Bencher, len: usize) {
 fn basecase_row_schoolbook(bencher: divan::Bencher, row: usize) {
     let (left, right, mut destination) = operands_pair(4, row);
     bencher.bench_local(|| {
-        bench_schoolbook_mul(
+        Tuner::bench_schoolbook_mul(
             black_box(&mut destination),
             black_box(&left),
             black_box(&right),
@@ -54,7 +46,7 @@ fn basecase_row_schoolbook(bencher: divan::Bencher, row: usize) {
 fn basecase_crossover_schoolbook(bencher: divan::Bencher, len: usize) {
     let (left, right, mut destination) = operands(len);
     bencher.bench_local(|| {
-        bench_schoolbook_mul(
+        Tuner::bench_schoolbook_mul(
             black_box(&mut destination),
             black_box(&left),
             black_box(&right),
@@ -66,9 +58,9 @@ fn basecase_crossover_schoolbook(bencher: divan::Bencher, len: usize) {
 #[divan::bench(args = BASECASE_CROSSOVER_SIZES)]
 fn basecase_crossover_karatsuba(bencher: divan::Bencher, len: usize) {
     let (left, right, mut destination) = operands(len);
-    let mut scratch = vec![Limb::MIN; bench_karatsuba_mul_scratch_len(len, len)];
+    let mut scratch = vec![Limb::MIN; Tuner::bench_karatsuba_mul_scratch_len(len, len)];
     bencher.bench_local(|| {
-        bench_karatsuba_mul_with_scratch(
+        Tuner::bench_karatsuba_mul_with_scratch(
             black_box(&mut destination),
             black_box(&left),
             black_box(&right),
@@ -81,9 +73,9 @@ fn basecase_crossover_karatsuba(bencher: divan::Bencher, len: usize) {
 #[divan::bench(args = LOWER_CHILD_SIZES)]
 fn lower_child_karatsuba(bencher: divan::Bencher, len: usize) {
     let (left, right, mut destination) = operands(len);
-    let mut scratch = vec![Limb::MIN; bench_karatsuba_mul_scratch_len(len, len)];
+    let mut scratch = vec![Limb::MIN; Tuner::bench_karatsuba_mul_scratch_len(len, len)];
     bencher.bench_local(|| {
-        bench_karatsuba_mul_with_scratch(
+        Tuner::bench_karatsuba_mul_with_scratch(
             black_box(&mut destination),
             black_box(&left),
             black_box(&right),
@@ -96,9 +88,9 @@ fn lower_child_karatsuba(bencher: divan::Bencher, len: usize) {
 #[divan::bench(args = LOWER_TOWER_CROSSOVER_SIZES)]
 fn lower_crossover_karatsuba(bencher: divan::Bencher, len: usize) {
     let (left, right, mut destination) = operands(len);
-    let mut scratch = vec![Limb::MIN; bench_karatsuba_mul_scratch_len(len, len)];
+    let mut scratch = vec![Limb::MIN; Tuner::bench_karatsuba_mul_scratch_len(len, len)];
     bencher.bench_local(|| {
-        bench_karatsuba_mul_with_scratch(
+        Tuner::bench_karatsuba_mul_with_scratch(
             black_box(&mut destination),
             black_box(&left),
             black_box(&right),
@@ -111,9 +103,9 @@ fn lower_crossover_karatsuba(bencher: divan::Bencher, len: usize) {
 #[divan::bench(args = LOWER_TOWER_CROSSOVER_SIZES)]
 fn lower_crossover_toom3(bencher: divan::Bencher, len: usize) {
     let (left, right, mut destination) = operands(len);
-    let mut scratch = vec![Limb::MIN; bench_toom_cook_3_forced_scratch_len(len, len)];
+    let mut scratch = vec![Limb::MIN; Tuner::bench_toom_cook_3_forced_scratch_len(len, len)];
     bencher.bench_local(|| {
-        bench_toom_cook_3_mul_forced_with_scratch(
+        Tuner::bench_toom_cook_3_mul_forced_with_scratch(
             black_box(&mut destination),
             black_box(&left),
             black_box(&right),
@@ -126,9 +118,9 @@ fn lower_crossover_toom3(bencher: divan::Bencher, len: usize) {
 #[divan::bench(args = LOWER_TOWER_CROSSOVER_SIZES)]
 fn lower_crossover_toom4(bencher: divan::Bencher, len: usize) {
     let (left, right, mut destination) = operands(len);
-    let mut scratch = vec![Limb::MIN; bench_toom_cook_4_scratch_len(len, len)];
+    let mut scratch = vec![Limb::MIN; Tuner::bench_toom_cook_4_scratch_len(len, len)];
     bencher.bench_local(|| {
-        bench_toom_cook_4_mul_forced_with_scratch(
+        Tuner::bench_toom_cook_4_mul_forced_with_scratch(
             black_box(&mut destination),
             black_box(&left),
             black_box(&right),
@@ -141,7 +133,7 @@ fn lower_crossover_toom4(bencher: divan::Bencher, len: usize) {
 #[divan::bench(args = TOWER_SIZES)]
 fn mp_tower_reused(bencher: divan::Bencher, len: usize) {
     let (left, right, mut destination) = operands(len);
-    let mut scratch = MulBenchScratch::default();
+    let mut scratch = MultiplicationBenchState::default();
     bencher.bench_local(|| {
         scratch.run(
             black_box(&mut destination),
@@ -156,7 +148,7 @@ fn mp_tower_reused(bencher: divan::Bencher, len: usize) {
 fn mp_tower_pooled(bencher: divan::Bencher, len: usize) {
     let (left, right, mut destination) = operands(len);
     bencher.bench_local(|| {
-        bench_mul_tower_pooled(
+        Tuner::bench_mul_tower_pooled(
             black_box(&mut destination),
             black_box(&left),
             black_box(&right),

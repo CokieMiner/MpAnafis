@@ -36,6 +36,7 @@ include = [
 default = []
 std = []
 num-traits = ["dep:num-traits"]
+rayon = ["std", "dep:rayon"]
 # Internal: enables the host-side tuner and the multiplication benchmarks. The
 # latter link the system FLINT (`pacman -S flint`, `apt install libflint-dev`)
 # for the `compare` group.
@@ -44,6 +45,7 @@ _internal-tune = ["std"]
 
 [dependencies]
 num-traits = { version = "0.2", optional = true, default-features = false }
+rayon = { version = "1.10", optional = true, default-features = false }
 
 [dev-dependencies]
 divan = "0.1.21"

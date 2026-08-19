@@ -2,8 +2,10 @@
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::parallel::{ParallelExecutor, SequentialExecutor};
+
 use super::{
-    ArchKernels, LIMB_BITS, Limb, MulPlan, Multiplication, NegacyclicPlan, Residue,
+    ArchKernels, FftPlan, LIMB_BITS, Limb, MulPlan, Multiplication, NegacyclicPlan, Residue,
     SSA_BASE_MODULUS_BITS, SsaCarry, SsaRing, SsaTransform, TierCeiling,
 };
 
@@ -63,14 +65,16 @@ impl SsaPointwise {
             return false;
         }
         // Multiplying by -1 is a negated copy of the other operand.
-        let source = if left_class == Residue::NegOne {
+        let source_coefficient = if left_class == Residue::NegOne {
             right
         } else {
             left
         };
-        // SAFETY: both spans are complete, disjoint cl-limb coefficients.
-        unsafe { dst.get_unchecked_mut(..cl) }
-            .copy_from_slice(unsafe { source.get_unchecked(..cl) });
+        // SAFETY: `dst` contains the complete writable coefficient span.
+        let destination = unsafe { dst.get_unchecked_mut(..cl) };
+        // SAFETY: `source` contains the complete initialized coefficient span.
+        let source = unsafe { source_coefficient.get_unchecked(..cl) };
+        destination.copy_from_slice(source);
         // SAFETY: dst has cl limbs and mod_bits matches.
         unsafe {
             SsaRing::negate(dst, mod_bits);
@@ -101,24 +105,24 @@ impl SsaPointwise {
         true
     }
 
-    /// Multiplies every coefficient pair in two Fermat-ring matrices.
+    /// Multiplies every coefficient pair using the supplied synchronous executor.
     ///
-    /// Normalizes coefficients in-place, multiplies into a shared result buffer,
-    /// and writes results back into `left_matrix`. `right_matrix` is mutated
-    /// during normalization and is dead after this call.
+    /// Both sequential and parallel paths use the caller-provided scratch.
+    /// Parallel leaves receive disjoint coefficient-aligned regions; nested
+    /// coefficient products use a sequential child executor to avoid recursive
+    /// oversubscription.
     ///
     /// # Safety
-    /// - `left_matrix` and `right_matrix` each have `transform_len * cl` limbs.
-    /// - `product_scratch` has at least `cl` limbs for result staging plus recursive
-    ///   scratch as determined by the tier dispatcher.
-    pub unsafe fn pointwise_multiply(
+    /// The caller must satisfy the validated matrix and scratch preconditions
+    /// described above.
+    pub unsafe fn pointwise_multiply_with_executor<E: ParallelExecutor>(
         left_matrix: &mut [Limb],
         right_matrix: &mut [Limb],
         transform_len: usize,
         mod_bits: usize,
+        executor: &E,
         product_scratch: &mut [Limb],
     ) {
-        let cl = SsaRing::coeff_limbs(mod_bits);
         let basecase_plan = (mod_bits <= SSA_BASE_MODULUS_BITS).then(|| {
             let ml = SsaRing::mod_limbs(mod_bits);
             Multiplication::select_plan(ml, ml, TierCeiling::Full)
@@ -127,33 +131,65 @@ impl SsaPointwise {
             .then(|| NegacyclicPlan::new(SsaRing::mod_limbs(mod_bits)))
             .flatten();
 
-        let (result, mul_scratch) = product_scratch.split_at_mut(cl);
-
-        for i in 0..transform_len {
-            let offset = i.wrapping_mul(cl);
-
-            // SAFETY: offset + cl <= matrix length by construction; both matrices
-            // are disjoint and each holds transform_len complete coefficients.
-            let left = unsafe { left_matrix.get_unchecked_mut(offset..offset.wrapping_add(cl)) };
-            // SAFETY: same bounds proof as left, applied to the right matrix.
-            let right = unsafe { right_matrix.get_unchecked_mut(offset..offset.wrapping_add(cl)) };
-
-            // SAFETY: both spans are complete cl-limb coefficients.
+        if executor.parallelism().get() > 1 && transform_len >= 16 {
+            let cl = SsaRing::coeff_limbs(mod_bits);
+            let needed_scratch_result = if mod_bits <= SSA_BASE_MODULUS_BITS {
+                cl.checked_add(Self::fermat_basecase_scratch_len(mod_bits))
+            } else {
+                cl.checked_add(FftPlan::new(mod_bits).transform_mul_scratch())
+            };
+            let Some(needed_scratch) = needed_scratch_result else {
+                debug_assert!(
+                    false,
+                    "pointwise scratch size overflowed during preparation"
+                );
+                return;
+            };
+            let workers =
+                FftPlan::pointwise_parallelism_budget(transform_len, executor.parallelism().get());
+            let leaf_len = transform_len.div_ceil(workers).max(1);
+            let leaf_count = FftPlan::pointwise_leaf_count(transform_len, leaf_len);
+            let Some(required_scratch) = needed_scratch.checked_mul(leaf_count) else {
+                debug_assert!(
+                    false,
+                    "pointwise leaf arena size overflowed during preparation"
+                );
+                return;
+            };
+            debug_assert!(
+                product_scratch.len() >= required_scratch,
+                "pointwise scratch must be partitioned at the outer transform boundary"
+            );
+            // SAFETY: the matrices and caller-owned scratch contain complete,
+            // coefficient-aligned partitions for every leaf.
             unsafe {
-                SsaRing::normalize(left, mod_bits);
-                SsaRing::normalize(right, mod_bits);
-                if write_pointwise_special_product(left, right, mod_bits) {
-                    continue;
-                }
-                if let Some(plan) = negacyclic_plan {
-                    plan.mul_assign_left(left, right, mul_scratch);
-                } else if let Some(plan) = basecase_plan {
-                    fermat_basecase_mul_assign_left(left, right, mod_bits, plan, mul_scratch);
-                } else {
-                    fermat_mul_into(result, left, right, mod_bits, None, mul_scratch);
-                    left.copy_from_slice(result);
-                }
+                pointwise_multiply_parallel(
+                    left_matrix,
+                    right_matrix,
+                    transform_len,
+                    mod_bits,
+                    basecase_plan,
+                    negacyclic_plan,
+                    needed_scratch,
+                    leaf_len,
+                    product_scratch,
+                    executor,
+                );
             }
+            return;
+        }
+
+        // SAFETY: left_matrix and right_matrix are disjoint slices.
+        unsafe {
+            pointwise_multiply_sequential(
+                left_matrix,
+                right_matrix,
+                transform_len,
+                mod_bits,
+                basecase_plan,
+                negacyclic_plan,
+                product_scratch,
+            );
         }
     }
 
@@ -198,7 +234,12 @@ impl SsaPointwise {
         product_scratch: &mut [Limb],
     ) {
         let ml = SsaRing::mod_limbs(mod_bits);
+        // The validated basecase layout always contains the full two-limb product.
         let product_span = ml.wrapping_mul(2);
+        debug_assert!(
+            product_span != usize::MAX,
+            "validated product span overflowed"
+        );
         // SAFETY: the caller guarantees product_scratch has the basecase scratch
         // length, whose first product_span limbs hold the complete product.
         let (product, tower_scratch) =
@@ -206,10 +247,13 @@ impl SsaPointwise {
         // SAFETY: both ranges have their exact fixed widths by construction, and
         // `uncached_fermat_basecase_scratch_len` sizes the tail for whichever of
         // the two towers is larger.
+        let product_output = unsafe { product.get_unchecked_mut(..product_span) };
+        // SAFETY: the caller guarantees `value` contains the complete data span.
+        let value_input = unsafe { value.get_unchecked(..ml) };
         Multiplication::execute_square_plan(
             Multiplication::select_square_plan(ml, TierCeiling::Full),
-            unsafe { product.get_unchecked_mut(..product_span) },
-            unsafe { value.get_unchecked(..ml) },
+            product_output,
+            value_input,
             tower_scratch,
         );
         // SAFETY: the square overwrote the complete 2*ml-limb product and dst is a
@@ -285,7 +329,9 @@ fn uncached_fermat_basecase_scratch_len(ml: usize) -> usize {
     // two towers size their workspaces independently.
     let tower =
         Multiplication::required_scratch(ml, ml).max(Multiplication::required_sqr_scratch(ml));
-    let exact = ml.wrapping_mul(2).wrapping_add(tower);
+    let Some(exact) = ml.checked_mul(2).and_then(|n| n.checked_add(tower)) else {
+        return usize::MAX;
+    };
     NegacyclicPlan::new(ml).map_or(exact, |plan| exact.max(plan.scratch_len()))
 }
 
@@ -320,9 +366,11 @@ unsafe fn write_pointwise_special_product(
 
     if left_guard != 0 {
         let cl = ml.wrapping_add(1);
-        // SAFETY: both complete coefficient spans are disjoint.
-        unsafe { left.get_unchecked_mut(..cl) }
-            .copy_from_slice(unsafe { right.get_unchecked(..cl) });
+        // SAFETY: `left` contains the complete writable coefficient span.
+        let destination = unsafe { left.get_unchecked_mut(..cl) };
+        // SAFETY: `right` is a disjoint complete initialized coefficient span.
+        let source = unsafe { right.get_unchecked(..cl) };
+        destination.copy_from_slice(source);
         // SAFETY: left now contains right's canonical residue.
         unsafe {
             SsaRing::negate(left, mod_bits);
@@ -380,7 +428,7 @@ unsafe fn fermat_mul_into(
     } else {
         // SAFETY: all buffers correctly sized for recursive call.
         unsafe {
-            SsaTransform::fft_mul_mod_slices(
+            SsaTransform::fft_mul_mod_slices_with_executor(
                 dst,
                 left,
                 right,
@@ -388,6 +436,7 @@ unsafe fn fermat_mul_into(
                 None,
                 false,
                 None,
+                &SequentialExecutor,
                 mul_scratch,
             );
         }
@@ -415,7 +464,12 @@ unsafe fn fermat_basecase_mul_assign_left(
     product_scratch: &mut [Limb],
 ) {
     let ml = SsaRing::mod_limbs(mod_bits);
+    // The selected plan and its scratch layout prove this span is representable.
     let product_span = ml.wrapping_mul(2);
+    debug_assert!(
+        product_span != usize::MAX,
+        "validated product span overflowed"
+    );
     // SAFETY: the caller guarantees the ordinary basecase scratch length.
     let (product, tower_scratch) = unsafe { product_scratch.split_at_mut_unchecked(product_span) };
     // The selected multiplication writes a disjoint product and returns before
@@ -459,7 +513,12 @@ unsafe fn fermat_basecase_mul_with_plan(
     product_scratch: &mut [Limb],
 ) {
     let ml = SsaRing::mod_limbs(mod_bits);
+    // The selected plan and its scratch layout prove this span is representable.
     let product_span = ml.wrapping_mul(2);
+    debug_assert!(
+        product_span != usize::MAX,
+        "validated product span overflowed"
+    );
     // SAFETY: the caller guarantees product_scratch has the basecase scratch
     // length, whose first product_span limbs hold the complete product.
     let (product, tower_scratch) = unsafe { product_scratch.split_at_mut_unchecked(product_span) };
@@ -470,16 +529,159 @@ unsafe fn fermat_basecase_mul_with_plan(
     // `2 * ml`-limb result. Leading zero limbs remain algebraically harmless.
     // SAFETY: all three ranges have their exact fixed widths by construction;
     // tower_scratch was sized for this full-width product.
-    Multiplication::execute_plan(
-        plan,
-        unsafe { product.get_unchecked_mut(..product_span) },
-        unsafe { left.get_unchecked(..ml) },
-        unsafe { right.get_unchecked(..ml) },
-        tower_scratch,
-    );
+    let product_output = unsafe { product.get_unchecked_mut(..product_span) };
+    // SAFETY: the caller guarantees `left` contains the complete data span.
+    let left_input = unsafe { left.get_unchecked(..ml) };
+    // SAFETY: the caller guarantees `right` contains the complete data span.
+    let right_input = unsafe { right.get_unchecked(..ml) };
+    Multiplication::execute_plan(plan, product_output, left_input, right_input, tower_scratch);
     // SAFETY: the multiplication overwrote the complete 2*ml-limb product and
     // dst is a disjoint complete coefficient.
     unsafe {
         SsaPointwise::reduce_full_product(dst, product, ml);
     }
+}
+
+/// Sequential loop for pointwise multiplication over a contiguous chunk of coefficients.
+///
+/// # Safety
+/// - `left_matrix` and `right_matrix` each have `transform_len * SsaRing::coeff_limbs(mod_bits)` limbs.
+/// - `product_scratch` has at least `cl` limbs plus recursive scratch.
+unsafe fn pointwise_multiply_sequential(
+    left_matrix: &mut [Limb],
+    right_matrix: &mut [Limb],
+    transform_len: usize,
+    mod_bits: usize,
+    basecase_plan: Option<MulPlan>,
+    negacyclic_plan: Option<NegacyclicPlan>,
+    product_scratch: &mut [Limb],
+) {
+    let cl = SsaRing::coeff_limbs(mod_bits);
+    let (result, mul_scratch) = product_scratch.split_at_mut(cl);
+
+    for i in 0..transform_len {
+        let offset = i.wrapping_mul(cl);
+
+        // SAFETY: offset + cl <= matrix length by construction; both matrices
+        // are disjoint and each holds transform_len complete coefficients.
+        let left = unsafe { left_matrix.get_unchecked_mut(offset..offset.wrapping_add(cl)) };
+        // SAFETY: same bounds proof as left, applied to the right matrix.
+        let right = unsafe { right_matrix.get_unchecked_mut(offset..offset.wrapping_add(cl)) };
+
+        // SAFETY: both spans are complete cl-limb coefficients.
+        unsafe {
+            SsaRing::normalize(left, mod_bits);
+            SsaRing::normalize(right, mod_bits);
+            if write_pointwise_special_product(left, right, mod_bits) {
+                continue;
+            }
+            if let Some(plan) = negacyclic_plan {
+                plan.mul_assign_left(left, right, mul_scratch);
+            } else if let Some(plan) = basecase_plan {
+                fermat_basecase_mul_assign_left(left, right, mod_bits, plan, mul_scratch);
+            } else {
+                fermat_mul_into(result, left, right, mod_bits, None, mul_scratch);
+                left.copy_from_slice(result);
+            }
+        }
+    }
+}
+
+/// Executes pointwise products in disjoint coefficient ranges.
+///
+/// # Safety
+/// The two matrices contain `transform_len` complete coefficients. Recursive
+/// splits occur only on coefficient boundaries; every leaf owns an independent
+/// caller-provided scratch range before calling the shared sequential kernel.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "The recursive worker carries one immutable plan and one executor alongside the two disjoint matrix ranges"
+)]
+unsafe fn pointwise_multiply_parallel<E: ParallelExecutor>(
+    left_matrix: &mut [Limb],
+    right_matrix: &mut [Limb],
+    transform_len: usize,
+    mod_bits: usize,
+    basecase_plan: Option<MulPlan>,
+    negacyclic_plan: Option<NegacyclicPlan>,
+    needed_scratch: usize,
+    leaf_len: usize,
+    scratch: &mut [Limb],
+    executor: &E,
+) {
+    let cl = SsaRing::coeff_limbs(mod_bits);
+    if transform_len <= leaf_len {
+        debug_assert!(
+            scratch.len() >= needed_scratch,
+            "validated pointwise leaf scratch must cover its product workspace"
+        );
+        // SAFETY: the outer preparation proved one complete arena per leaf.
+        let leaf_scratch = unsafe { scratch.get_unchecked_mut(..needed_scratch) };
+        // SAFETY: this leaf is a complete coefficient-aligned matrix partition.
+        unsafe {
+            pointwise_multiply_sequential(
+                left_matrix,
+                right_matrix,
+                transform_len,
+                mod_bits,
+                basecase_plan,
+                negacyclic_plan,
+                leaf_scratch,
+            );
+        }
+        return;
+    }
+
+    let left_count = transform_len.div_euclid(2);
+    // Matrix validity proves every coefficient boundary is representable.
+    let left_limbs = left_count.wrapping_mul(cl);
+    let (left_first, left_second) = left_matrix.split_at_mut(left_limbs);
+    let (right_first, right_second) = right_matrix.split_at_mut(left_limbs);
+    // `transform_len > leaf_len >= 1` proves the split has at least two
+    // coefficients, so this subtraction cannot underflow.
+    let right_count = transform_len.wrapping_sub(left_count);
+    let left_leaves = FftPlan::pointwise_leaf_count(left_count, leaf_len);
+    // The outer preparation checked the complete leaf arena before recursion.
+    let left_scratch_len = needed_scratch.wrapping_mul(left_leaves);
+    debug_assert!(
+        left_scratch_len != usize::MAX,
+        "validated pointwise leaf arena must fit the caller scratch"
+    );
+    let (left_scratch, right_scratch) = scratch.split_at_mut(left_scratch_len);
+    let ((), ()) = executor.join(
+        || {
+            // SAFETY: the first matrix ranges are disjoint and complete.
+            unsafe {
+                pointwise_multiply_parallel(
+                    left_first,
+                    right_first,
+                    left_count,
+                    mod_bits,
+                    basecase_plan,
+                    negacyclic_plan,
+                    needed_scratch,
+                    leaf_len,
+                    left_scratch,
+                    executor,
+                );
+            }
+        },
+        || {
+            // SAFETY: the second matrix ranges are disjoint and complete.
+            unsafe {
+                pointwise_multiply_parallel(
+                    left_second,
+                    right_second,
+                    right_count,
+                    mod_bits,
+                    basecase_plan,
+                    negacyclic_plan,
+                    needed_scratch,
+                    leaf_len,
+                    right_scratch,
+                    executor,
+                );
+            }
+        },
+    );
 }

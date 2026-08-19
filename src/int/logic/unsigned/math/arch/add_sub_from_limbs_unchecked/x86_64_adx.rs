@@ -58,10 +58,10 @@ pub unsafe fn add_sub_from_limbs_unchecked(
             // Seed CF=0 and OF=1 (OF=1 seeds two's complement borrow-to-carry inversion)
             "movabsq $0x7fffffffffffffff, %r8",           // %r8 = MAX_INT
             "addq $1, %r8",                              // Clears CF (0), sets OF (1)
-            "jrcxz 1f",                                  // If block_count == 0, jump to remainder (1f)
+            "jrcxz 1f",                                  // If block_count == 0, jump to trampoline (1f)
             "jmp 2f",                                    // Jump to 8-way loop (2f)
-            "1:",                                        // Jump stub label
-            "jmp 3f",                                    // Jump to tail entry (3f)
+            "1:",                                        // Trampoline label for 8-bit jrcxz displacement
+            "jmp 3f",                                    // 32-bit jump to tail entry (3f)
 
             ".p2align 4",                                // Align loop header
             // Main 8-way unrolled butterfly loop

@@ -3,6 +3,8 @@
 use alloc::vec;
 use core::panic::AssertUnwindSafe;
 
+use crate::int::InternalMpInt;
+
 use super::{std::panic::catch_unwind, *};
 
 proptest! {
@@ -98,6 +100,94 @@ proptest! {
         // A square is never negative, including when the operand is.
         prop_assert!(signed_squared >= MpInt::zero());
     }
+}
+
+fn reconstruct_signed_words(lower: &MpInt, upper: &MpInt, width: usize) -> InternalMpInt {
+    let mut bits = upper.value.to_tc_bits(width).shl(width);
+    bits.add_assign(&lower.value.to_tc_bits(width));
+    InternalMpInt::from_tc_bits(bits, width * 2)
+}
+
+#[test]
+fn signed_widening_words_reconstruct_negative_and_boundary_products() {
+    let width = nz(8);
+    for (left_value, right_value) in [
+        (-128_i16, 1_i16),
+        (-1, 2),
+        (-128, -1),
+        (127, 127),
+        (-128, -128),
+    ] {
+        let left = MpInt::with_precision_checked(left_value, width).expect("left fits");
+        let right = MpInt::with_precision_checked(right_value, width).expect("right fits");
+        let expected = MpInt::from(left_value) * MpInt::from(right_value);
+
+        let (lower, upper) = left.widening_mul(&right);
+        assert_eq!(
+            reconstruct_signed_words(&lower, &upper, width.get()),
+            expected.value,
+            "signed word reconstruction for {left_value} * {right_value}"
+        );
+        let (try_lower, try_upper) = left.try_widening_mul(&right).expect("bounded width");
+        assert_eq!(try_lower, lower);
+        assert_eq!(try_upper, upper);
+    }
+}
+
+#[test]
+fn signed_carrying_words_reconstruct_negative_and_boundary_sums() {
+    let width = nz(8);
+    let left = MpInt::with_precision_checked(-128_i16, width).expect("left fits");
+    let right = MpInt::with_precision_checked(-128_i16, width).expect("right fits");
+    let carry = MpInt::with_precision_checked(-3_i16, width).expect("carry fits");
+    let expected = MpInt::from(-128_i16) * MpInt::from(-128_i16) + MpInt::from(-3_i16);
+
+    let (lower, upper) = left.carrying_mul(&right, &carry);
+    assert_eq!(
+        reconstruct_signed_words(&lower, &upper, width.get()),
+        expected.value
+    );
+    let (try_lower, try_upper) = left
+        .try_carrying_mul(&right, &carry)
+        .expect("bounded width");
+    assert_eq!(try_lower, lower);
+    assert_eq!(try_upper, upper);
+
+    let carry1 = MpInt::with_precision_checked(127_i16, width).expect("carry1 fits");
+    let carry2 = MpInt::with_precision_checked(127_i16, width).expect("carry2 fits");
+    let expected_add =
+        MpInt::from(-128_i16) * MpInt::from(-128_i16) + MpInt::from(127_i16) + MpInt::from(127_i16);
+    let (add_lower, add_upper) = left.carrying_mul_add(&right, &carry1, &carry2);
+    assert_eq!(
+        reconstruct_signed_words(&add_lower, &add_upper, width.get()),
+        expected_add.value
+    );
+}
+
+#[test]
+fn signed_widening_unbounded_returns_exact_lower_and_rejects_try_split() {
+    let left = MpInt::from(-129_i16);
+    let right = MpInt::from(7_i16);
+    let carry = MpInt::from(-3_i16);
+    let expected_product = &left * &right;
+    let expected_carrying = &expected_product + &carry;
+
+    let (lower, upper) = left.widening_mul(&right);
+    assert_eq!(lower, expected_product);
+    assert_eq!(upper, MpInt::zero());
+    assert_eq!(left.try_widening_mul(&right), Err(MpError::WidthRequired));
+
+    let (carry_lower, carry_upper) = left.carrying_mul(&right, &carry);
+    assert_eq!(carry_lower, expected_carrying);
+    assert_eq!(carry_upper, MpInt::zero());
+    assert_eq!(
+        left.try_carrying_mul(&right, &carry),
+        Err(MpError::WidthRequired)
+    );
+
+    let (add_lower, add_upper) = left.carrying_mul_add(&right, &carry, &MpInt::one());
+    assert_eq!(add_lower, &expected_carrying + MpInt::one());
+    assert_eq!(add_upper, MpInt::zero());
 }
 
 /// Zero and one operands, which the fused product short-circuits.
@@ -373,5 +463,55 @@ proptest! {
 
         let fused = factor.mul_add(&multiplier, &addend);
         prop_assert_eq!(fused, factor, "exact addition brings the final result back in range");
+    }
+
+    #[test]
+    fn prop_widening_and_carrying_mul_identities(
+        u_a in strategies::uint(8),
+        u_b in strategies::uint(8),
+        u_c in strategies::uint(8),
+        u_d in strategies::uint(8),
+        shift in 0_usize..=128,
+    ) {
+        prop_assert_eq!(u_a.mul_2exp(shift), &u_a << shift);
+        prop_assert_eq!(u_a.div_2exp(shift), &u_a >> shift);
+
+        let (lo, _hi) = u_a.widening_mul(&u_b);
+        prop_assert_eq!(lo, &u_a * &u_b);
+
+        let (c_lo, _c_hi) = u_a.carrying_mul(&u_b, &u_c);
+        let expected_carrying = (&u_a * &u_b) + &u_c;
+        prop_assert_eq!(c_lo, expected_carrying);
+
+        let (ca_lo, _ca_hi) = u_a.carrying_mul_add(&u_b, &u_c, &u_d);
+        let expected_carrying_add = (&u_a * &u_b) + &u_c + &u_d;
+        prop_assert_eq!(ca_lo, expected_carrying_add);
+    }
+
+    #[test]
+    fn prop_bounded_widening_mul_split(
+        bits in 8_usize..=64,
+        a_val in any::<u64>(),
+        b_val in any::<u64>(),
+    ) {
+        let width = nz(bits);
+        let mask = if bits == 64 { u64::MAX } else { (1_u64 << bits).wrapping_sub(1) };
+        let a_bounded = a_val & mask;
+        let b_bounded = b_val & mask;
+        let u_a = MpUint::with_precision_checked(a_bounded, width).expect("bounded value fits");
+        let u_b = MpUint::with_precision_checked(b_bounded, width).expect("bounded value fits");
+
+        let (lo, hi) = u_a.widening_mul(&u_b);
+        let (try_lo, try_hi) = u_a.try_widening_mul(&u_b).expect("bounded precision supports try_widening_mul");
+        prop_assert_eq!(&lo, &try_lo);
+        prop_assert_eq!(&hi, &try_hi);
+
+        let full_prod = u128::from(a_bounded).wrapping_mul(u128::from(b_bounded));
+        #[allow(clippy::as_conversions, clippy::cast_possible_truncation, reason = "mask restricts to u64")]
+        let expected_lo = (full_prod & u128::from(mask)) as u64;
+        #[allow(clippy::as_conversions, clippy::cast_possible_truncation, reason = "bits <= 64 restricts upper to u64")]
+        let expected_hi = (full_prod >> bits) as u64;
+        prop_assert_eq!(lo, MpUint::with_precision_checked(expected_lo, width).expect("expected lo fits"));
+        prop_assert_eq!(hi, MpUint::with_precision_checked(expected_hi, width).expect("expected hi fits"));
     }
 }

@@ -6,8 +6,16 @@
 //! or more end to end, so the selections are pinned.
 
 #[cfg(target_arch = "x86_64")]
-use super::SSA_BASE_MODULUS_BITS;
-use super::{FftPlan, LIMB_BITS, SsaPlan, TOP_LEVEL_SEARCH_RADIUS};
+use super::{FftPlan, LIMB_BITS, SSA_BASE_MODULUS_BITS, SsaPlan};
+
+use super::super::SsaCrt;
+
+#[test]
+fn crt_layout_rejects_unrepresentable_scratch_sizes() {
+    assert_eq!(SsaCrt::layout_len(usize::MAX, 1), usize::MAX);
+    assert_eq!(SsaCrt::sqr_layout_len(usize::MAX, 1), usize::MAX);
+    assert_eq!(SsaCrt::mul_mod_bnm1_scratch_len(usize::MAX), usize::MAX);
+}
 
 /// Ring widths reached by the top-level Fermat product for power-of-two operand
 /// widths, paired with the transform exponent the planner selects.
@@ -51,9 +59,9 @@ const MEASURED_OPTIMA: [(usize, usize); 7] = [
 #[cfg(target_arch = "x86_64")]
 const X86_RAM_OPTIMA: [(usize, usize); 4] = [
     (1 << 26, 11), // 1,048,576-limb operands
-    (1 << 27, 11), // 2,097,152-limb operands
+    (1 << 27, 12), // 2,097,152-limb operands
     (1 << 28, 12), // 4,194,304-limb operands
-    (1 << 29, 12), // 8,388,608-limb operands
+    (1 << 29, 13), // 8,388,608-limb operands
 ];
 
 /// Ring widths the `mul_mod_bnm1` recursion reaches below the pinned range.
@@ -206,7 +214,7 @@ fn assert_window_reaches(modulus_bits: usize, measured: usize) {
     let centre = SsaPlan::search_centre(modulus_bits);
     let optimum = u32::try_from(measured).expect("a transform exponent fits u32");
     assert!(
-        centre.abs_diff(optimum) <= TOP_LEVEL_SEARCH_RADIUS,
+        centre.abs_diff(optimum) <= 4,
         "the search window around centre {centre} does not reach the measured \
          optimum {optimum} for a {modulus_bits}-bit ring"
     );

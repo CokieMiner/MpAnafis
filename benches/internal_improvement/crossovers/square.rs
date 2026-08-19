@@ -22,10 +22,9 @@
 use core::hint::black_box;
 
 use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
-use mp_anafis::tune_api::tier::{
-    Limb,
-    state::SquareBenchScratch,
-    transform::{bench_ssa_sqr_scratch_len, bench_ssa_sqr_with_scratch},
+use mp_anafis::tune_api::{
+    SquaringAlgorithm, Tuner,
+    tier::{Limb, state::SquaringBenchState},
 };
 
 use crate::shared::operand;
@@ -36,7 +35,7 @@ const WIDTHS: [usize; 9] = [1800, 2000, 2200, 2400, 2500, 2600, 2800, 3000, 3072
 fn dispatched(bencher: divan::Bencher<'_, '_>, len: usize) {
     let value = operand(len, Limb::MAX.wrapping_sub(0x1234));
     let mut destination = vec![Limb::MIN; len.saturating_mul(2)];
-    let mut reusable = SquareBenchScratch::default();
+    let mut reusable = SquaringBenchState::default();
     bencher.bench_local(|| {
         reusable.run(black_box(&mut destination), black_box(&value));
     });
@@ -46,13 +45,10 @@ fn dispatched(bencher: divan::Bencher<'_, '_>, len: usize) {
 fn forced_transform(bencher: divan::Bencher<'_, '_>, len: usize) {
     let value = operand(len, Limb::MAX.wrapping_sub(0x1234));
     let mut destination = vec![Limb::MIN; len.saturating_mul(2)];
-    let mut scratch = vec![Limb::MIN; bench_ssa_sqr_scratch_len(len)];
+    let mut runner = Tuner::squaring(SquaringAlgorithm::SsaForced, len);
+    let mut prepared = runner.prepare(&mut destination, &value);
     bencher.bench_local(|| {
-        bench_ssa_sqr_with_scratch(
-            black_box(&mut destination),
-            black_box(&value),
-            black_box(&mut scratch),
-        );
+        black_box(&mut prepared).run();
     });
 }
 

@@ -7,6 +7,8 @@
 
 use core::cmp::{max, min};
 
+use crate::parallel::ParallelExecutor;
+
 use super::{Addition, Limb, Multiplication, TierCeiling, Widths};
 
 /// Block width, as a multiple of the shorter operand, once a block product is
@@ -40,10 +42,23 @@ impl Lopsided {
     /// Every later block overlaps that prefix by exactly `smaller.len()` limbs;
     /// its remaining high limbs extend the initialized frontier and are copied,
     /// not added, so dirty destination storage is never read.
-    pub fn mul(dst: &mut [Limb], a: &[Limb], b: &[Limb], scratch: &mut [Limb]) {
+    pub fn mul<E: ParallelExecutor>(
+        dst: &mut [Limb],
+        a: &[Limb],
+        b: &[Limb],
+        scratch: &mut [Limb],
+        executor: &E,
+    ) {
         let smaller_len = min(a.len(), b.len());
         let larger_len = max(a.len(), b.len());
-        Self::mul_forced(dst, a, b, scratch, Self::block_len(larger_len, smaller_len));
+        Self::mul_forced(
+            dst,
+            a,
+            b,
+            scratch,
+            Self::block_len(larger_len, smaller_len),
+            executor,
+        );
     }
 
     /// Multiply a highly unbalanced pair with a benchmark-forced full-block width.
@@ -51,12 +66,13 @@ impl Lopsided {
     /// Production calls this with [`Self::block_len`]. The tuning facade may
     /// supply another nonzero width to compare complete algorithms rather than
     /// extrapolating isolated block timings.
-    pub fn mul_forced(
+    pub fn mul_forced<E: ParallelExecutor>(
         dst: &mut [Limb],
         a: &[Limb],
         b: &[Limb],
         scratch: &mut [Limb],
         block_len: usize,
+        executor: &E,
     ) {
         let (larger, smaller) = if a.len() >= b.len() { (a, b) } else { (b, a) };
         let smaller_len = smaller.len();
@@ -90,12 +106,13 @@ impl Lopsided {
             "the first lopsided block must have full width"
         );
         let (initialized_prefix, _) = dst.split_at_mut(block_product_capacity);
-        Multiplication::execute_plan(
+        Multiplication::execute_plan_with_executor(
             full_block_plan,
             initialized_prefix,
             first_block,
             smaller,
             recursive_scratch,
+            executor,
         );
 
         let mut block_offset = block_len;
@@ -103,19 +120,24 @@ impl Lopsided {
             let active_product_len = smaller_len.wrapping_add(block.len());
             let (active_product, _) = block_product.split_at_mut(active_product_len);
             if block.len() == block_len {
-                Multiplication::execute_plan(
+                Multiplication::execute_plan_with_executor(
                     full_block_plan,
                     active_product,
                     block,
                     smaller,
                     recursive_scratch,
+                    executor,
                 );
             } else {
-                Multiplication::mul_limbs_with_slice_scratch(
+                let tail_plan =
+                    Multiplication::select_plan(block.len(), smaller_len, TierCeiling::Full);
+                Multiplication::execute_plan_with_executor(
+                    tail_plan,
+                    active_product,
                     block,
                     smaller,
-                    active_product,
                     recursive_scratch,
+                    executor,
                 );
             }
 
@@ -206,11 +228,12 @@ impl Lopsided {
 /// 1.13x to 1.34x behind where a sixteen-fold block measures 0.82x to 0.96x.
 fn transform_block_len(larger_len: usize, smaller_len: usize) -> Option<usize> {
     let target = smaller_len.checked_mul(WIDE_BLOCK_RATIO)?;
-    // A block this wide only pays if the block product is genuinely a transform,
+    // A block this wide pays when the block product or balanced equivalent reaches a transform,
     // and only counts as blocking if at least two blocks remain.
-    if !Multiplication::select_plan(target, smaller_len, TierCeiling::Full).is_transform()
-        || larger_len < target.saturating_mul(2)
-    {
+    let is_transform = Multiplication::select_plan(target, smaller_len, TierCeiling::Full)
+        .is_transform()
+        || Multiplication::select_plan(smaller_len, smaller_len, TierCeiling::Full).is_transform();
+    if !is_transform || larger_len < target.saturating_mul(2) {
         return None;
     }
     let block_count = larger_len.div_ceil(target);

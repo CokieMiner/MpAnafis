@@ -12,8 +12,9 @@ use super::{InternalMpInt, InternalMpUint, Limb};
 impl InternalMpInt {
     /// Computes `self = a * b` while reusing this magnitude allocation.
     pub fn assign_mul(&mut self, a: &Self, b: &Self) {
+        let is_positive = a.is_positive == b.is_positive;
         self.abs.assign_product(&a.abs, &b.abs);
-        self.is_positive = self.abs.is_zero() || a.is_positive == b.is_positive;
+        self.is_positive = self.abs.is_zero() || is_positive;
     }
 
     /// Computes `self = a * a` while reusing this magnitude allocation.

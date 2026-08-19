@@ -42,6 +42,12 @@ impl Clone for UintRepr {
             (Self::Heap(dest_vec), Self::Heap(src_vec)) => {
                 dest_vec.clone_from(src_vec); // Reuses the heap allocation!
             }
+            (Self::Heap(dest_vec), Self::Inline { len, limbs }) => {
+                dest_vec.clear();
+                // SAFETY: usize::from(*len) <= INLINE_LIMBS, so ..usize::from(*len) is within the limbs array bounds.
+                let slice = unsafe { limbs.get_unchecked(..usize::from(*len)) };
+                dest_vec.extend_from_slice(slice);
+            }
             (dest, src) => {
                 *dest = src.clone();
             }
@@ -80,6 +86,45 @@ impl InternalMpUint {
         }
     }
 
+    /// Creates a new unsigned integer from up to 2 limbs.
+    #[inline]
+    #[must_use]
+    pub const fn from_limbs_2(lo: Limb, hi: Limb) -> Self {
+        if hi == 0 {
+            Self::from_limb(lo)
+        } else {
+            Self {
+                repr: UintRepr::Inline {
+                    len: 2,
+                    limbs: [lo, hi, 0, 0],
+                },
+            }
+        }
+    }
+
+    /// Creates a new unsigned integer from up to 4 limbs.
+    #[inline]
+    #[must_use]
+    pub const fn from_limbs_4(l0: Limb, l1: Limb, l2: Limb, l3: Limb) -> Self {
+        if l3 != 0 {
+            Self {
+                repr: UintRepr::Inline {
+                    len: 4,
+                    limbs: [l0, l1, l2, l3],
+                },
+            }
+        } else if l2 != 0 {
+            Self {
+                repr: UintRepr::Inline {
+                    len: 3,
+                    limbs: [l0, l1, l2, 0],
+                },
+            }
+        } else {
+            Self::from_limbs_2(l0, l1)
+        }
+    }
+
     /// Pre-allocates memory for a specific number of limbs.
     #[inline]
     #[must_use]
@@ -102,19 +147,28 @@ impl InternalMpUint {
     #[inline(always)]
     #[must_use]
     pub unsafe fn from_limbs_normalized(limbs: Vec<Limb>) -> Self {
-        if limbs.is_empty() {
-            return Self::zero();
-        }
-        if limbs.len() <= INLINE_LIMBS {
+        debug_assert!(
+            limbs.last().is_none_or(|&x| x != 0),
+            "normalized inputs must not end with zero"
+        );
+        let len = limbs.len();
+        if len <= INLINE_LIMBS {
             let mut arr = [0; INLINE_LIMBS];
-            let copy_len = limbs.len();
-            // SAFETY: copy_len <= INLINE_LIMBS <= 4, valid for copy_len and fits in u8 without overflow.
-            let len = unsafe {
-                copy_nonoverlapping(limbs.as_ptr(), arr.as_mut_ptr(), copy_len);
-                u8::try_from(copy_len).unwrap_unchecked()
-            };
+            // SAFETY: len <= INLINE_LIMBS and len == limbs.len() by construction.
+            unsafe {
+                copy_nonoverlapping(limbs.as_ptr(), arr.as_mut_ptr(), len);
+            }
+            #[allow(
+                clippy::as_conversions,
+                clippy::cast_possible_truncation,
+                reason = "inline limb count is at most INLINE_LIMBS — always fits in u8"
+            )]
+            let len_u8 = len as u8;
             Self {
-                repr: UintRepr::Inline { len, limbs: arr },
+                repr: UintRepr::Inline {
+                    len: len_u8,
+                    limbs: arr,
+                },
             }
         } else {
             Self {
@@ -123,7 +177,9 @@ impl InternalMpUint {
         }
     }
 
-    /// Constructs an integer from a vector of limbs, stripping trailing zeros and optimizing representation.
+    /// Creates an integer from a vector of limbs.
+    ///
+    /// Trims any trailing zero limbs so that the internal representation is normalized.
     #[allow(
         clippy::inline_always,
         reason = "from_limbs is a core constructor called on every operation result"
@@ -131,28 +187,26 @@ impl InternalMpUint {
     #[inline(always)]
     #[must_use]
     pub fn from_limbs(mut limbs: Vec<Limb>) -> Self {
-        // Find the last non-zero limb position and truncate in one operation.
-        if let Some(last_nonzero) = limbs.iter().rposition(|&l| l != 0) {
-            limbs.truncate(last_nonzero.wrapping_add(1));
+        while limbs.last() == Some(&0) {
+            let _popped = limbs.pop();
+        }
+        // SAFETY: Trailing zeros have just been popped from `limbs`.
+        unsafe { Self::from_limbs_normalized(limbs) }
+    }
+
+    /// Creates an integer from a single limb.
+    #[inline]
+    #[must_use]
+    pub const fn from_limb(limb: Limb) -> Self {
+        if limb == 0 {
+            Self::zero()
         } else {
-            return Self::zero();
-        }
-        if limbs.len() <= INLINE_LIMBS {
-            let mut arr = [0; INLINE_LIMBS];
-            let copy_len = limbs.len();
-            // SAFETY: copy_len <= INLINE_LIMBS <= limbs.len() (guarded above and by truncate).
-            // Both pointers are valid for `copy_len` reads/writes of properly aligned Limb values.
-            // copy_len <= 4 always fits in u8 without overflow.
-            let len = unsafe {
-                copy_nonoverlapping(limbs.as_ptr(), arr.as_mut_ptr(), copy_len);
-                u8::try_from(copy_len).unwrap_unchecked()
-            };
-            return Self {
-                repr: UintRepr::Inline { len, limbs: arr },
-            };
-        }
-        Self {
-            repr: UintRepr::Heap(limbs),
+            Self {
+                repr: UintRepr::Inline {
+                    len: 1,
+                    limbs: [limb, 0, 0, 0],
+                },
+            }
         }
     }
 
@@ -167,24 +221,6 @@ impl InternalMpUint {
             self.clear();
             return;
         }
-        if len <= INLINE_LIMBS {
-            let mut arr = [0; INLINE_LIMBS];
-            // SAFETY: We verified len <= INLINE_LIMBS and len <= slice.len()
-            unsafe {
-                copy_nonoverlapping(slice.as_ptr(), arr.as_mut_ptr(), len);
-            }
-            #[allow(
-                clippy::as_conversions,
-                clippy::cast_possible_truncation,
-                reason = "inline limb count is at most INLINE_LIMBS — always fits in u8"
-            )]
-            let len_u8 = len as u8;
-            self.repr = UintRepr::Inline {
-                len: len_u8,
-                limbs: arr,
-            };
-            return;
-        }
         // SAFETY: len <= slice.len() is guaranteed by the trimming loop above
         let trimmed_slice = unsafe { slice.get_unchecked(..len) };
         match self.repr {
@@ -193,7 +229,25 @@ impl InternalMpUint {
                 vec.extend_from_slice(trimmed_slice);
             }
             UintRepr::Inline { .. } => {
-                self.repr = UintRepr::Heap(trimmed_slice.to_vec());
+                if len <= INLINE_LIMBS {
+                    let mut arr = [0; INLINE_LIMBS];
+                    // SAFETY: We verified len <= INLINE_LIMBS and len <= slice.len()
+                    unsafe {
+                        copy_nonoverlapping(slice.as_ptr(), arr.as_mut_ptr(), len);
+                    }
+                    #[allow(
+                        clippy::as_conversions,
+                        clippy::cast_possible_truncation,
+                        reason = "inline limb count is at most INLINE_LIMBS — always fits in u8"
+                    )]
+                    let len_u8 = len as u8;
+                    self.repr = UintRepr::Inline {
+                        len: len_u8,
+                        limbs: arr,
+                    };
+                } else {
+                    self.repr = UintRepr::Heap(trimmed_slice.to_vec());
+                }
             }
         }
     }

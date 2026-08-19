@@ -26,16 +26,7 @@
 use core::hint::black_box;
 
 use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
-use mp_anafis::tune_api::tier::{
-    Limb,
-    algorithms::{
-        bench_karatsuba_sqr_scratch_len, bench_karatsuba_sqr_with_scratch,
-        bench_toom_cook_3_sqr_forced_scratch_len, bench_toom_cook_3_sqr_forced_with_scratch,
-        bench_toom_cook_4_sqr_scratch_len, bench_toom_cook_4_sqr_with_scratch,
-        bench_toom_cook_6_sqr_scratch_len, bench_toom_cook_6_sqr_with_scratch,
-    },
-    state::SquareBenchScratch,
-};
+use mp_anafis::tune_api::tier::{Limb, Tuner, state::SquaringBenchState};
 
 use crate::shared::operand;
 
@@ -51,7 +42,7 @@ fn setup(len: usize) -> (Vec<Limb>, Vec<Limb>) {
 #[divan::bench(args = WIDTHS)]
 fn dispatched(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (value, mut destination) = setup(len);
-    let mut reusable = SquareBenchScratch::default();
+    let mut reusable = SquaringBenchState::default();
     bencher.bench_local(|| {
         reusable.run(black_box(&mut destination), black_box(&value));
     });
@@ -60,9 +51,9 @@ fn dispatched(bencher: divan::Bencher<'_, '_>, len: usize) {
 #[divan::bench(args = WIDTHS)]
 fn karatsuba(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (value, mut destination) = setup(len);
-    let mut scratch = vec![Limb::MIN; bench_karatsuba_sqr_scratch_len(len)];
+    let mut scratch = vec![Limb::MIN; Tuner::bench_karatsuba_sqr_scratch_len(len)];
     bencher.bench_local(|| {
-        bench_karatsuba_sqr_with_scratch(
+        Tuner::bench_karatsuba_sqr_with_scratch(
             black_box(&mut destination),
             black_box(&value),
             black_box(&mut scratch),
@@ -73,9 +64,9 @@ fn karatsuba(bencher: divan::Bencher<'_, '_>, len: usize) {
 #[divan::bench(args = WIDTHS)]
 fn toom3(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (value, mut destination) = setup(len);
-    let mut scratch = vec![Limb::MIN; bench_toom_cook_3_sqr_forced_scratch_len(len)];
+    let mut scratch = vec![Limb::MIN; Tuner::bench_toom_cook_3_sqr_forced_scratch_len(len)];
     bencher.bench_local(|| {
-        bench_toom_cook_3_sqr_forced_with_scratch(
+        Tuner::bench_toom_cook_3_sqr_forced_with_scratch(
             black_box(&mut destination),
             black_box(&value),
             black_box(&mut scratch),
@@ -86,9 +77,9 @@ fn toom3(bencher: divan::Bencher<'_, '_>, len: usize) {
 #[divan::bench(args = WIDTHS)]
 fn toom4(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (value, mut destination) = setup(len);
-    let mut scratch = vec![Limb::MIN; bench_toom_cook_4_sqr_scratch_len(len)];
+    let mut scratch = vec![Limb::MIN; Tuner::bench_toom_cook_4_sqr_scratch_len(len)];
     bencher.bench_local(|| {
-        bench_toom_cook_4_sqr_with_scratch(
+        Tuner::bench_toom_cook_4_sqr_with_scratch(
             black_box(&mut destination),
             black_box(&value),
             black_box(&mut scratch),
@@ -99,9 +90,9 @@ fn toom4(bencher: divan::Bencher<'_, '_>, len: usize) {
 #[divan::bench(args = WIDTHS)]
 fn toom6(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (value, mut destination) = setup(len);
-    let mut scratch = vec![Limb::MIN; bench_toom_cook_6_sqr_scratch_len(len)];
+    let mut scratch = vec![Limb::MIN; Tuner::bench_toom_cook_6_sqr_scratch_len(len)];
     bencher.bench_local(|| {
-        bench_toom_cook_6_sqr_with_scratch(
+        Tuner::bench_toom_cook_6_sqr_with_scratch(
             black_box(&mut destination),
             black_box(&value),
             black_box(&mut scratch),

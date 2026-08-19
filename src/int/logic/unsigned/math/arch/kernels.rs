@@ -30,6 +30,8 @@ use super::add_sub_limbs_unchecked::runtime_dispatch::fast_add_sub_limbs_availab
     ))
 ))]
 use super::mul_2_limbs_unchecked::kernel as selected_mul_2_kernel;
+#[cfg(feature = "_internal-tune")]
+use super::ntt_monty_u32::{radix4_dif_scalar, radix4_dit_scalar};
 use super::{
     DoubleLimb, LIMB_BITS, Limb,
     add_limbs_3_unchecked::add_limbs_3_unchecked,
@@ -45,6 +47,8 @@ use super::{
     mul_basecase_unchecked::{
         mul_2x2_portable_unchecked, mul_3x3_portable_unchecked, mul_basecase_unchecked,
     },
+    ntt_digits_u32::kernel as selected_ntt_digits_kernel,
+    ntt_monty_u32::kernel as selected_ntt_monty_kernel,
     propagate_borrow_unchecked::propagate_borrow_unchecked,
     propagate_carry_unchecked::propagate_carry_unchecked,
     rshift_into_unchecked::kernel as selected_rshift_into_kernel,
@@ -53,6 +57,15 @@ use super::{
     sub_limbs_unchecked::sub_limbs_unchecked,
     sub_mul_limbs_unchecked::{kernel as selected_sub_mul_kernel, sub_mul_limbs_unchecked},
 };
+#[cfg(all(
+    feature = "_internal-tune",
+    feature = "std",
+    not(miri),
+    target_arch = "x86_64",
+    target_pointer_width = "64",
+    not(target_feature = "avx2")
+))]
+use super::{X86SimdTier, selected_x86_simd_tier};
 #[cfg(not(target_pointer_width = "16"))]
 use super::{
     add_sub_from_limbs_unchecked::kernel as selected_add_sub_from_kernel,
@@ -103,6 +116,52 @@ pub type Mul2Kernel = unsafe fn(*mut Limb, *const Limb, usize, Limb, Limb);
 /// Cross-limb shifted-high subtraction kernel.
 #[cfg(not(target_pointer_width = "16"))]
 pub type SubShiftedHighKernel = unsafe fn(*mut Limb, *const Limb, usize, u32, Limb) -> Limb;
+/// Fused radix-4 NTT stage over four value quarters and two twiddle quarters.
+#[cfg(feature = "_internal-tune")]
+pub type NttRadix4Kernel = unsafe fn(*mut u32, *const u32, usize, u32, u32);
+
+/// Architecture-selected 31-bit Montgomery NTT kernels.
+#[derive(Clone, Copy, Debug)]
+pub struct NttMontyKernels {
+    pub mul_slice: unsafe fn(
+        dst: *mut u32,
+        a: *const u32,
+        b: *const u32,
+        len: usize,
+        prime: u32,
+        neg_inverse: u32,
+    ),
+    pub dif_butterfly: unsafe fn(
+        low: *mut u32,
+        high: *mut u32,
+        twiddles: *const u32,
+        len: usize,
+        prime: u32,
+        neg_inverse: u32,
+    ),
+    pub dit_butterfly: unsafe fn(
+        low: *mut u32,
+        high: *mut u32,
+        twiddles: *const u32,
+        len: usize,
+        prime: u32,
+        neg_inverse: u32,
+    ),
+    pub radix4_dif: unsafe fn(*mut u32, *const u32, usize, u32, u32),
+    pub radix4_dit: unsafe fn(*mut u32, *const u32, usize, u32, u32),
+}
+
+/// Provider function type for Montgomery NTT kernels.
+pub type NttMontyKernel = fn() -> NttMontyKernels;
+
+/// Architecture-selected 16-bit digit-packing NTT kernel.
+#[derive(Clone, Copy, Debug)]
+pub struct NttDigitsKernels {
+    pub pack_16: unsafe fn(*mut u32, *const u64, usize, usize) -> usize,
+}
+
+/// Provider function type for 16-bit NTT digit packing.
+pub type NttDigitsKernel = fn() -> NttDigitsKernels;
 
 /// Namespace for architecture-selected limb kernels.
 ///
@@ -112,6 +171,60 @@ pub type SubShiftedHighKernel = unsafe fn(*mut Limb, *const Limb, usize, u32, Li
 pub struct ArchKernels;
 
 impl ArchKernels {
+    /// Returns the runtime-selected fused radix-4 kernels for controlled tuning.
+    #[cfg(feature = "_internal-tune")]
+    #[must_use]
+    pub fn ntt_radix4_selected_kernels() -> (NttRadix4Kernel, NttRadix4Kernel) {
+        let selected = selected_ntt_monty_kernel()();
+        (selected.radix4_dif, selected.radix4_dit)
+    }
+
+    /// Returns the scalar fused radix-4 reference kernels for controlled tuning.
+    #[cfg(feature = "_internal-tune")]
+    #[must_use]
+    pub const fn ntt_radix4_scalar_kernels() -> (NttRadix4Kernel, NttRadix4Kernel) {
+        (radix4_dif_scalar, radix4_dit_scalar)
+    }
+
+    /// Names the fused radix-4 backend selected for this process.
+    #[cfg(feature = "_internal-tune")]
+    #[must_use]
+    pub fn ntt_radix4_selected_backend_name() -> &'static str {
+        #[cfg(all(
+            not(miri),
+            target_arch = "x86_64",
+            target_pointer_width = "64",
+            target_feature = "avx2"
+        ))]
+        {
+            "avx2"
+        }
+        #[cfg(all(
+            feature = "std",
+            not(miri),
+            target_arch = "x86_64",
+            target_pointer_width = "64",
+            not(target_feature = "avx2")
+        ))]
+        {
+            match selected_x86_simd_tier() {
+                X86SimdTier::Avx2 => "avx2",
+                X86SimdTier::Sse2 => "scalar",
+            }
+        }
+        #[cfg(all(not(miri), target_arch = "aarch64", target_pointer_width = "64"))]
+        {
+            "neon"
+        }
+        #[cfg(not(any(
+            all(not(miri), target_arch = "x86_64", target_pointer_width = "64"),
+            all(not(miri), target_arch = "aarch64", target_pointer_width = "64")
+        )))]
+        {
+            "scalar"
+        }
+    }
+
     /// Computes the full double-limb product of two limbs.
     #[must_use]
     #[allow(
@@ -549,5 +662,174 @@ impl ArchKernels {
     pub unsafe fn mul_3x3_portable_unchecked(dst: *mut Limb, a: *const Limb, b: *const Limb) {
         // SAFETY: The caller establishes the exact input/output spans.
         unsafe { mul_3x3_portable_unchecked(dst, a, b) }
+    }
+
+    /// Pointwise Montgomery multiplication over 31-bit integer slices.
+    ///
+    /// # Safety
+    ///
+    /// - `dst` covers `len` writable elements and `a` and `b` cover `len`
+    ///   readable elements.
+    /// - `a[..len]` and `b[..len]` contain lazy residues in `[0, 2 * prime)`;
+    ///   the selected backend canonicalizes each operand in place of a
+    ///   separate normalization pass.
+    /// - `prime` is odd, nonzero, and strictly less than `2^31`, and
+    ///   `neg_inverse == -prime^-1 mod 2^32`.
+    /// - `dst` may exactly alias either input span, as required by in-place
+    ///   pointwise multiplication and squaring. Any other destination/input
+    ///   overlap is forbidden.
+    #[inline]
+    pub unsafe fn ntt_monty_mul_slice_unchecked(
+        dst: *mut u32,
+        a: *const u32,
+        b: *const u32,
+        len: usize,
+        prime: u32,
+        neg_inverse: u32,
+    ) {
+        // SAFETY: The caller establishes all complete spans.
+        unsafe {
+            (selected_ntt_monty_kernel()().mul_slice)(dst, a, b, len, prime, neg_inverse);
+        }
+    }
+
+    /// Packs validated 64-bit limbs into 16-bit NTT digits.
+    ///
+    /// The transform calls this only when `Limb` is 64 bits, `digit_bits` is
+    /// 16, and the destination has room for four digits per limb.  The
+    /// architecture backend itself accepts a short destination to preserve
+    /// the scalar helper's truncating behavior for direct internal tests.
+    ///
+    /// # Safety
+    /// `limbs` is readable for `len` native limbs and `dst` is writable for
+    /// `dst_len` `u32`s.  The caller proves that the native limbs are 64-bit
+    /// before converting the input pointer to `u64`.
+    pub unsafe fn ntt_digits_16_into(
+        dst: *mut u32,
+        limbs: *const Limb,
+        len: usize,
+        dst_len: usize,
+    ) -> usize {
+        // SAFETY: the caller proves `Limb` is u64 for this operation, and the
+        // selected backend receives the same validated spans and capacity.
+        unsafe { (selected_ntt_digits_kernel()().pack_16)(dst, limbs.cast(), len, dst_len) }
+    }
+
+    /// Radix-2 Decimation-in-Frequency butterfly pass over 31-bit integer slices.
+    ///
+    /// # Safety
+    ///
+    /// - `low` and `high` cover `len` writable elements and `twiddles` covers
+    ///   `len` readable elements; all three active spans are pairwise disjoint.
+    /// - `low[..len]` and `high[..len]` contain lazy residues in `[0, 2 * prime)`
+    ///   and `twiddles[..len]` contains Montgomery residues in `[0, prime)`.
+    /// - `prime` is odd, nonzero, and strictly less than `2^31`, and
+    ///   `neg_inverse == -prime^-1 mod 2^32`.
+    ///
+    /// On return both writable spans contain lazy residues in `[0, 2 * prime)`.
+    #[inline]
+    pub unsafe fn ntt_dif_butterfly_unchecked(
+        low: *mut u32,
+        high: *mut u32,
+        twiddles: *const u32,
+        len: usize,
+        prime: u32,
+        neg_inverse: u32,
+    ) {
+        // SAFETY: The caller establishes all complete spans.
+        unsafe {
+            (selected_ntt_monty_kernel()().dif_butterfly)(
+                low,
+                high,
+                twiddles,
+                len,
+                prime,
+                neg_inverse,
+            );
+        }
+    }
+
+    /// Radix-2 Decimation-in-Time butterfly pass over 31-bit integer slices.
+    ///
+    /// # Safety
+    ///
+    /// - `low` and `high` cover `len` writable elements and `twiddles` covers
+    ///   `len` readable elements; all three active spans are pairwise disjoint.
+    /// - `low[..len]` and `high[..len]` contain lazy residues in `[0, 2 * prime)`
+    ///   and `twiddles[..len]` contains Montgomery residues in `[0, prime)`.
+    /// - `prime` is odd, nonzero, and strictly less than `2^31`, and
+    ///   `neg_inverse == -prime^-1 mod 2^32`.
+    ///
+    /// On return both writable spans contain lazy residues in `[0, 2 * prime)`.
+    #[inline]
+    pub unsafe fn ntt_dit_butterfly_unchecked(
+        low: *mut u32,
+        high: *mut u32,
+        twiddles: *const u32,
+        len: usize,
+        prime: u32,
+        neg_inverse: u32,
+    ) {
+        // SAFETY: The caller establishes all complete spans.
+        unsafe {
+            (selected_ntt_monty_kernel()().dit_butterfly)(
+                low,
+                high,
+                twiddles,
+                len,
+                prime,
+                neg_inverse,
+            );
+        }
+    }
+
+    /// Applies a fused two-level radix-4 DIF stage.
+    ///
+    /// # Safety
+    /// `values` covers four disjoint quarter spans, `twiddles` covers two
+    /// quarter spans, and all residues satisfy the Montgomery kernel contract.
+    #[inline]
+    pub unsafe fn ntt_radix4_dif_unchecked(
+        values: *mut u32,
+        twiddles: *const u32,
+        quarter_len: usize,
+        prime: u32,
+        neg_inverse: u32,
+    ) {
+        // SAFETY: the caller establishes all complete spans.
+        unsafe {
+            (selected_ntt_monty_kernel()().radix4_dif)(
+                values,
+                twiddles,
+                quarter_len,
+                prime,
+                neg_inverse,
+            );
+        }
+    }
+
+    /// Applies a fused two-level radix-4 DIT stage.
+    ///
+    /// # Safety
+    /// `values` covers four disjoint quarter spans, `twiddles` covers two
+    /// quarter spans, and all residues satisfy the Montgomery kernel contract.
+    #[inline]
+    pub unsafe fn ntt_radix4_dit_unchecked(
+        values: *mut u32,
+        twiddles: *const u32,
+        quarter_len: usize,
+        prime: u32,
+        neg_inverse: u32,
+    ) {
+        // SAFETY: the caller establishes all complete spans.
+        unsafe {
+            (selected_ntt_monty_kernel()().radix4_dit)(
+                values,
+                twiddles,
+                quarter_len,
+                prime,
+                neg_inverse,
+            );
+        }
     }
 }

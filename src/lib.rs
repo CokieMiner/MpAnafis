@@ -13,9 +13,9 @@ extern crate alloc;
 
 mod error;
 mod int;
+mod parallel;
 
 pub use error::{MpError, ParseMpIntError, ParseMpUintError};
-
 pub use int::{
     AmbientPrecision, BoundedPrecision, DebugVerbose, MpInt, MpUint, Precision, PrecisionContext,
 };

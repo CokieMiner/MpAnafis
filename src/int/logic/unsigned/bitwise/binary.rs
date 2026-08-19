@@ -364,9 +364,50 @@ impl InternalMpUint {
         let src = self.limbs();
         let src_limb_count = src.len();
         let result_limb_count = width.div_ceil(LIMB_BITS);
+        let rem = width.wrapping_rem(LIMB_BITS);
+
+        if result_limb_count <= INLINE_LIMBS {
+            let mut inline = [0_usize; INLINE_LIMBS];
+            for i in 0..result_limb_count {
+                let src_idx = result_limb_count.wrapping_sub(1).wrapping_sub(i);
+                let mut val = if src_idx < src_limb_count {
+                    // SAFETY: src_idx < src_limb_count checked above
+                    unsafe { *src.get_unchecked(src_idx) }
+                } else {
+                    0
+                };
+                if src_idx == result_limb_count.wrapping_sub(1) && rem != 0 {
+                    val &= low_bits_mask(rem);
+                }
+                // SAFETY: i < result_limb_count <= INLINE_LIMBS
+                unsafe {
+                    *inline.get_unchecked_mut(i) = val.reverse_bits();
+                }
+            }
+
+            let total_shift = result_limb_count
+                .wrapping_mul(LIMB_BITS)
+                .wrapping_sub(width);
+            if total_shift > 0 {
+                #[allow(
+                    clippy::as_conversions,
+                    clippy::cast_possible_truncation,
+                    reason = "total_shift < LIMB_BITS fits in u32"
+                )]
+                let shift_u32 = total_shift as u32;
+                // SAFETY: inline has length INLINE_LIMBS >= result_limb_count, shift_u32 < LIMB_BITS
+                unsafe {
+                    let _ = ArchKernels::rshift_unchecked(
+                        inline.as_mut_ptr(),
+                        result_limb_count,
+                        shift_u32,
+                    );
+                }
+            }
+            return Self::from_limbs_4(inline[0], inline[1], inline[2], inline[3]);
+        }
 
         let mut result_limbs = alloc::vec![0; result_limb_count];
-        let rem = width.wrapping_rem(LIMB_BITS);
 
         for i in 0..result_limb_count {
             let src_idx = result_limb_count.wrapping_sub(1).wrapping_sub(i);
@@ -429,8 +470,6 @@ impl InternalMpUint {
             .wrapping_add(LIMB_BYTES.wrapping_sub(1))
             .wrapping_div(LIMB_BYTES);
 
-        let mut result_limbs = alloc::vec![0; result_limb_count];
-
         // If the original top limb was partial, the result is left-shifted by
         // (LIMB_BYTES - top_bytes) bytes. Compute the right-shift needed to
         // correct it (0 when all limbs are full).
@@ -440,6 +479,26 @@ impl InternalMpUint {
         } else {
             0
         };
+
+        if result_limb_count <= INLINE_LIMBS {
+            let mut inline = [0_usize; INLINE_LIMBS];
+            let mut carry: Limb = 0;
+            for i in 0..result_limb_count {
+                let src_limb = limbs.get(i).copied().unwrap_or(0);
+                let dst = result_limb_count.wrapping_sub(1).wrapping_sub(i);
+                let swapped = src_limb.swap_bytes();
+                // SAFETY: dst < result_limb_count <= INLINE_LIMBS
+                unsafe {
+                    *inline.get_unchecked_mut(dst) = swapped.wrapping_shr(shift_bits) | carry;
+                }
+                if shift_bits != 0 {
+                    carry = swapped.wrapping_shl((LIMB_BITS as u32).wrapping_sub(shift_bits));
+                }
+            }
+            return Self::from_limbs_4(inline[0], inline[1], inline[2], inline[3]);
+        }
+
+        let mut result_limbs = alloc::vec![0; result_limb_count];
 
         let mut carry: Limb = 0;
         for i in 0..result_limb_count {

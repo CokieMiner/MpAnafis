@@ -7,7 +7,7 @@ use super::{FormatCache, InternalMpUint, Limb};
 /// Root formatting tier measured by [`Tuner`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
-pub enum Algorithm {
+pub enum FormattingAlgorithm {
     /// Linear per-digit schoolbook extraction.
     Schoolbook,
     /// Barrett divide-and-conquer recursive formatting.
@@ -23,14 +23,14 @@ const FORMAT_HASH: usize = 0x9E37;
 
 /// Reusable fixed-input state for comparing formatting algorithms at a fixed limb width.
 #[derive(Debug)]
-pub struct Tuner {
-    algorithm: Algorithm,
+pub struct FormattingRunner {
+    algorithm: FormattingAlgorithm,
     value: InternalMpUint,
     radix: u32,
     format_cache: FormatCache,
 }
 
-impl Tuner {
+impl FormattingRunner {
     /// Constructs a tuner for the given algorithm, operand width, and radix.
     ///
     /// The operand is filled with deterministic non-zero limbs so that the
@@ -45,7 +45,7 @@ impl Tuner {
     /// of two. Power-of-two radices use a separate bit-extraction path that
     /// does not participate in this crossover.
     #[must_use]
-    pub fn new(algorithm: Algorithm, len: usize, radix: u32) -> Self {
+    pub(crate) fn new(algorithm: FormattingAlgorithm, len: usize, radix: u32) -> Self {
         assert!(len != 0, "formatting tuner operand width must be nonzero");
         assert!(
             (3..=36).contains(&radix) && !radix.is_power_of_two(),
@@ -56,7 +56,7 @@ impl Tuner {
             .collect();
         let value = InternalMpUint::from_limbs(limbs);
         let mut format_cache = FormatCache::new();
-        if algorithm == Algorithm::Recursive {
+        if algorithm == FormattingAlgorithm::Recursive {
             drop(black_box(value.to_string_radix_recursive_with_cache(
                 radix,
                 &mut format_cache,
@@ -73,8 +73,8 @@ impl Tuner {
     /// Runs the configured formatting algorithm, consuming the output.
     pub fn run(&mut self) {
         let result = match self.algorithm {
-            Algorithm::Schoolbook => self.value.to_string_radix_schoolbook(self.radix),
-            Algorithm::Recursive => self
+            FormattingAlgorithm::Schoolbook => self.value.to_string_radix_schoolbook(self.radix),
+            FormattingAlgorithm::Recursive => self
                 .value
                 .to_string_radix_recursive_with_cache(self.radix, &mut self.format_cache),
         };
@@ -85,8 +85,8 @@ impl Tuner {
     #[must_use]
     pub fn output(&mut self) -> String {
         match self.algorithm {
-            Algorithm::Schoolbook => self.value.to_string_radix_schoolbook(self.radix),
-            Algorithm::Recursive => self
+            FormattingAlgorithm::Schoolbook => self.value.to_string_radix_schoolbook(self.radix),
+            FormattingAlgorithm::Recursive => self
                 .value
                 .to_string_radix_recursive_with_cache(self.radix, &mut self.format_cache),
         }

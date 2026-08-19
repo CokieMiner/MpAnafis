@@ -3,8 +3,9 @@
 #![doc(hidden)]
 
 use super::{
-    ArchKernels, Karatsuba, Lopsided, LowProduct, MulScratch, Multiplication, Ntt, Schoolbook, Ssa,
-    Toom3, Toom4, Toom6, Toom8, Toom32, Toom43, TransformBench, TransformChoice,
+    ArchKernels, Karatsuba, Lopsided, LowProduct, MulScratch, Multiplication, Ntt,
+    NttMultiplicationPlan, Schoolbook, Ssa, SsaMultiplicationPlan, Toom3, Toom4, Toom6, Toom8,
+    Toom32, Toom43, TransformBench, TransformChoice, TransformPlan,
 };
 
 use validation::BenchValidation;
@@ -18,4 +19,4 @@ pub mod transform;
 
 mod validation;
 
-pub use super::Limb;
+pub use super::{Limb, Tuner};

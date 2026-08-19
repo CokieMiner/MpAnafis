@@ -29,16 +29,16 @@
 //!   --features _internal-tune
 //! ```
 //!
-//! Its first phase measures every adjacent multiplication and squaring tier
-//! (Schoolbook through SSA/NTT) plus both division transitions. Its second phase
-//! rebuilds candidate profiles for constants embedded in SSA planning and hot
-//! loops. Those candidates are scored over multiplication and squaring cells
-//! ranging from the crossover region through working sets larger than the last
-//! level cache. A candidate needs a median-backed aggregate improvement of at
-//! least one percent; otherwise the existing value is retained.
+//! Its ordered phases tune compiled Toom geometry, multiplication and squaring
+//! tiers, division geometry and dispatch, compiled SSA geometry, transform
+//! crossovers, and radix formatting. Rebuild-based candidates are scored over
+//! multiplication and squaring cells ranging from the crossover region through
+//! working sets larger than the last-level cache. A candidate must beat the
+//! calibrated host-noise margin; otherwise the existing value is retained.
 //!
-//! `--tiers-only` and `--compiled-only` make the two phases independently
-//! repeatable. The complete result is written to the ignored local profile and
-//! takes effect on the next build.
+//! Partial modes make individual phase families repeatable, but they deliberately
+//! preserve only rejected candidates because they skip end-to-end validation.
+//! A complete validated result is written to the ignored local profile and takes
+//! effect on the next build.
 
 include!(concat!(env!("OUT_DIR"), "/thresholds.rs"));

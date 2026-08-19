@@ -42,15 +42,15 @@ impl InternalMpUint {
             }
 
             let max_len = max(old_dst_len, src_len);
-            if limbs.capacity() < max_len {
-                limbs.reserve(max_len.wrapping_sub(limbs.len()));
+            let required_capacity = max_len.wrapping_add(1);
+            if limbs.capacity() < required_capacity {
+                limbs.reserve(required_capacity.wrapping_sub(limbs.len()));
             }
             #[allow(
                 clippy::uninit_vec,
                 reason = "add_limbs_unchecked plus fused copy and propagation fill all max_len slots"
             )]
-            // SAFETY: capacity is at least `max_len`; all extended slots are
-            // initialized below before any read.
+            // SAFETY: capacity is at least `required_capacity >= max_len + 1`; all slots are initialized below.
             unsafe {
                 limbs.set_len(max_len);
             }
@@ -84,7 +84,11 @@ impl InternalMpUint {
             }
 
             if carry != 0 {
-                limbs.push(carry);
+                // SAFETY: capacity covers `max_len + 1` as ensured above.
+                unsafe {
+                    *dst_ptr.add(max_len) = carry;
+                    limbs.set_len(max_len.wrapping_add(1));
+                }
             }
             return;
         }

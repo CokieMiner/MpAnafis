@@ -387,26 +387,6 @@ fn disabled_crossovers_are_never_selected() {
 }
 
 #[test]
-fn owned_specializations_do_not_override_basecase_or_lopsided() {
-    for len in [20, 32, 48] {
-        let production = Multiplication::select_plan(len, len, TierCeiling::Full);
-        let owned = Multiplication::select_owned_plan(len, len);
-        let expected = if matches!(production, MulPlan::Schoolbook | MulPlan::Lopsided) {
-            production
-        } else {
-            MulPlan::Karatsuba
-        };
-        assert_eq!(owned, expected);
-    }
-
-    let unbalanced_len = 48_usize.saturating_mul(8);
-    assert_eq!(
-        Multiplication::select_owned_plan(unbalanced_len, 48),
-        MulPlan::Lopsided
-    );
-}
-
-#[test]
 fn a_toom8_plan_is_only_named_for_a_shape_it_can_split() {
     // Toom-8.5 has no lower fallback inside its own tier, so naming it for a
     // shape with no eight-way split would send the product back through the

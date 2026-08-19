@@ -84,6 +84,14 @@ readonly -a POWERPC64_FEATURE_PROFILES=(
     "POWER8 baseline|powerpc64le-unknown-linux-gnu|-C target-cpu=pwr8"
 )
 
+# ARMv7 has no target-specific NTT backend: this profile proves that enabling
+# NEON still compiles the intentionally portable 32-bit fallback. It is kept
+# separate from the ordinary target pass so the fallback policy cannot silently
+# become coupled to a NEON-only implementation.
+readonly -a ARM_FEATURE_PROFILES=(
+    "ARMv7 NEON fallback|armv7-unknown-linux-gnueabihf|-C target-feature=+neon"
+)
+
 if [[ -t 1 ]]; then
     readonly BLUE=$'\033[1;34m'
     readonly CYAN=$'\033[1;36m'
@@ -228,6 +236,21 @@ for entry in "${POWERPC64_FEATURE_PROFILES[@]}"; do
         "$target: $profile (no_std)" \
         "$extra_rustflags" \
         --release --locked --lib --no-default-features --target "$target"
+done
+
+printf '\n%sChecking ARM feature selectors...%s\n' "$BLUE" "$RESET"
+for entry in "${ARM_FEATURE_PROFILES[@]}"; do
+    IFS='|' read -r profile target extra_rustflags <<<"$entry"
+    if rustup target list --installed | grep -Fxq "$target"; then
+        run_clippy \
+            "$target: $profile (no_std)" \
+            "$extra_rustflags" \
+            --release --locked --lib --no-default-features --target "$target"
+        run_clippy \
+            "$target: $profile (std)" \
+            "$extra_rustflags" \
+            --release --locked --lib --no-default-features --features std --target "$target"
+    fi
 done
 
 printf '\n%sProbing targets blocked by known nightly/toolchain limitations...%s\n' "$BLUE" "$RESET"

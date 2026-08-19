@@ -191,81 +191,65 @@ impl SsaCoefficients {
         );
 
         let mut twist_stage = twist;
-        for negative_pass in [false, true] {
-            for idx in 0..transform_len {
-                // The inverse twiddle is applied on first touch instead of in a
-                // separate sweep, so the coefficient matrix is read once rather than
-                // read, rewritten, and read again. The second pass therefore sees
-                // slots that the first pass already corrected.
-                if !negative_pass
-                    && let Some((ref stage_twist, ref mut stage_scratch)) = twist_stage
-                {
-                    // SAFETY: idx < transform_len and the caller guarantees the
-                    // staging buffer holds two disjoint complete coefficients.
-                    unsafe {
-                        untwist_coefficient(matrix, idx, stage_twist, stage_scratch);
-                    }
+        for idx in 0..transform_len {
+            // Apply inverse twiddle and scaling on first touch in the same streaming pass.
+            if let Some((ref stage_twist, ref mut stage_scratch)) = twist_stage {
+                // SAFETY: idx < transform_len and the caller guarantees the
+                // staging buffer holds two disjoint complete coefficients.
+                unsafe {
+                    untwist_coefficient(matrix, idx, stage_twist, stage_scratch);
                 }
-                // SAFETY: idx < transform_len, matrix has transform_len * cl limbs.
-                let coeff_slice = unsafe { SsaTransform::coeff(matrix, idx, cl) };
+            }
+            // SAFETY: idx < transform_len, matrix has transform_len * cl limbs.
+            let coeff_slice = unsafe { SsaTransform::coeff(matrix, idx, cl) };
 
-                // Exact convolution coefficients have magnitude below
-                // 2^coefficient_bound_bits, which is below 2^(inner_bits-1).
-                // Therefore canonical residues with the top data bit set are
-                // precisely negative coefficients; the guard-only value is -1.
-                // SAFETY: 0 < ml_inner < cl <= coeff_slice.len().
-                let top_data = unsafe { *coeff_slice.get_unchecked(ml_inner.wrapping_sub(1)) };
-                // SAFETY: ml_inner < cl <= coeff_slice.len().
-                let guard = unsafe { *coeff_slice.get_unchecked(ml_inner) };
-                let is_negative = guard != 0 || top_data.leading_zeros() == 0;
-                if is_negative != negative_pass {
+            // Exact convolution coefficients have magnitude below
+            // 2^coefficient_bound_bits, which is below 2^(inner_bits-1).
+            // Therefore canonical residues with the top data bit set are
+            // precisely negative coefficients; the guard-only value is -1.
+            // SAFETY: 0 < ml_inner < cl <= coeff_slice.len().
+            let top_data = unsafe { *coeff_slice.get_unchecked(ml_inner.wrapping_sub(1)) };
+            // SAFETY: ml_inner < cl <= coeff_slice.len().
+            let guard = unsafe { *coeff_slice.get_unchecked(ml_inner) };
+            let is_negative = guard != 0 || top_data.leading_zeros() == 0;
+
+            let shift_bits = idx.wrapping_mul(chunk_bits);
+            let shift_limbs = shift_bits.wrapping_div(LIMB_BITS);
+            #[allow(
+                clippy::as_conversions,
+                clippy::cast_possible_truncation,
+                reason = "shift_bits % LIMB_BITS < LIMB_BITS; fits u32"
+            )]
+            let shift_sub_bits = shift_bits.wrapping_rem(LIMB_BITS) as u32;
+
+            if is_negative {
+                // SAFETY: work.len() >= cl (guaranteed by caller), acc.len() >= needed.
+                unsafe {
+                    process_negative_coeff(
+                        coeff_slice,
+                        shift_limbs,
+                        shift_sub_bits,
+                        cl,
+                        ml_inner,
+                        acc,
+                        work,
+                    );
+                }
+            } else {
+                let active = SharedEval::active_len(coeff_slice);
+                if active == 0 {
                     continue;
                 }
-
-                let shift_bits = idx.wrapping_mul(chunk_bits);
-                let shift_limbs = shift_bits.wrapping_div(LIMB_BITS);
-                #[allow(
-                    clippy::as_conversions,
-                    clippy::cast_possible_truncation,
-                    reason = "shift_bits % LIMB_BITS < LIMB_BITS; fits u32"
-                )]
-                let shift_sub_bits = shift_bits.wrapping_rem(LIMB_BITS) as u32;
-
-                if is_negative {
-                    // SAFETY: work.len() >= cl (guaranteed by caller), acc.len() >= needed.
-                    unsafe {
-                        process_negative_coeff(
-                            coeff_slice,
-                            shift_limbs,
-                            shift_sub_bits,
-                            cl,
-                            ml_inner,
-                            acc,
-                            work,
-                        );
-                    }
-                } else {
-                    // Only the positive branch consumes an active length, and only
-                    // it can see an all-zero coefficient: a negative classification
-                    // requires a nonzero guard or a set top data bit. Scanning here
-                    // rather than before the branch keeps the backward sweep off
-                    // the negative pass entirely, which is one full pass over the
-                    // coefficient matrix per multiplication.
-                    let active = SharedEval::active_len(coeff_slice);
-                    if active == 0 {
-                        continue;
-                    }
-                    // SAFETY: work.len() >= needed, acc.len() >= needed.
-                    unsafe {
-                        process_positive_coeff(
-                            coeff_slice,
-                            active,
-                            shift_limbs,
-                            shift_sub_bits,
-                            acc,
-                            work,
-                        );
-                    }
+                // SAFETY: work.len() >= needed, acc.len() >= needed.
+                unsafe {
+                    process_positive_coeff(
+                        coeff_slice,
+                        active,
+                        shift_limbs,
+                        shift_sub_bits,
+                        acc,
+                        work,
+                    );
                 }
             }
         }
@@ -404,11 +388,11 @@ unsafe fn process_negative_coeff(
         *mag_slice.get_unchecked_mut(ml_inner) = 1;
     }
 
-    // SAFETY: caller guarantees both slices have at least cl limbs.
-    let mag_borrow =
-        Addition::sub_slice_in_place(unsafe { mag_slice.get_unchecked_mut(..cl) }, unsafe {
-            coeff_slice.get_unchecked(..cl)
-        });
+    // SAFETY: caller guarantees `mag_slice` has at least cl writable limbs.
+    let magnitude = unsafe { mag_slice.get_unchecked_mut(..cl) };
+    // SAFETY: caller guarantees `coeff_slice` has at least cl initialized limbs.
+    let coefficient = unsafe { coeff_slice.get_unchecked(..cl) };
+    let mag_borrow = Addition::sub_slice_in_place(magnitude, coefficient);
     debug_assert_eq!(mag_borrow, 0, "modulus >= canonical residue");
 
     let mag_active = mag_slice
