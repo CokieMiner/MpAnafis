@@ -23,12 +23,10 @@ pub struct Multiplication;
 /// a target is omitted here, so selectors and exhaustive matches cannot name
 /// an impossible tier and need no dead-code allowance or sentinel arm.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg(not(target_pointer_width = "16"))]
 pub enum LargePlan {
     /// Recursive Schönhage-Strassen over Fermat rings.
-    #[cfg(not(target_pointer_width = "16"))]
     Ssa,
-    /// Exact multi-prime number-theoretic transform.
-    Ntt,
 }
 
 /// Complete dispatch decision for one multiplication.
@@ -51,6 +49,7 @@ pub enum MulPlan {
     Toom4,
     Toom6,
     Toom8,
+    #[cfg(not(target_pointer_width = "16"))]
     Large(LargePlan),
 }
 
@@ -59,8 +58,8 @@ impl MulPlan {
     ///
     /// `lopsided::lopsided_block_len` sizes its blocks so that each one lands
     /// on the widest available tier, and asks this to check a candidate width.
-    /// Toom-8.5 is the widest conventional split, and both transforms are wider
-    /// still, so all three answer yes: a block that reaches a transform is
+    /// Toom-8.5 is the widest conventional split, and the transform is wider
+    /// still, so both answer yes: a block that reaches a transform is
     /// better sized than one that reaches Toom-8.5, not worse.
     ///
     /// Named rather than matched at each call site because it is a policy, and
@@ -68,7 +67,14 @@ impl MulPlan {
     /// unreachable for unbalanced shapes.
     #[inline]
     pub const fn reaches_widest_tier(self) -> bool {
-        matches!(self, Self::Toom8 | Self::Large(_))
+        #[cfg(not(target_pointer_width = "16"))]
+        {
+            matches!(self, Self::Toom8 | Self::Large(_))
+        }
+        #[cfg(target_pointer_width = "16")]
+        {
+            matches!(self, Self::Toom8)
+        }
     }
 
     /// Whether this plan is a transform rather than a conventional split.
@@ -79,7 +85,14 @@ impl MulPlan {
     /// operand ratio, which Toom-8.5 does not share.
     #[inline]
     pub const fn is_transform(self) -> bool {
-        matches!(self, Self::Large(_))
+        #[cfg(not(target_pointer_width = "16"))]
+        {
+            matches!(self, Self::Large(_))
+        }
+        #[cfg(target_pointer_width = "16")]
+        {
+            false
+        }
     }
 }
 
@@ -92,6 +105,7 @@ pub enum SquarePlan {
     Toom4,
     Toom6,
     Toom8,
+    #[cfg(not(target_pointer_width = "16"))]
     Large(LargePlan),
 }
 

@@ -93,36 +93,29 @@ impl InternalMpUint {
         reason = "Limb fits in u64 on 16/32/64-bit platforms"
     )]
     pub fn to_u64(&self) -> Option<u64> {
-        let limbs = self.limbs();
         #[cfg(target_pointer_width = "64")]
         {
-            match *limbs {
-                [] => Some(0),
-                [lo] => Some(lo as u64),
-                _ => None,
+            if self.limbs().len() > 1 {
+                return None;
             }
+            let [lo, ..] = self.extract_4();
+            Some(lo as u64)
         }
         #[cfg(target_pointer_width = "32")]
         {
-            match *limbs {
-                [] => Some(0),
-                [lo] => Some(lo as u64),
-                [lo, hi] => Some(((hi as u64) << 32) | (lo as u64)),
-                _ => None,
+            if self.limbs().len() > 2 {
+                return None;
             }
+            let [lo, hi, ..] = self.extract_4();
+            Some(((hi as u64) << 32) | (lo as u64))
         }
         #[cfg(target_pointer_width = "16")]
         {
-            match *limbs {
-                [] => Some(0),
-                [l0] => Some(l0 as u64),
-                [l0, l1] => Some(((l1 as u64) << 16) | (l0 as u64)),
-                [l0, l1, l2] => Some(((l2 as u64) << 32) | ((l1 as u64) << 16) | (l0 as u64)),
-                [l0, l1, l2, l3] => Some(
-                    ((l3 as u64) << 48) | ((l2 as u64) << 32) | ((l1 as u64) << 16) | (l0 as u64),
-                ),
-                _ => None,
+            if self.limbs().len() > 4 {
+                return None;
             }
+            let [l0, l1, l2, l3] = self.extract_4();
+            Some(((l3 as u64) << 48) | ((l2 as u64) << 32) | ((l1 as u64) << 16) | (l0 as u64))
         }
     }
 
@@ -136,39 +129,29 @@ impl InternalMpUint {
         reason = "Limb fits in u128 on 16/32/64-bit platforms"
     )]
     pub fn to_u128(&self) -> Option<u128> {
-        let limbs = self.limbs();
         #[cfg(target_pointer_width = "64")]
         {
-            match *limbs {
-                [] => Some(0),
-                [lo] => Some(lo as u128),
-                [lo, hi] => Some(((hi as u128) << 64) | (lo as u128)),
-                _ => None,
+            if self.limbs().len() > 2 {
+                return None;
             }
+            let [lo, hi, ..] = self.extract_4();
+            Some(((hi as u128) << 64) | (lo as u128))
         }
         #[cfg(target_pointer_width = "32")]
         {
-            match *limbs {
-                [] => Some(0),
-                [lo] => Some(lo as u128),
-                [l0, l1] => Some(((l1 as u128) << 32) | (l0 as u128)),
-                [l0, l1, l2] => Some(((l2 as u128) << 64) | ((l1 as u128) << 32) | (l0 as u128)),
-                [l0, l1, l2, l3] => Some(
-                    ((l3 as u128) << 96)
-                        | ((l2 as u128) << 64)
-                        | ((l1 as u128) << 32)
-                        | (l0 as u128),
-                ),
-                _ => None,
+            if self.limbs().len() > 4 {
+                return None;
             }
+            let [l0, l1, l2, l3] = self.extract_4();
+            Some(((l3 as u128) << 96) | ((l2 as u128) << 64) | ((l1 as u128) << 32) | (l0 as u128))
         }
         #[cfg(target_pointer_width = "16")]
         {
-            if limbs.len() > 8 {
+            if self.limbs().len() > 8 {
                 return None;
             }
             let mut result: u128 = 0;
-            for (i, &limb) in limbs.iter().enumerate() {
+            for (i, &limb) in self.limbs().iter().enumerate() {
                 let shift = i.wrapping_mul(LIMB_BITS) as u32;
                 let shifted = (limb as u128).wrapping_shl(shift);
                 result |= shifted;

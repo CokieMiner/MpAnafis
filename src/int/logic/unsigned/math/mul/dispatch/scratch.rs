@@ -13,13 +13,13 @@
 
 use core::cmp::{max, min};
 
-#[cfg(not(target_pointer_width = "16"))]
-use super::Ssa;
 use super::{
-    KARATSUBA_THRESHOLD, Karatsuba, LargePlan, Lopsided, MulPlan, MulShape, Multiplication,
+    KARATSUBA_THRESHOLD, Karatsuba, Lopsided, MulPlan, MulShape, Multiplication,
     SQR_KARATSUBA_THRESHOLD, SQR_TOOM_COOK_THRESHOLD, SquarePlan, TOOM_COOK_THRESHOLD, TierCeiling,
     Toom3, Toom4, Toom6, Toom8, Toom32, Toom43, Widths,
 };
+#[cfg(not(target_pointer_width = "16"))]
+use super::{LargePlan, Ssa};
 
 // ---------------------------------------------------------------------------
 // Plan-to-scratch-size dispatch
@@ -52,8 +52,6 @@ impl Multiplication {
             MulPlan::Toom8 => Self::toom8_mul_scratch_len(len_a, len_b),
             #[cfg(not(target_pointer_width = "16"))]
             MulPlan::Large(LargePlan::Ssa) => Ssa::mul_scratch_len(len_a, len_b),
-            // The NTT allocates its own transform buffers.
-            MulPlan::Large(LargePlan::Ntt) => 0,
         }
     }
 
@@ -69,7 +67,6 @@ impl Multiplication {
             SquarePlan::Toom8 => Self::toom8_sqr_scratch_len(len),
             #[cfg(not(target_pointer_width = "16"))]
             SquarePlan::Large(LargePlan::Ssa) => Ssa::sqr_scratch_len(len),
-            SquarePlan::Large(LargePlan::Ntt) => 0,
         }
     }
 }

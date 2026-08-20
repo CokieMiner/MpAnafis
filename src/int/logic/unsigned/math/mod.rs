@@ -35,8 +35,8 @@ pub use mul::MulScratch;
 pub use mul::TransformBench;
 #[cfg(feature = "_internal-tune")]
 pub use mul::{
-    Karatsuba, Lopsided, LowProduct, Multiplication, Ntt, NttMultiplicationPlan, Schoolbook, Toom3,
-    Toom4, Toom6, Toom8, Toom32, Toom43, TransformPlan,
+    Karatsuba, Lopsided, LowProduct, Multiplication, Schoolbook, Toom3, Toom4, Toom6, Toom8,
+    Toom32, Toom43,
 };
 #[cfg(all(feature = "_internal-tune", not(target_pointer_width = "16")))]
 pub use mul::{Ssa, SsaMultiplicationPlan, SsaSquaringPlan, TransformChoice};

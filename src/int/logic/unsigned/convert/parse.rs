@@ -321,6 +321,10 @@ fn combine_chunks(chunks: &[InternalMpUint], powers: &[InternalMpUint]) -> Inter
         )
     };
 
+    if upper.is_zero() {
+        return lower;
+    }
+
     // `chunks.len()` is a power of two and `mid` is its exact half, so `mid` is
     // a power of two and `k` is its split level. `powers` holds one entry per
     // split level up to `len_pow2`, so `k < powers.len()`.
@@ -330,6 +334,10 @@ fn combine_chunks(chunks: &[InternalMpUint], powers: &[InternalMpUint]) -> Inter
     // SAFETY: `k` is the precomputed power index for `mid`'s split level and is
     // below `powers.len()`.
     let power = unsafe { powers.get_unchecked(k) };
+
+    if lower.is_zero() {
+        return upper.mul(power);
+    }
 
     let mut upper_shifted = upper.mul(power);
     upper_shifted.add_assign(&lower);

@@ -33,8 +33,6 @@ pub struct TuningProfile {
     pub burnikel_ziegler_block: usize,
     /// Reciprocal basecase cutoff for Newton-Raphson iteration.
     pub newton_reciprocal_basecase: usize,
-    /// Conventional multiplication tower to NTT crossover; zero disables NTT.
-    pub ntt: usize,
     /// Conventional multiplication tower to SSA crossover; zero disables SSA.
     pub ssa: usize,
     /// Conventional squaring tower to SSA crossover; zero disables SSA.
@@ -99,18 +97,14 @@ impl TuningProfile {
         {
             return Err("division geometry must be finite and nonzero");
         }
-        if !valid_optional_crossover(self.ntt, self.toom_cook_85)
-            || !valid_optional_crossover(self.ssa, self.toom_cook_85)
+        if !valid_optional_crossover(self.ssa, self.toom_cook_85)
             || !valid_optional_crossover(self.sqr_ssa, self.sqr_toom_cook_85)
         {
             return Err("disabled transform crossovers must be zero or valid later thresholds");
         }
         if !valid_finite(self.transform_min_smaller_limbs)
             || !valid_finite(self.transform_max_operand_ratio)
-        {
-            return Err("transform geometry must be finite and nonzero");
-        }
-        if !valid_finite(self.ssa_base_modulus_bits)
+            || !valid_finite(self.ssa_base_modulus_bits)
             || !valid_finite(self.ssa_bnm1_basecase_limbs)
             || !valid_finite(self.ssa_negacyclic_factor3)
             || !valid_finite(self.ssa_negacyclic_factor5)

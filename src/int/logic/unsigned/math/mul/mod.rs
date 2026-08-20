@@ -8,9 +8,9 @@
 
 use super::{
     Addition, ArchKernels, DoubleLimb, INLINE_LIMBS, InternalMpUint, KARATSUBA_THRESHOLD,
-    LIMB_BITS, Limb, NTT_THRESHOLD, SQR_KARATSUBA_THRESHOLD, SQR_TOOM_COOK_4_THRESHOLD,
-    SQR_TOOM_COOK_6_THRESHOLD, SQR_TOOM_COOK_85_THRESHOLD, SQR_TOOM_COOK_THRESHOLD, ScratchBuffer,
-    TOOM_COOK_4_THRESHOLD, TOOM_COOK_6_THRESHOLD, TOOM_COOK_85_THRESHOLD, TOOM_COOK_THRESHOLD,
+    LIMB_BITS, Limb, SQR_KARATSUBA_THRESHOLD, SQR_TOOM_COOK_4_THRESHOLD, SQR_TOOM_COOK_6_THRESHOLD,
+    SQR_TOOM_COOK_85_THRESHOLD, SQR_TOOM_COOK_THRESHOLD, ScratchBuffer, TOOM_COOK_4_THRESHOLD,
+    TOOM_COOK_6_THRESHOLD, TOOM_COOK_85_THRESHOLD, TOOM_COOK_THRESHOLD,
     TOOM8_FULL_GUARD_PRODUCT_MIN_SPLIT_LIMBS, TOOM85_PAIRED_RECONSTRUCTION_MIN_LIMBS,
     TRANSFORM_MAX_OPERAND_RATIO, TRANSFORM_MIN_SMALLER_LIMBS,
 };
@@ -33,7 +33,6 @@ mod entry;
 mod karatsuba;
 mod lopsided;
 mod low;
-mod ntt;
 mod recursive;
 mod shared;
 #[cfg(not(target_pointer_width = "16"))]
@@ -54,9 +53,6 @@ pub use entry::MulScratch;
 pub use karatsuba::Karatsuba;
 pub use lopsided::Lopsided;
 pub use low::LowProduct;
-pub use ntt::Ntt;
-#[cfg(feature = "_internal-tune")]
-pub use ntt::{NttMultiplicationPlan, TransformPlan};
 #[cfg(not(target_pointer_width = "16"))]
 pub use ssa::{Ssa, TransformChoice};
 #[cfg(all(feature = "_internal-tune", not(target_pointer_width = "16")))]

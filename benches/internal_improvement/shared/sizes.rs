@@ -76,29 +76,6 @@ pub const FERMAT_TRANSFORM_SIZES: [usize; 12] = [
     256, 512, 1_024, 2_048, 4_096, 8_192, 16_384, 524_288, 1_048_576, 2_097_152, 4_194_304,
     8_388_608,
 ];
-/// Widths whose exact coefficient bound fits one Goldilocks modulus at 23 bits per digit.
-#[cfg(debug_assertions)]
-pub const GOLDILOCKS_23_SIZES: [usize; 3] = [2_048, 4_096, 16_384];
-/// Release widths whose exact coefficient bound fits one Goldilocks modulus at 23 bits per digit.
-#[cfg(not(debug_assertions))]
-pub const GOLDILOCKS_23_SIZES: [usize; 6] = [2_048, 4_096, 8_192, 16_384, 24_576, 32_768];
-/// Widths whose exact coefficient bound fits two 31-bit moduli at 20 bits per digit.
-#[cfg(debug_assertions)]
-pub const TWO_PRIME_20_SIZES: [usize; 4] = [2_048, 4_096, 16_384, 65_536];
-/// Release widths whose exact coefficient bound fits two 31-bit moduli at 20 bits per digit.
-#[cfg(not(debug_assertions))]
-pub const TWO_PRIME_20_SIZES: [usize; 12] = [
-    2_048, 4_096, 8_192, 16_384, 24_576, 32_768, 49_152, 65_536, 98_304, 131_072, 196_608, 262_144,
-];
-/// Widths whose exact coefficient bound fits two 31-bit moduli at 19 bits per digit.
-#[cfg(debug_assertions)]
-pub const TWO_PRIME_19_SIZES: [usize; 4] = [2_048, 4_096, 16_384, 65_536];
-/// Release widths whose exact coefficient bound fits two 31-bit moduli at 19 bits per digit.
-#[cfg(not(debug_assertions))]
-pub const TWO_PRIME_19_SIZES: [usize; 14] = [
-    2_048, 4_096, 8_192, 16_384, 24_576, 32_768, 49_152, 65_536, 98_304, 131_072, 196_608, 262_144,
-    524_288, 1_048_576,
-];
 pub const HALF_SIZES: [(usize, usize); 6] = [
     (140, 120),
     (280, 240),
@@ -139,12 +116,6 @@ pub const DENSE_COMPARE_SIZES: [usize; 28] = [
     256, 384, 512, 640, 768, 896, 1_024, 1_280, 1_536, 1_792, 2_048, 2_560, 3_072, 3_584, 4_096,
     5_120, 6_144, 7_168, 8_192, 10_240, 12_288, 14_336, 16_384, 20_480, 24_576, 32_768, 49_152,
     65_536,
-];
-
-/// Continuation of dense sampling for NTT from 98,304 limbs (6 Mibit) up to 8,388,608 limbs (512 Mibit).
-pub const DENSE_COMPARE_NTT_HUGE_SIZES: [usize; 14] = [
-    98_304, 131_072, 196_608, 262_144, 393_216, 524_288, 786_432, 1_048_576, 1_572_864, 2_097_152,
-    3_145_728, 4_194_304, 6_291_456, 8_388_608,
 ];
 
 /// Continuation of dense sampling from 98,304 limbs (6 Mibit) up to 33,554,432 limbs (2 Gibit).

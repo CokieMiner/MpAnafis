@@ -9,12 +9,9 @@ mod forward;
 mod inverse;
 mod matrix;
 
-use entry::{can_fork_four, should_parallelize};
-use forward::{fft_recursive_dif_with_executor, recurse_dif_pair};
-use inverse::fft_recursive_dit_with_executor;
-
 use super::{
-    ArchKernels, FftPlan, Limb, SSA_BASE_MODULUS_BITS, SsaCoefficients, SsaPointwise, SsaRing,
+    ArchKernels, FftPlan, LIMB_BITS, Limb, SSA_BASE_MODULUS_BITS, SsaCoefficients, SsaPointwise,
+    SsaRing,
 };
 
 pub use drive::SsaTransform;

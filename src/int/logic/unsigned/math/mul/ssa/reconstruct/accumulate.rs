@@ -134,7 +134,8 @@ impl SsaCoefficients {
     ///   (see internal computation) and work area (>= max shifted coeff width)
     #[allow(
         clippy::too_many_arguments,
-        reason = "the fused sweep needs the chunk geometry, both output buffers, and the inverse twist"
+        clippy::too_many_lines,
+        reason = "the fused sweep handles dual-pass twist specialization and whole-product accumulation"
     )]
     pub fn reconstruct(
         matrix: &mut [Limb],
@@ -190,66 +191,116 @@ impl SsaCoefficients {
             "the centered coefficient bound must leave a sign-separation bit"
         );
 
-        let mut twist_stage = twist;
-        for idx in 0..transform_len {
-            // Apply inverse twiddle and scaling on first touch in the same streaming pass.
-            if let Some((ref stage_twist, ref mut stage_scratch)) = twist_stage {
+        if let Some((stage_twist, stage_scratch)) = twist {
+            for idx in 0..transform_len {
+                // Apply inverse twiddle and scaling on first touch in the same streaming pass.
                 // SAFETY: idx < transform_len and the caller guarantees the
                 // staging buffer holds two disjoint complete coefficients.
                 unsafe {
-                    untwist_coefficient(matrix, idx, stage_twist, stage_scratch);
+                    untwist_coefficient(matrix, idx, &stage_twist, stage_scratch);
+                }
+                // SAFETY: idx < transform_len, matrix has transform_len * cl limbs.
+                let coeff_slice = unsafe { SsaTransform::coeff(matrix, idx, cl) };
+
+                // Exact convolution coefficients have magnitude below
+                // 2^coefficient_bound_bits, which is below 2^(inner_bits-1).
+                // Therefore canonical residues with the top data bit set are
+                // precisely negative coefficients; the guard-only value is -1.
+                // SAFETY: 0 < ml_inner < cl <= coeff_slice.len().
+                let top_data = unsafe { *coeff_slice.get_unchecked(ml_inner.wrapping_sub(1)) };
+                // SAFETY: ml_inner < cl <= coeff_slice.len().
+                let guard = unsafe { *coeff_slice.get_unchecked(ml_inner) };
+                let is_negative = guard != 0 || top_data.leading_zeros() == 0;
+
+                let shift_bits = idx.wrapping_mul(chunk_bits);
+                let shift_limbs = shift_bits.wrapping_div(LIMB_BITS);
+                #[allow(
+                    clippy::as_conversions,
+                    clippy::cast_possible_truncation,
+                    reason = "shift_bits % LIMB_BITS < LIMB_BITS; fits u32"
+                )]
+                let shift_sub_bits = shift_bits.wrapping_rem(LIMB_BITS) as u32;
+
+                if is_negative {
+                    // SAFETY: work.len() >= cl (guaranteed by caller), acc.len() >= needed.
+                    unsafe {
+                        process_negative_coeff(
+                            coeff_slice,
+                            shift_limbs,
+                            shift_sub_bits,
+                            cl,
+                            ml_inner,
+                            acc,
+                            work,
+                        );
+                    }
+                } else {
+                    let active = SharedEval::active_len(coeff_slice);
+                    if active == 0 {
+                        continue;
+                    }
+                    // SAFETY: work.len() >= needed, acc.len() >= needed.
+                    unsafe {
+                        process_positive_coeff(
+                            coeff_slice,
+                            active,
+                            shift_limbs,
+                            shift_sub_bits,
+                            acc,
+                            work,
+                        );
+                    }
                 }
             }
-            // SAFETY: idx < transform_len, matrix has transform_len * cl limbs.
-            let coeff_slice = unsafe { SsaTransform::coeff(matrix, idx, cl) };
+        } else {
+            for idx in 0..transform_len {
+                // SAFETY: idx < transform_len, matrix has transform_len * cl limbs.
+                let coeff_slice = unsafe { SsaTransform::coeff(matrix, idx, cl) };
 
-            // Exact convolution coefficients have magnitude below
-            // 2^coefficient_bound_bits, which is below 2^(inner_bits-1).
-            // Therefore canonical residues with the top data bit set are
-            // precisely negative coefficients; the guard-only value is -1.
-            // SAFETY: 0 < ml_inner < cl <= coeff_slice.len().
-            let top_data = unsafe { *coeff_slice.get_unchecked(ml_inner.wrapping_sub(1)) };
-            // SAFETY: ml_inner < cl <= coeff_slice.len().
-            let guard = unsafe { *coeff_slice.get_unchecked(ml_inner) };
-            let is_negative = guard != 0 || top_data.leading_zeros() == 0;
+                // SAFETY: 0 < ml_inner < cl <= coeff_slice.len().
+                let top_data = unsafe { *coeff_slice.get_unchecked(ml_inner.wrapping_sub(1)) };
+                // SAFETY: ml_inner < cl <= coeff_slice.len().
+                let guard = unsafe { *coeff_slice.get_unchecked(ml_inner) };
+                let is_negative = guard != 0 || top_data.leading_zeros() == 0;
 
-            let shift_bits = idx.wrapping_mul(chunk_bits);
-            let shift_limbs = shift_bits.wrapping_div(LIMB_BITS);
-            #[allow(
-                clippy::as_conversions,
-                clippy::cast_possible_truncation,
-                reason = "shift_bits % LIMB_BITS < LIMB_BITS; fits u32"
-            )]
-            let shift_sub_bits = shift_bits.wrapping_rem(LIMB_BITS) as u32;
+                let shift_bits = idx.wrapping_mul(chunk_bits);
+                let shift_limbs = shift_bits.wrapping_div(LIMB_BITS);
+                #[allow(
+                    clippy::as_conversions,
+                    clippy::cast_possible_truncation,
+                    reason = "shift_bits % LIMB_BITS < LIMB_BITS; fits u32"
+                )]
+                let shift_sub_bits = shift_bits.wrapping_rem(LIMB_BITS) as u32;
 
-            if is_negative {
-                // SAFETY: work.len() >= cl (guaranteed by caller), acc.len() >= needed.
-                unsafe {
-                    process_negative_coeff(
-                        coeff_slice,
-                        shift_limbs,
-                        shift_sub_bits,
-                        cl,
-                        ml_inner,
-                        acc,
-                        work,
-                    );
-                }
-            } else {
-                let active = SharedEval::active_len(coeff_slice);
-                if active == 0 {
-                    continue;
-                }
-                // SAFETY: work.len() >= needed, acc.len() >= needed.
-                unsafe {
-                    process_positive_coeff(
-                        coeff_slice,
-                        active,
-                        shift_limbs,
-                        shift_sub_bits,
-                        acc,
-                        work,
-                    );
+                if is_negative {
+                    // SAFETY: work.len() >= cl (guaranteed by caller), acc.len() >= needed.
+                    unsafe {
+                        process_negative_coeff(
+                            coeff_slice,
+                            shift_limbs,
+                            shift_sub_bits,
+                            cl,
+                            ml_inner,
+                            acc,
+                            work,
+                        );
+                    }
+                } else {
+                    let active = SharedEval::active_len(coeff_slice);
+                    if active == 0 {
+                        continue;
+                    }
+                    // SAFETY: work.len() >= needed, acc.len() >= needed.
+                    unsafe {
+                        process_positive_coeff(
+                            coeff_slice,
+                            active,
+                            shift_limbs,
+                            shift_sub_bits,
+                            acc,
+                            work,
+                        );
+                    }
                 }
             }
         }
@@ -343,16 +394,8 @@ unsafe fn process_positive_coeff(
         unsafe { work.get_unchecked(..apply_len) },
     );
     if carry != 0 {
-        let mut idx = apply_end;
-        let mut pending = carry;
-        while pending != 0 && idx < dst.len() {
-            // SAFETY: idx < dst.len(), guaranteed by the loop condition.
-            let limb = unsafe { dst.get_unchecked_mut(idx) };
-            let (sum, overflow) = limb.overflowing_add(pending);
-            pending = Limb::from(overflow);
-            *limb = sum;
-            idx = idx.wrapping_add(1);
-        }
+        // SAFETY: apply_end <= destination_end <= dst.len().
+        let _ = SsaCarry::propagate_carry(unsafe { dst.get_unchecked_mut(apply_end..) });
     }
 }
 
@@ -457,18 +500,7 @@ unsafe fn process_negative_coeff(
         unsafe { mag_work.get_unchecked(..sub_len) },
     );
     if sub_borrow != 0 {
-        let mut idx = sub_end;
-        let mut pending = sub_borrow;
-        while pending != 0 && idx < dst.len() {
-            // SAFETY: idx < dst.len(), guaranteed by the loop condition.
-            let (difference, underflow) =
-                unsafe { dst.get_unchecked_mut(idx) }.overflowing_sub(pending);
-            pending = Limb::from(underflow);
-            // SAFETY: idx < dst.len().
-            unsafe {
-                *dst.get_unchecked_mut(idx) = difference;
-            }
-            idx = idx.wrapping_add(1);
-        }
+        // SAFETY: sub_end <= destination_end <= dst.len().
+        let _ = SsaCarry::propagate_borrow(unsafe { dst.get_unchecked_mut(sub_end..) });
     }
 }

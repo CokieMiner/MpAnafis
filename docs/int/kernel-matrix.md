@@ -63,44 +63,12 @@ microarchitecture.
 | `propagate_borrow_unchecked` | propagate one borrow through a span | x86-64, AArch64, s390x; fallback elsewhere |
 | `mul_basecase_unchecked` | one complete schoolbook product | x86-64 ADX (fully unrolled per width); every other target composes the row kernels above |
 | `sub_shifted_high_limbs_unchecked` | subtract a cross-limb shifted span | x86-64 BMI2, AArch64, s390x, POWER32/64; fallback elsewhere |
-| `ntt_digits_u32` | pack 64-bit limbs into 16-bit NTT digits | x86-64 SSE2 baseline and AVX2 (RT/compile-time); AArch64 NEON; fallback on ARMv7 and other targets |
-| `ntt_monty_u32` | 31-bit Montgomery multiply, radix-2 butterflies, and fused radix-4 butterflies | x86-64 SSE2 baseline and AVX2 (RT/compile-time); AArch64 NEON; fallback on ARMv7 and other targets |
 
 `mul_basecase_unchecked` is the one entry that owns a *driver* rather than a
 row. Off x86-64 it is a portable loop over `mul_2`, `add_mul_2`, and
 `add_mul_1`, each of which already selects its own backend, so the composed
 path is architecture-specific everywhere without a per-target driver file.
 
-### NTT backend boundary and ARM coverage
-
-The two NTT kernel families have deliberately narrow target predicates:
-
-| Target | `ntt_digits_u32` | `ntt_monty_u32` | Evidence status |
-|---|---|---|---|
-| x86-64 `std` | SSE2 baseline or AVX2 selected once at runtime | SSE2 baseline or AVX2 selected once at runtime | Correctness tests; no native speed claim yet |
-| x86-64 `no_std` | fallback unless compiled with `+avx2` | fallback unless compiled with `+avx2` | Compile-time feature selection |
-| AArch64 | 128-bit NEON packer | 128-bit NEON Montgomery/butterfly kernels | Cross-target code review; no AArch64 hardware benchmark |
-| ARMv7/ARM32 | portable fallback; 32-bit limbs cannot use the 64-bit digit packer | portable fallback | No ARMv7 NEON backend is compiled or claimed |
-| other targets | portable fallback | portable fallback | No target-specific NTT backend |
-
-“ARM” in these rows is not a blanket performance statement: AArch64 and
-ARMv7 are separate targets with separate limb widths and NEON ABIs. ARMv7
-NEON was reviewed for these operations but is intentionally not selected: the
-digit kernel packs four 16-bit digits per 64-bit limb, while ARMv7 uses 32-bit
-native limbs, and no Montgomery-butterfly ARMv7 backend has been validated or
-benchmarked in this checkout. `ntt_monty_u32` therefore uses its scalar
-fallback on ARMv7. The repository's architecture checks cover the AArch64
-source through its target predicate. The architecture matrix also has a
-focused ARMv7 `+neon` compile profile to prove that this fallback selection
-remains valid when NEON is enabled; it does not claim a NEON implementation or
-performance.
-
-In total this table lists all 24 kernel directories under `math/arch/`.
-`lshift_into_unchecked` and `rshift_into_unchecked` are separate ownership rows
-from the in-place shifts, and the shifted subtraction kernel is
-`sub_shifted_high_limbs_unchecked`.
-
-## The shifted-high subtraction backend rule
 
 `sub_shifted_high_limbs_unchecked` needs a hardware borrow chain that survives a
 variable-count shift, a merge, loads and stores, and loop control. Where that

@@ -41,16 +41,12 @@ macro_rules! select_arch_kernel {
             $item
         )*
     };
-    (@import_limb ntt_monty_u32) => {};
-    (@import_limb ntt_digits_u32) => {};
+    (@import_limb ntt_float_f64) => {};
     (@import_limb $other:ident) => {
         use super::Limb;
     };
-    (@import_kernel_types NttMontyKernel) => {
-        use super::kernels::NttMontyKernels;
-    };
-    (@import_kernel_types NttDigitsKernel) => {
-        use super::kernels::NttDigitsKernels;
+    (@import_kernel_types NttFloatKernel) => {
+        use super::kernels::NttFloatKernels;
     };
     (@import_kernel_types $other:ident) => {};
     (

@@ -53,8 +53,6 @@ mod lshift_unchecked;
 mod monty_redc_unchecked;
 mod mul_2_limbs_unchecked;
 mod mul_basecase_unchecked;
-mod ntt_digits_u32;
-mod ntt_monty_u32;
 mod propagate_borrow_unchecked;
 mod propagate_carry_unchecked;
 mod rshift_into_unchecked;

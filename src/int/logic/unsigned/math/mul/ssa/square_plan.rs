@@ -157,45 +157,62 @@ impl<'operand> SsaSquaringPlan<'operand> {
         {
             let (padded, ring_scratch) = rest3.split_at_mut(coeff_len);
 
-            let copy_a = active_a.len().min(n);
-            // SAFETY: `copy_a <= n < padded.len() == n + 1`.
-            let padded_prefix = unsafe { padded.get_unchecked_mut(..copy_a) };
-            // SAFETY: `copy_a <= active_a.len()` by construction.
-            let a_prefix = unsafe { active_a.get_unchecked(..copy_a) };
-            padded_prefix.copy_from_slice(a_prefix);
-            // SAFETY: `copy_a <= n` and the inclusive end is in `padded`.
-            unsafe { padded.get_unchecked_mut(copy_a..=n) }.fill(0);
-
-            // Above the half-width the operand folds negacyclically: B^n = -1.
-            if active_a.len() > n {
-                // SAFETY: `padded.len() == n + 1`, so this is its data span.
-                let padded_data = unsafe { padded.get_unchecked_mut(..n) };
-                // SAFETY: the square-width proof bounds this tail by `n` limbs.
-                let a_tail = unsafe { active_a.get_unchecked(n..) };
-                let mut borrow = SsaCarry::sub_full_in_place(padded_data, a_tail);
-                if borrow > 0 {
-                    // SAFETY: `padded.len() == n + 1`, so the data span is valid.
-                    borrow = borrow.wrapping_sub(SsaCarry::add_full_in_place(
-                        unsafe { padded.get_unchecked_mut(..n) },
-                        &[1],
-                    ));
-                    // SAFETY: `n < padded.len()` by its guard-limb layout.
-                    *unsafe { padded.get_unchecked_mut(n) } = 1_usize.wrapping_sub(borrow);
+            if active_a.len() == n && (ring_bits > SSA_BASE_MODULUS_BITS || force_transform) {
+                // SAFETY: normalized full-width operand is nonzero, has exactly
+                // ml=n data limbs, and the transform treats its omitted guard as
+                // zero.
+                unsafe {
+                    SsaTransform::fft_sqr_mod_slices_with_executor(
+                        xp,
+                        active_a,
+                        ring_bits,
+                        force_transform,
+                        Some(&ring_plan),
+                        executor,
+                        ring_scratch,
+                    );
                 }
-            }
+            } else {
+                let copy_a = active_a.len().min(n);
+                // SAFETY: `copy_a <= n < padded.len() == n + 1`.
+                let padded_prefix = unsafe { padded.get_unchecked_mut(..copy_a) };
+                // SAFETY: `copy_a <= active_a.len()` by construction.
+                let a_prefix = unsafe { active_a.get_unchecked(..copy_a) };
+                padded_prefix.copy_from_slice(a_prefix);
+                // SAFETY: `copy_a <= n` and the inclusive end is in `padded`.
+                unsafe { padded.get_unchecked_mut(copy_a..=n) }.fill(0);
 
-            // SAFETY: the staged operand is guarded, disjoint from `xp`, and the
-            // ring workspace was sized by this immutable plan.
-            unsafe {
-                SsaTransform::fft_sqr_mod_slices_with_executor(
-                    xp,
-                    padded,
-                    ring_bits,
-                    force_transform,
-                    Some(&ring_plan),
-                    executor,
-                    ring_scratch,
-                );
+                // Above the half-width the operand folds negacyclically: B^n = -1.
+                if active_a.len() > n {
+                    // SAFETY: `padded.len() == n + 1`, so this is its data span.
+                    let padded_data = unsafe { padded.get_unchecked_mut(..n) };
+                    // SAFETY: the square-width proof bounds this tail by `n` limbs.
+                    let a_tail = unsafe { active_a.get_unchecked(n..) };
+                    let mut borrow = SsaCarry::sub_full_in_place(padded_data, a_tail);
+                    if borrow > 0 {
+                        // SAFETY: `padded.len() == n + 1`, so the data span is valid.
+                        borrow = borrow.wrapping_sub(SsaCarry::add_full_in_place(
+                            unsafe { padded.get_unchecked_mut(..n) },
+                            &[1],
+                        ));
+                        // SAFETY: `n < padded.len()` by its guard-limb layout.
+                        *unsafe { padded.get_unchecked_mut(n) } = 1_usize.wrapping_sub(borrow);
+                    }
+                }
+
+                // SAFETY: the staged operand is guarded, disjoint from `xp`, and the
+                // ring workspace was sized by this immutable plan.
+                unsafe {
+                    SsaTransform::fft_sqr_mod_slices_with_executor(
+                        xp,
+                        padded,
+                        ring_bits,
+                        force_transform,
+                        Some(&ring_plan),
+                        executor,
+                        ring_scratch,
+                    );
+                }
             }
         }
 

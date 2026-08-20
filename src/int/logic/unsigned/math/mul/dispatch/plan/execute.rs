@@ -5,17 +5,17 @@ use core::cmp::{max, min};
 use crate::parallel::{DefaultExecutor, ParallelExecutor};
 
 use super::{
-    Karatsuba, LargePlan, Limb, Lopsided, MulPlan, Multiplication, Ntt, Schoolbook, SquarePlan,
-    Toom3, Toom4, Toom6, Toom8, Toom32, Toom43,
+    Karatsuba, Limb, Lopsided, MulPlan, Multiplication, Schoolbook, SquarePlan, Toom3, Toom4,
+    Toom6, Toom8, Toom32, Toom43,
 };
 #[cfg(not(target_pointer_width = "16"))]
-use super::{Ssa, TransformChoice};
+use super::{LargePlan, Ssa, TransformChoice};
 
 /// Execute exactly the strategy described by `plan` with the default executor policy.
 ///
 /// Total: every variant names one algorithm and runs it. The transform arms
 /// carry no conventional fallback because `select_mul_plan` only names them
-/// after `ssa_admits_mul`/`ntt_admits_mul` established the construction exists
+/// after `ssa_admits_mul` established the construction exists
 /// for these widths. `dispatch::tests` sweeps those predicates against the
 /// entry points they guard.
 impl Multiplication {
@@ -34,7 +34,7 @@ impl Multiplication {
     /// Execute a multiplication plan using a caller-selected executor.
     ///
     /// Non-transform tiers remain on their existing synchronous kernels. Large
-    /// NTT and SSA tiers receive `executor` all the way through their transform
+    /// SSA tiers receive `executor` all the way through their transform
     /// orchestration, so applications can reuse an existing work-stealing pool.
     #[inline]
     pub fn execute_plan_with_executor<E: ParallelExecutor>(
@@ -88,17 +88,6 @@ impl Multiplication {
                 );
                 debug_assert!(computed, "the planner named SSA for operands it declines");
             }
-            MulPlan::Large(LargePlan::Ntt) => {
-                let Some(ntt_plan) = Ntt::choose_transform_plan(a.len(), b.len()) else {
-                    debug_assert!(false, "the planner named NTT without a transform plan");
-                    return;
-                };
-                let computed = Ntt::try_mul_with_executor(dst, a, b, ntt_plan, executor);
-                debug_assert!(
-                    computed,
-                    "the planner named the NTT for operands it declines"
-                );
-            }
         }
     }
 
@@ -149,17 +138,6 @@ impl Multiplication {
                     executor,
                 );
                 debug_assert!(computed, "the planner named SSA for an operand it declines");
-            }
-            SquarePlan::Large(LargePlan::Ntt) => {
-                let Some(ntt_plan) = Ntt::choose_transform_plan(a.len(), a.len()) else {
-                    debug_assert!(false, "the planner named NTT without a transform plan");
-                    return;
-                };
-                let computed = Ntt::try_sqr_with_executor(dst, a, ntt_plan, executor);
-                debug_assert!(
-                    computed,
-                    "the planner named the NTT for an operand it declines"
-                );
             }
         }
     }

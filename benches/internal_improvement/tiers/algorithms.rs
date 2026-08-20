@@ -4,9 +4,7 @@ use core::hint::black_box;
 
 use mp_anafis::tune_api::tier::{
     Limb, Tuner,
-    transform::{
-        NttPlanPolicy, NttScratchPolicy, SsaGeometryPolicy, SsaScratchPolicy, TransformExecutor,
-    },
+    transform::{SsaGeometryPolicy, SsaScratchPolicy, TransformExecutor},
 };
 
 const SSA_2048_EXPONENTS: [u32; 4] = [7, 8, 9, 10];
@@ -104,9 +102,8 @@ const FERMAT_GEOMETRIES: [(usize, u32); 17] = [
 ];
 
 use crate::shared::{
-    FERMAT_TRANSFORM_SIZES, GOLDILOCKS_23_SIZES, KARATSUBA_SIZES, SCHOOLBOOK_SIZES,
-    SSA_SCORECARD_SIZES, TOOM3_SIZES, TOOM4_SIZES, TOOM6_SIZES, TOOM8_SIZES, TRANSFORM_SIZES,
-    TWO_PRIME_19_SIZES, TWO_PRIME_20_SIZES, gmp_equal_reference, operands,
+    FERMAT_TRANSFORM_SIZES, KARATSUBA_SIZES, SCHOOLBOOK_SIZES, SSA_SCORECARD_SIZES, TOOM3_SIZES,
+    TOOM4_SIZES, TOOM6_SIZES, TOOM8_SIZES, TRANSFORM_SIZES, gmp_equal_reference, operands,
     validate_and_warm_product,
 };
 
@@ -222,102 +219,6 @@ fn toom8_forced(bencher: divan::Bencher, len: usize) {
         );
         let _output = black_box(&destination);
     });
-}
-
-#[divan::bench(args = TRANSFORM_SIZES)]
-fn ntt_production_sequential_reusable(bencher: divan::Bencher, len: usize) {
-    bench_ntt(
-        bencher,
-        len,
-        NttPlanPolicy::Production,
-        TransformExecutor::Sequential,
-    );
-}
-
-#[cfg(feature = "rayon")]
-#[divan::bench(args = TRANSFORM_SIZES)]
-fn ntt_production_default_reusable(bencher: divan::Bencher, len: usize) {
-    bench_ntt(
-        bencher,
-        len,
-        NttPlanPolicy::Production,
-        TransformExecutor::Default,
-    );
-}
-
-#[divan::bench(args = GOLDILOCKS_23_SIZES)]
-fn ntt_goldilocks_23(bencher: divan::Bencher, len: usize) {
-    bench_ntt(
-        bencher,
-        len,
-        NttPlanPolicy::Forced {
-            digit_bits: 23,
-            modulus_count: 1,
-        },
-        TransformExecutor::Sequential,
-    );
-}
-
-#[divan::bench(args = TWO_PRIME_20_SIZES)]
-fn ntt_two_prime_20(bencher: divan::Bencher, len: usize) {
-    bench_ntt(
-        bencher,
-        len,
-        NttPlanPolicy::Forced {
-            digit_bits: 20,
-            modulus_count: 2,
-        },
-        TransformExecutor::Sequential,
-    );
-}
-
-#[divan::bench(args = TWO_PRIME_19_SIZES)]
-fn ntt_two_prime_19(bencher: divan::Bencher, len: usize) {
-    bench_ntt(
-        bencher,
-        len,
-        NttPlanPolicy::Forced {
-            digit_bits: 19,
-            modulus_count: 2,
-        },
-        TransformExecutor::Sequential,
-    );
-}
-
-#[divan::bench(args = TRANSFORM_SIZES)]
-fn ntt_three_prime_31(bencher: divan::Bencher, len: usize) {
-    bench_ntt(
-        bencher,
-        len,
-        NttPlanPolicy::Forced {
-            digit_bits: 31,
-            modulus_count: 3,
-        },
-        TransformExecutor::Sequential,
-    );
-}
-
-fn bench_ntt(
-    bencher: divan::Bencher<'_, '_>,
-    len: usize,
-    policy: NttPlanPolicy,
-    executor: TransformExecutor,
-) {
-    let (left, right, mut destination) = operands(len);
-    let expected = gmp_equal_reference(&left, &right);
-    let mut runner = Tuner::bench_ntt_multiplication(
-        policy,
-        executor,
-        NttScratchPolicy::Reusable,
-        &left,
-        &right,
-    )
-    .expect("forced NTT tier plan is valid for this width");
-    validate_and_warm_product(&expected, "prepared NTT tier product", |probe| {
-        runner.prepare(probe).run();
-    });
-    let mut prepared = runner.prepare(&mut destination);
-    bencher.bench_local(|| black_box(&mut prepared).run());
 }
 
 /// Caller-owned-scratch SSA timing: the measured body is pure algorithm.

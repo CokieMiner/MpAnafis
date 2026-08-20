@@ -26,7 +26,6 @@ impl TuningProfile {
             newton_raphson: 2_880,
             burnikel_ziegler_block: 48,
             newton_reciprocal_basecase: 32,
-            ntt: 0,
             ssa: 0,
             sqr_ssa: 0,
             transform_min_smaller_limbs: 1_024,

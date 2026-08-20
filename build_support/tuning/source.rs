@@ -2,7 +2,7 @@
 
 use super::TuningProfile;
 
-pub const REQUIRED_DEFINITIONS: [&str; 32] = [
+pub const REQUIRED_DEFINITIONS: [&str; 31] = [
     "const RADIX_DECIMAL_RECURSIVE_THRESHOLD:",
     "const RADIX_SMALL_RECURSIVE_THRESHOLD:",
     "const RADIX_LARGE_RECURSIVE_THRESHOLD:",
@@ -22,7 +22,6 @@ pub const REQUIRED_DEFINITIONS: [&str; 32] = [
     "const NEWTON_RAPHSON_THRESHOLD:",
     "const BURNIKEL_ZIEGLER_BLOCK_LIMBS:",
     "const NEWTON_RAPHSON_BASECASE_LIMBS:",
-    "const NTT_THRESHOLD:",
     "const SSA_THRESHOLD:",
     "const SQR_SSA_THRESHOLD:",
     "const TRANSFORM_MIN_SMALLER_LIMBS:",
@@ -71,7 +70,6 @@ impl TuningProfile {
         read!(newton_raphson, "NEWTON_RAPHSON_THRESHOLD");
         read!(burnikel_ziegler_block, "BURNIKEL_ZIEGLER_BLOCK_LIMBS");
         read!(newton_reciprocal_basecase, "NEWTON_RAPHSON_BASECASE_LIMBS");
-        read!(ntt, "NTT_THRESHOLD");
         read!(ssa, "SSA_THRESHOLD");
         read!(sqr_ssa, "SQR_SSA_THRESHOLD");
         read!(transform_min_smaller_limbs, "TRANSFORM_MIN_SMALLER_LIMBS");
@@ -120,7 +118,6 @@ impl TuningProfile {
              pub const NEWTON_RAPHSON_THRESHOLD: usize = {};\n\
              pub const BURNIKEL_ZIEGLER_BLOCK_LIMBS: usize = {};\n\
              pub const NEWTON_RAPHSON_BASECASE_LIMBS: usize = {};\n\
-             pub const NTT_THRESHOLD: usize = {};\n\
              #[cfg(not(target_pointer_width = \"16\"))]\n\
              pub const SSA_THRESHOLD: usize = {};\n\
              #[cfg(not(target_pointer_width = \"16\"))]\n\
@@ -162,7 +159,6 @@ impl TuningProfile {
             self.newton_raphson,
             self.burnikel_ziegler_block,
             self.newton_reciprocal_basecase,
-            self.ntt,
             self.ssa,
             self.sqr_ssa,
             self.transform_min_smaller_limbs,

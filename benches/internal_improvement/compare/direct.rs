@@ -1,7 +1,6 @@
 //! Direct algorithm-vs-adversary benchmarks on dense size ladders for continuous graphing.
 //!
 //! Compares raw transform engines without tower dispatch:
-//! - `MpAnafis` NTT (Sequential & Parallel)
 //! - `MpAnafis` SSA (Sequential & Parallel)
 //! - GMP `mpn_mul_n` (Serial baseline)
 //! - FLINT `flint_mpn_mul_n` (Parallel baseline)
@@ -17,8 +16,7 @@ use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
 use mp_anafis::tune_api::tier::{
     Limb, Tuner,
     transform::{
-        DefaultExecutor, NttPlanPolicy, NttScratchPolicy, ParallelExecutor, SsaGeometryPolicy,
-        SsaScratchPolicy, TransformExecutor,
+        DefaultExecutor, ParallelExecutor, SsaGeometryPolicy, SsaScratchPolicy, TransformExecutor,
     },
 };
 
@@ -27,8 +25,8 @@ use crate::{
         FlintLimb, FlintSize, FlintThreadBudget, assert_compatible_limb_width, flint_mpn_mul_n,
     },
     shared::{
-        DENSE_COMPARE_HUGE_SIZES, DENSE_COMPARE_NTT_HUGE_SIZES, DENSE_COMPARE_SIZES,
-        gmp_equal_reference, operands, validate_and_warm_product,
+        DENSE_COMPARE_HUGE_SIZES, DENSE_COMPARE_SIZES, gmp_equal_reference, operands,
+        validate_and_warm_product,
     },
 };
 
@@ -53,48 +51,7 @@ const fn assert_one_limb_width() {
     assert_compatible_limb_width();
 }
 
-// ── 1. MpAnafis NTT Sequential & Parallel ───────────────────────────────────
-
-#[divan::bench(args = DENSE_COMPARE_SIZES)]
-fn ntt_sequential(bencher: divan::Bencher<'_, '_>, len: usize) {
-    bench_ntt(bencher, len, TransformExecutor::Sequential);
-}
-
-#[divan::bench(args = DENSE_COMPARE_SIZES)]
-fn ntt_parallel(bencher: divan::Bencher<'_, '_>, len: usize) {
-    bench_ntt(bencher, len, TransformExecutor::Default);
-}
-
-#[divan::bench(args = DENSE_COMPARE_NTT_HUGE_SIZES, sample_count = 3, sample_size = 1)]
-fn ntt_sequential_huge(bencher: divan::Bencher<'_, '_>, len: usize) {
-    bench_ntt(bencher, len, TransformExecutor::Sequential);
-}
-
-#[divan::bench(args = DENSE_COMPARE_NTT_HUGE_SIZES, sample_count = 3, sample_size = 1)]
-fn ntt_parallel_huge(bencher: divan::Bencher<'_, '_>, len: usize) {
-    bench_ntt(bencher, len, TransformExecutor::Default);
-}
-
-fn bench_ntt(bencher: divan::Bencher<'_, '_>, len: usize, executor: TransformExecutor) {
-    let (left, right, mut destination) = operands(len);
-    let expected = gmp_equal_reference(&left, &right);
-    let Some(mut runner) = Tuner::bench_ntt_multiplication(
-        NttPlanPolicy::Production,
-        executor,
-        NttScratchPolicy::Reusable,
-        &left,
-        &right,
-    ) else {
-        return;
-    };
-    validate_and_warm_product(&expected, "prepared NTT tier product", |probe| {
-        runner.prepare(probe).run();
-    });
-    let mut prepared = runner.prepare(&mut destination);
-    bencher.bench_local(|| black_box(&mut prepared).run());
-}
-
-// ── 2. MpAnafis SSA Sequential & Parallel ───────────────────────────────────
+// ── 1. MpAnafis SSA Sequential & Parallel ───────────────────────────────────
 
 #[divan::bench(args = DENSE_COMPARE_SIZES)]
 fn ssa_sequential(bencher: divan::Bencher<'_, '_>, len: usize) {

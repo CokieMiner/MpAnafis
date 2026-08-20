@@ -125,6 +125,40 @@ impl InternalMpUint {
         }
     }
 
+    /// Extracts the lowest 4 limbs into a fixed array `[Limb; 4]`.
+    /// Zero-pads if the integer has fewer than 4 limbs.
+    #[allow(
+        unsafe_code,
+        clippy::inline_always,
+        reason = "Extracting fixed 4-limb inline array is a critical hot path for in-register arithmetic."
+    )]
+    #[inline(always)]
+    #[must_use]
+    pub fn extract_4(&self) -> [Limb; 4] {
+        match self.repr {
+            UintRepr::Inline { len, limbs } => match len {
+                0 => [0, 0, 0, 0],
+                1 => [limbs[0], 0, 0, 0],
+                2 => [limbs[0], limbs[1], 0, 0],
+                3 => [limbs[0], limbs[1], limbs[2], 0],
+                _ => limbs,
+            },
+            UintRepr::Heap(ref v) => {
+                let mut res = [0; 4];
+                let len = v.len().min(4);
+                let mut i = 0;
+                while i < len {
+                    // SAFETY: i < len <= v.len() and i < 4 <= res.len()
+                    unsafe {
+                        *res.get_unchecked_mut(i) = *v.get_unchecked(i);
+                    }
+                    i = i.wrapping_add(1);
+                }
+                res
+            }
+        }
+    }
+
     /// Pre-allocates memory for a specific number of limbs.
     #[inline]
     #[must_use]
@@ -178,6 +212,48 @@ impl InternalMpUint {
     }
 
     /// Creates an integer from a vector of limbs.
+    /// Creates an integer from an arbitrary limb slice, trimming high zero limbs.
+    #[allow(
+        clippy::inline_always,
+        clippy::as_conversions,
+        clippy::cast_possible_truncation,
+        reason = "from_limbs_slice is a hot-path constructor; len <= INLINE_LIMBS (4) fits in u8"
+    )]
+    #[inline(always)]
+    #[must_use]
+    pub fn from_limbs_slice(limbs: &[Limb]) -> Self {
+        let mut len = limbs.len();
+        while len > 0 {
+            let last_idx = len.wrapping_sub(1);
+            if limbs.get(last_idx) == Some(&0) {
+                len = last_idx;
+            } else {
+                break;
+            }
+        }
+        if len == 0 {
+            return Self::zero();
+        }
+        let trimmed = limbs.get(..len).unwrap_or(&[]);
+        if len <= INLINE_LIMBS {
+            let mut arr = [0; INLINE_LIMBS];
+            if let Some(target) = arr.get_mut(..len) {
+                target.copy_from_slice(trimmed);
+            }
+            Self {
+                repr: UintRepr::Inline {
+                    len: len as u8,
+                    limbs: arr,
+                },
+            }
+        } else {
+            Self {
+                repr: UintRepr::Heap(trimmed.to_vec()),
+            }
+        }
+    }
+
+    /// Creates an integer from an owned limb vector.
     ///
     /// Trims any trailing zero limbs so that the internal representation is normalized.
     #[allow(

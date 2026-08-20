@@ -391,17 +391,16 @@ impl SsaCrt {
             // SAFETY: copy_k == max_len - n <= n == k.len(), so k[..copy_k] is in range.
             let k_span = unsafe { k.get_unchecked(..copy_k) };
             dst_span.copy_from_slice(k_span);
-            // SAFETY: max_len <= dst.len(), so dst[n..max_len] is in range.
-            let mut c2 =
-                SsaCarry::add_full_in_place(unsafe { dst.get_unchecked_mut(n..max_len) }, &[carry]);
             // SAFETY: xp carries one guard limb above the n-limb residue.
             let xp_guard = unsafe { *xp.get_unchecked(n) };
-            // SAFETY: max_len <= dst.len(), so dst[n..max_len] is in range.
-            c2 = c2.wrapping_add(SsaCarry::add_full_in_place(
-                unsafe { dst.get_unchecked_mut(n..max_len) },
-                &[xp_guard],
-            ));
-            let _ = c2;
+            let total_carry = carry.wrapping_add(xp_guard);
+            if total_carry != 0 {
+                // SAFETY: max_len <= dst.len(), so dst[n..max_len] is in range.
+                let _ = SsaCarry::add_full_in_place(
+                    unsafe { dst.get_unchecked_mut(n..max_len) },
+                    &[total_carry],
+                );
+            }
         }
     }
 

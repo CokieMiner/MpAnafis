@@ -11,9 +11,8 @@
 
 use super::{
     ArchKernels, DivScratch, Division, FormatCache, InternalMpUint, Karatsuba, Lopsided,
-    LowProduct, MulScratch, Multiplication, Ntt, NttMultiplicationPlan, Schoolbook, ScratchBuffer,
-    Ssa, SsaMultiplicationPlan, SsaSquaringPlan, Toom3, Toom4, Toom6, Toom8, Toom32, Toom43,
-    TransformBench, TransformChoice, TransformPlan,
+    LowProduct, MulScratch, Multiplication, Schoolbook, ScratchBuffer, Ssa, SsaMultiplicationPlan,
+    SsaSquaringPlan, Toom3, Toom4, Toom6, Toom8, Toom32, Toom43, TransformBench, TransformChoice,
 };
 
 mod division;

@@ -12,7 +12,7 @@ use core::{
 
 use alloc::vec::Vec;
 
-use super::{ArchKernels, DivScratch, Division, Gcd, InternalMpUint, Limb};
+use super::{ArchKernels, DivScratch, Division, DoubleLimb, Gcd, InternalMpUint, LIMB_BITS, Limb};
 
 impl Division {
     /// Computes the modular inverse of `a` modulo `m` using the extended
@@ -63,20 +63,31 @@ impl Division {
             return (a.clone(), InternalMpUint::one(), InternalMpUint::zero());
         }
 
+        let a_limbs = a.limbs();
+        let b_limbs = b.limbs();
+        if a_limbs.len() == 1 && b_limbs.len() == 1 {
+            // SAFETY: a_limbs.len() == 1 and b_limbs.len() == 1
+            let (gcd_val, s_val, t_val) =
+                unsafe { extended_gcd_1(*a_limbs.get_unchecked(0), *b_limbs.get_unchecked(0)) };
+            return (
+                InternalMpUint::from_limb(gcd_val),
+                InternalMpUint::from_limb(s_val),
+                InternalMpUint::from_limb(t_val),
+            );
+        }
+
         let mut r0 = a.clone();
         let mut r1 = b.clone();
 
-        // Absolute values of coefficients
+        // Absolute value of coefficient for `a`
         let mut s0 = InternalMpUint::one();
         let mut s1 = InternalMpUint::zero();
-        let mut t0 = InternalMpUint::zero();
-        let mut t1 = InternalMpUint::one();
+        s0.reserve(a.limbs().len().wrapping_add(4));
+        s1.reserve(a.limbs().len().wrapping_add(4));
 
         let mut q = InternalMpUint::zero();
         let mut next_r = InternalMpUint::zero();
         let mut temp = InternalMpUint::zero();
-        let mut saved_r0 = InternalMpUint::zero();
-        let mut saved_r1 = InternalMpUint::zero();
         let mut u_backup = Vec::new();
         let mut v_backup = Vec::new();
 
@@ -84,22 +95,14 @@ impl Division {
         let mut step: usize = 0;
 
         while !r1.is_zero() {
-            if r1.limbs().len() < 4 {
+            if r1.limbs().len() < 2 {
                 Self::div_rem_into(&r0, &r1, &mut q, &mut next_r, &mut scratch);
                 swap(&mut r0, &mut r1);
                 swap(&mut r1, &mut next_r);
 
                 temp.assign_product_with_scratch(&q, &s1, &mut scratch.mul_scratch);
-                let mut next_s = s0.clone();
-                next_s.add_assign(&temp);
+                s0.add_assign(&temp);
                 swap(&mut s0, &mut s1);
-                swap(&mut s1, &mut next_s);
-
-                temp.assign_product_with_scratch(&q, &t1, &mut scratch.mul_scratch);
-                let mut next_t = t0.clone();
-                next_t.add_assign(&temp);
-                swap(&mut t0, &mut t1);
-                swap(&mut t1, &mut next_t);
 
                 step = step.wrapping_add(1);
                 continue;
@@ -122,21 +125,11 @@ impl Division {
                 swap(&mut r1, &mut next_r);
 
                 temp.assign_product_with_scratch(&q, &s1, &mut scratch.mul_scratch);
-                let mut next_s = s0.clone();
-                next_s.add_assign(&temp);
+                s0.add_assign(&temp);
                 swap(&mut s0, &mut s1);
-                swap(&mut s1, &mut next_s);
-
-                temp.assign_product_with_scratch(&q, &t1, &mut scratch.mul_scratch);
-                let mut next_t = t0.clone();
-                next_t.add_assign(&temp);
-                swap(&mut t0, &mut t1);
-                swap(&mut t1, &mut next_t);
 
                 step = step.wrapping_add(1);
             } else {
-                saved_r0.clone_from(&r0);
-                saved_r1.clone_from(&r1);
                 let ok = Gcd::lehmer_update(
                     &mut r0,
                     &mut r1,
@@ -150,29 +143,17 @@ impl Division {
                 );
                 if ok {
                     update_abs_coeffs(&mut s0, &mut s1, u0, v0, u1, v1);
-                    update_abs_coeffs(&mut t0, &mut t1, u0, v0, u1, v1);
                     if !even {
                         step = step.wrapping_add(1);
                     }
                 } else {
-                    swap(&mut r0, &mut saved_r0);
-                    swap(&mut r1, &mut saved_r1);
-
                     Self::div_rem_into(&r0, &r1, &mut q, &mut next_r, &mut scratch);
                     swap(&mut r0, &mut r1);
                     swap(&mut r1, &mut next_r);
 
                     temp.assign_product_with_scratch(&q, &s1, &mut scratch.mul_scratch);
-                    let mut next_s = s0.clone();
-                    next_s.add_assign(&temp);
+                    s0.add_assign(&temp);
                     swap(&mut s0, &mut s1);
-                    swap(&mut s1, &mut next_s);
-
-                    temp.assign_product_with_scratch(&q, &t1, &mut scratch.mul_scratch);
-                    let mut next_t = t0.clone();
-                    next_t.add_assign(&temp);
-                    swap(&mut t0, &mut t1);
-                    swap(&mut t1, &mut next_t);
 
                     step = step.wrapping_add(1);
                 }
@@ -183,28 +164,53 @@ impl Division {
         let mut final_t = InternalMpUint::zero();
         let mut dump = InternalMpUint::zero();
 
-        if s0.cmp(b) == Ordering::Less {
-            final_s.clone_from(&s0);
-        } else {
-            Self::div_rem_into(&s0, b, &mut dump, &mut final_s, &mut scratch);
-        }
-
-        if t0.cmp(a) == Ordering::Less {
-            final_t.clone_from(&t0);
-        } else {
-            Self::div_rem_into(&t0, a, &mut dump, &mut final_t, &mut scratch);
-        }
-
         if step & 1 == 0 {
+            if s0.cmp(b) == Ordering::Less {
+                final_s.clone_from(&s0);
+            } else {
+                Self::div_rem_into(&s0, b, &mut dump, &mut final_s, &mut scratch);
+            }
+
+            let mut as0 = a.clone();
+            as0.mul_assign(&s0);
+            as0.sub_assign(&r0);
+            let t0 = as0.div(b);
+
+            if t0.cmp(a) == Ordering::Less {
+                final_t = t0;
+            } else {
+                Self::div_rem_into(&t0, a, &mut dump, &mut final_t, &mut scratch);
+            }
+
             if !final_t.is_zero() {
                 let mut t_diff = a.clone();
                 t_diff.sub_assign(&final_t);
                 final_t = t_diff;
             }
-        } else if !final_s.is_zero() {
-            let mut s_diff = b.clone();
-            s_diff.sub_assign(&final_s);
-            final_s = s_diff;
+        } else {
+            let mut s_rem = InternalMpUint::zero();
+            if s0.cmp(b) == Ordering::Less {
+                s_rem.clone_from(&s0);
+            } else {
+                Self::div_rem_into(&s0, b, &mut dump, &mut s_rem, &mut scratch);
+            }
+
+            if !s_rem.is_zero() {
+                let mut s_diff = b.clone();
+                s_diff.sub_assign(&s_rem);
+                final_s = s_diff;
+            }
+
+            let mut as0 = a.clone();
+            as0.mul_assign(&s0);
+            as0.add_assign(&r0);
+            let t0 = as0.div(b);
+
+            if t0.cmp(a) == Ordering::Less {
+                final_t = t0;
+            } else {
+                Self::div_rem_into(&t0, a, &mut dump, &mut final_t, &mut scratch);
+            }
         }
 
         (r0, final_s, final_t)
@@ -320,6 +326,13 @@ fn update_abs_coeffs(
 /// for an exact Lehmer coefficient update.
 ///
 /// [`DoubleLimb`]: super::DoubleLimb
+#[inline]
+#[allow(
+    clippy::similar_names,
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    reason = "DoubleLimb hardware arithmetic for fused 2-product carry accumulation."
+)]
 fn add_two_limb_products(
     x: Limb,
     x_coeff: Limb,
@@ -327,19 +340,104 @@ fn add_two_limb_products(
     y_coeff: Limb,
     carry: (Limb, Limb),
 ) -> (Limb, (Limb, Limb)) {
-    let (x_lo, x_hi) = ArchKernels::mul_limb_lo_hi(x, x_coeff);
-    let (y_lo, y_hi) = ArchKernels::mul_limb_lo_hi(y, y_coeff);
-
-    let (lo_sum, lo_xy_overflow) = x_lo.overflowing_add(y_lo);
-    let (result, lo_carry_overflow) = lo_sum.overflowing_add(carry.0);
-    let carry_from_low = Limb::from(lo_xy_overflow).wrapping_add(Limb::from(lo_carry_overflow));
-
-    let (hi_sum, hi_xy_overflow) = x_hi.overflowing_add(y_hi);
-    let (hi_with_low_carry, hi_low_overflow) = hi_sum.overflowing_add(carry_from_low);
-    let (next_low, hi_input_overflow) = hi_with_low_carry.overflowing_add(carry.1);
-
-    // The exact high sum is < 2*B, so at most one of these additions can
-    // overflow.  OR therefore preserves its single carry bit without a branch.
-    let next_high = Limb::from(hi_xy_overflow | hi_low_overflow | hi_input_overflow);
+    let p1 = (x as DoubleLimb).wrapping_mul(x_coeff as DoubleLimb);
+    let p2 = (y as DoubleLimb).wrapping_mul(y_coeff as DoubleLimb);
+    let (sum_p, c1) = p1.overflowing_add(p2);
+    let carry_in = (carry.0 as DoubleLimb) | ((carry.1 as DoubleLimb) << LIMB_BITS);
+    let (sum_all, c2) = sum_p.overflowing_add(carry_in);
+    let result = sum_all as Limb;
+    let next_low = (sum_all >> LIMB_BITS) as Limb;
+    let next_high = Limb::from(c1).wrapping_add(Limb::from(c2));
     (result, (next_low, next_high))
+}
+
+/// Single-limb extended GCD computed entirely in CPU registers.
+#[inline]
+#[allow(
+    unsafe_code,
+    clippy::similar_names,
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    reason = "DoubleLimb arithmetic on single-limb operands uses DoubleLimb / Limb primitive casts for in-register register math."
+)]
+fn extended_gcd_1(a_val: Limb, b_val: Limb) -> (Limb, Limb, Limb) {
+    let mut r0 = a_val;
+    let mut r1 = b_val;
+    let mut s0: DoubleLimb = 1;
+    let mut s1: DoubleLimb = 0;
+    let mut step: usize = 0;
+
+    while r1 != 0 {
+        // SAFETY: r1 is non-zero in this loop; rem_hi is 0 < r1.
+        let (q_val, r) = unsafe { ArchKernels::divrem_1_unchecked(r0, 0, r1) };
+        r0 = r1;
+        r1 = r;
+        let next_s = s0.wrapping_add((q_val as DoubleLimb).wrapping_mul(s1));
+        s0 = s1;
+        s1 = next_s;
+        step = step.wrapping_add(1);
+    }
+
+    let b_double = b_val as DoubleLimb;
+    let a_double = a_val as DoubleLimb;
+
+    let (final_s, final_t) = if step & 1 == 0 {
+        let s_coeff = if s0 < b_double {
+            s0
+        } else {
+            let s_lo = s0 as Limb;
+            let s_hi = (s0 >> LIMB_BITS) as Limb;
+            // SAFETY: b_val is non-zero; s0 < 2*b_double so s_hi < b_val.
+            let (_, rem) = unsafe { ArchKernels::divrem_1_unchecked(s_lo, s_hi, b_val) };
+            rem as DoubleLimb
+        };
+        let (as0_lo, as0_hi) = ArchKernels::mul_limb_lo_hi(a_val, s0 as Limb);
+        let (num_lo, borrow) = as0_lo.overflowing_sub(r0);
+        let num_hi = as0_hi.wrapping_sub(Limb::from(borrow));
+        // SAFETY: (a*s0 - r0) < a*b, so num_hi < b_val and quotient fits in Limb.
+        let (t0, _) = unsafe { ArchKernels::divrem_1_unchecked(num_lo, num_hi, b_val) };
+        let t_val = if (t0 as DoubleLimb) < a_double {
+            t0
+        } else {
+            // SAFETY: a_val is non-zero; rem_hi is 0 < a_val.
+            let (_, rem) = unsafe { ArchKernels::divrem_1_unchecked(t0, 0, a_val) };
+            rem
+        };
+        let final_t = if t_val != 0 {
+            a_val.wrapping_sub(t_val)
+        } else {
+            0
+        };
+        (s_coeff as Limb, final_t)
+    } else {
+        let s_rem = if s0 < b_double {
+            s0
+        } else {
+            let s_lo = s0 as Limb;
+            let s_hi = (s0 >> LIMB_BITS) as Limb;
+            // SAFETY: b_val is non-zero; s0 < 2*b_double so s_hi < b_val.
+            let (_, rem) = unsafe { ArchKernels::divrem_1_unchecked(s_lo, s_hi, b_val) };
+            rem as DoubleLimb
+        };
+        let final_s = if s_rem != 0 {
+            b_val.wrapping_sub(s_rem as Limb)
+        } else {
+            0
+        };
+        let (as0_lo, as0_hi) = ArchKernels::mul_limb_lo_hi(a_val, s0 as Limb);
+        let (num_lo, carry) = as0_lo.overflowing_add(r0);
+        let num_hi = as0_hi.wrapping_add(Limb::from(carry));
+        // SAFETY: (a*s0 + r0) <= a*b, so num_hi < b_val and quotient fits in Limb.
+        let (t0, _) = unsafe { ArchKernels::divrem_1_unchecked(num_lo, num_hi, b_val) };
+        let final_t = if (t0 as DoubleLimb) < a_double {
+            t0
+        } else {
+            // SAFETY: a_val is non-zero; rem_hi is 0 < a_val.
+            let (_, rem) = unsafe { ArchKernels::divrem_1_unchecked(t0, 0, a_val) };
+            rem
+        };
+        (final_s, final_t)
+    };
+
+    (r0, final_s, final_t)
 }

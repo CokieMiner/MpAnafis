@@ -60,6 +60,8 @@ pub unsafe fn add_sub_limbs_unchecked(
             ".p2align 4",                                // Align loop header
             // Main 4-way unrolled butterfly loop
             "2:",                                        // Loop head label
+            "prefetcht0 128({sum_ptr})",                 // Pre-load next cache line of sum (flag-free)
+            "prefetcht0 128({difference_ptr})",          // Pre-load next cache line of difference (flag-free)
             // [Limb 0]
             "movq ({sum_ptr}), %r8",                     // %r8 = sum[0]
             "movq ({difference_ptr}), %r9",              // %r9 = diff[0]

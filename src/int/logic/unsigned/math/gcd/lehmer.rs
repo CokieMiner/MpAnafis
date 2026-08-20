@@ -305,130 +305,75 @@ fn lehmer_update_slice(
         return true;
     }
 
-    u_backup.clear();
-    // SAFETY: the sole caller records `u_len` before resizing `u` to
-    // `max_len >= u_len`, so this initialized prefix is in bounds.
-    u_backup.extend_from_slice(unsafe { u.get_unchecked(..*u_len) });
-    v_backup.clear();
-    // SAFETY: the sole caller records `v_len` before resizing `v` to
-    // `max_len >= v_len`, so this initialized prefix is in bounds.
-    v_backup.extend_from_slice(unsafe { v.get_unchecked(..*v_len) });
-
-    if *u_len < max_len {
-        // SAFETY: the caller resized `u` to `max_len`, and this branch proves
-        // `u_len < max_len`, so the expanded tail is in bounds and initialized here.
-        unsafe { u.get_unchecked_mut(*u_len..max_len) }.fill(0);
-    }
-    if *v_len < max_len {
-        // SAFETY: the caller resized `v` to `max_len`, and this branch proves
-        // `v_len < max_len`, so the expanded tail is in bounds and initialized here.
-        unsafe { v.get_unchecked_mut(*v_len..max_len) }.fill(0);
-    }
+    u_backup.resize(max_len, 0);
+    v_backup.resize(max_len, 0);
 
     let mut carry_u: i128 = 0;
     let mut carry_v: i128 = 0;
     let limb_bits_u32 = LIMB_BITS as u32;
 
-    let extract_lo_hi = |val: i128| -> (Limb, i128) {
-        let lo = (val.cast_unsigned() & Limb::MAX as u128) as Limb;
-        let hi = val.wrapping_shr(limb_bits_u32);
-        (lo, hi)
-    };
-
-    let widen = |val: Limb| -> i128 { val as i128 };
-    let split_mul = |val: Limb, coeff: Limb| -> (i128, i128) {
-        let (lo, hi) = ArchKernels::mul_limb_lo_hi(val, coeff);
-        (lo as i128, hi as i128)
-    };
-
-    let split_identity = |val: Limb| -> (i128, i128) { (widen(val), 0) };
-    let split_zero = || -> (i128, i128) { (0, 0) };
-
-    let split_mul_if = |val: Limb, coeff: Limb, coeff_nonzero: bool, coeff_is_one: bool| {
-        if coeff_nonzero && val != 0 {
-            if coeff_is_one {
-                split_identity(val)
-            } else {
-                split_mul(val, coeff)
-            }
-        } else {
-            split_zero()
-        }
-    };
-
-    let assign_diff = |dst: &mut Limb,
-                       carry: &mut i128,
-                       lhs_lo: i128,
-                       lhs_hi: i128,
-                       rhs_lo: i128,
-                       rhs_hi: i128| {
-        let lo_diff = lhs_lo.wrapping_sub(rhs_lo).wrapping_add(*carry);
-        let (lo, hi_carry) = extract_lo_hi(lo_diff);
-        *dst = lo;
-        *carry = lhs_hi.wrapping_sub(rhs_hi).wrapping_add(hi_carry);
-    };
-
-    let u0_nonzero = u0 != 0;
-    let v0_nonzero = v0 != 0;
-    let u1_nonzero = u1 != 0;
-    let v1_nonzero = v1 != 0;
-    let u0_is_one = u0 == 1;
-    let v0_is_one = v0 == 1;
-    let u1_is_one = u1 == 1;
-    let v1_is_one = v1 == 1;
-
-    if even {
-        for i in 0..max_len {
-            // SAFETY: u and v are filled up to max_len above; i < max_len
-            let ui = unsafe { *u.get_unchecked(i) };
-            // SAFETY: v is filled up to max_len above; i < max_len
-            let vi = unsafe { *v.get_unchecked(i) };
-
-            let (uu0_lo, uu0_hi) = split_mul_if(ui, u0, u0_nonzero, u0_is_one);
-            let (vv0_lo, vv0_hi) = split_mul_if(vi, v0, v0_nonzero, v0_is_one);
-            let (uu1_lo, uu1_hi) = split_mul_if(ui, u1, u1_nonzero, u1_is_one);
-            let (vv1_lo, vv1_hi) = split_mul_if(vi, v1, v1_nonzero, v1_is_one);
-
-            // SAFETY: the caller resized `u` to `max_len`, and `i < max_len`.
-            let u_slot = unsafe { u.get_unchecked_mut(i) };
-            assign_diff(u_slot, &mut carry_u, uu0_lo, uu0_hi, vv0_lo, vv0_hi);
-
-            // SAFETY: the caller resized `v` to `max_len`, and `i < max_len`.
-            let v_slot = unsafe { v.get_unchecked_mut(i) };
-            assign_diff(v_slot, &mut carry_v, vv1_lo, vv1_hi, uu1_lo, uu1_hi);
-        }
+    let (u_pos_coeff, u_neg_coeff, v_pos_coeff, v_neg_coeff) = if even {
+        (u0, v0, v1, u1)
     } else {
-        for i in 0..max_len {
-            // SAFETY: u is filled up to max_len above; i < max_len
-            let ui = unsafe { *u.get_unchecked(i) };
-            // SAFETY: v is filled up to max_len above; i < max_len
-            let vi = unsafe { *v.get_unchecked(i) };
+        (v0, u0, u1, v1)
+    };
 
-            let (uu0_lo, uu0_hi) = split_mul_if(ui, u0, u0_nonzero, u0_is_one);
-            let (vv0_lo, vv0_hi) = split_mul_if(vi, v0, v0_nonzero, v0_is_one);
-            let (uu1_lo, uu1_hi) = split_mul_if(ui, u1, u1_nonzero, u1_is_one);
-            let (vv1_lo, vv1_hi) = split_mul_if(vi, v1, v1_nonzero, v1_is_one);
+    let u_orig_len = *u_len;
+    let v_orig_len = *v_len;
 
-            // SAFETY: the caller resized `u` to `max_len`, and `i < max_len`.
-            let u_slot = unsafe { u.get_unchecked_mut(i) };
-            assign_diff(u_slot, &mut carry_u, vv0_lo, vv0_hi, uu0_lo, uu0_hi);
+    for i in 0..max_len {
+        let ui = if i < u_orig_len {
+            // SAFETY: i < u_orig_len <= u.len()
+            unsafe { *u.get_unchecked(i) }
+        } else {
+            0
+        };
+        let vi = if i < v_orig_len {
+            // SAFETY: i < v_orig_len <= v.len()
+            unsafe { *v.get_unchecked(i) }
+        } else {
+            0
+        };
 
-            // SAFETY: the caller resized `v` to `max_len`, and `i < max_len`.
-            let v_slot = unsafe { v.get_unchecked_mut(i) };
-            assign_diff(v_slot, &mut carry_v, uu1_lo, uu1_hi, vv1_lo, vv1_hi);
+        let (u_pos_val, u_neg_val) = if even { (ui, vi) } else { (vi, ui) };
+        let (u_pos_lo, u_pos_hi) = ArchKernels::mul_limb_lo_hi(u_pos_val, u_pos_coeff);
+        let (u_neg_lo, u_neg_hi) = ArchKernels::mul_limb_lo_hi(u_neg_val, u_neg_coeff);
+        let u_lo_diff = (u_pos_lo as i128)
+            .wrapping_sub(u_neg_lo as i128)
+            .wrapping_add(carry_u);
+        let u_lo = (u_lo_diff.cast_unsigned() & Limb::MAX as u128) as Limb;
+        let u_hi_carry = u_lo_diff.wrapping_shr(limb_bits_u32);
+        carry_u = (u_pos_hi as i128)
+            .wrapping_sub(u_neg_hi as i128)
+            .wrapping_add(u_hi_carry);
+
+        let (v_pos_val, v_neg_val) = if even { (vi, ui) } else { (ui, vi) };
+        let (v_pos_lo, v_pos_hi) = ArchKernels::mul_limb_lo_hi(v_pos_val, v_pos_coeff);
+        let (v_neg_lo, v_neg_hi) = ArchKernels::mul_limb_lo_hi(v_neg_val, v_neg_coeff);
+        let v_lo_diff = (v_pos_lo as i128)
+            .wrapping_sub(v_neg_lo as i128)
+            .wrapping_add(carry_v);
+        let v_lo = (v_lo_diff.cast_unsigned() & Limb::MAX as u128) as Limb;
+        let v_hi_carry = v_lo_diff.wrapping_shr(limb_bits_u32);
+        carry_v = (v_pos_hi as i128)
+            .wrapping_sub(v_neg_hi as i128)
+            .wrapping_add(v_hi_carry);
+
+        // SAFETY: u_backup and v_backup were resized to max_len; i < max_len
+        unsafe {
+            *u_backup.get_unchecked_mut(i) = u_lo;
+            *v_backup.get_unchecked_mut(i) = v_lo;
         }
     }
 
     if carry_u != 0 || carry_v != 0 {
-        // SAFETY: `u_backup.len()` equals the original `u_len`, which is at
-        // most the caller-provided `u.len() = max_len`.
-        unsafe { u.get_unchecked_mut(..u_backup.len()) }.copy_from_slice(u_backup);
-        // SAFETY: `v_backup.len()` equals the original `v_len`, which is at
-        // most the caller-provided `v.len() = max_len`.
-        unsafe { v.get_unchecked_mut(..v_backup.len()) }.copy_from_slice(v_backup);
-        *u_len = u_backup.len();
-        *v_len = v_backup.len();
         return false;
+    }
+
+    // SAFETY: u and v have at least max_len allocated capacity; u_backup and v_backup have max_len elements.
+    unsafe {
+        u.get_unchecked_mut(..max_len).copy_from_slice(u_backup);
+        v.get_unchecked_mut(..max_len).copy_from_slice(v_backup);
     }
 
     let mut new_u_len = max_len;

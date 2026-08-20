@@ -40,7 +40,7 @@ impl TuneSession {
     /// been collected. The margin and score cache are established exactly once.
     #[must_use]
     pub fn new(
-        defaults: TuningProfile,
+        defaults: &TuningProfile,
         calibration: Calibration,
         machine_dir: PathBuf,
         cpu: String,
@@ -52,8 +52,8 @@ impl TuneSession {
             calibration.timing_bucket_ms,
         );
         Self {
-            profile: defaults,
-            defaults,
+            profile: *defaults,
+            defaults: *defaults,
             calibration,
             margin_ppm,
             harness,
@@ -79,7 +79,7 @@ mod tests {
     fn session_starts_with_an_independent_candidate_copy() {
         let defaults = TuningProfile::default();
         let session = TuneSession::new(
-            defaults,
+            &defaults,
             Calibration {
                 noise_cv: 0.01,
                 timing_bucket_ms: 2,
@@ -97,7 +97,7 @@ mod tests {
     fn record_preserves_order_and_owns_text() {
         let defaults = TuningProfile::default();
         let mut session = TuneSession::new(
-            defaults,
+            &defaults,
             Calibration {
                 noise_cv: 0.01,
                 timing_bucket_ms: 2,

@@ -16,24 +16,10 @@ impl InternalMpUint {
     #[inline]
     #[must_use]
     pub fn bitand(&self, rhs: &Self) -> Self {
-        if let (UintRepr::Inline { len: l1, limbs: a }, UintRepr::Inline { len: l2, limbs: b }) =
-            (&self.repr, &rhs.repr)
-        {
-            let min_len = min(*l1, *l2);
-            let mut arr = [0; INLINE_LIMBS];
-            for (i, v) in arr.iter_mut().enumerate().take(usize::from(min_len)) {
-                // SAFETY: i < min_len <= INLINE_LIMBS, and both inline arrays
-                // have exactly INLINE_LIMBS elements.
-                *v = unsafe { a.get_unchecked(i) & b.get_unchecked(i) };
-            }
-            let mut res = Self {
-                repr: UintRepr::Inline {
-                    len: min_len,
-                    limbs: arr,
-                },
-            };
-            res.normalize();
-            return res;
+        if self.limbs().len() <= INLINE_LIMBS && rhs.limbs().len() <= INLINE_LIMBS {
+            let [a0, a1, a2, a3] = self.extract_4();
+            let [b0, b1, b2, b3] = rhs.extract_4();
+            return Self::from_limbs_4(a0 & b0, a1 & b1, a2 & b2, a3 & b3);
         }
 
         let a = self.limbs();
@@ -62,34 +48,10 @@ impl InternalMpUint {
     #[inline]
     #[must_use]
     pub fn bitor(&self, rhs: &Self) -> Self {
-        if let (UintRepr::Inline { len: l1, limbs: a }, UintRepr::Inline { len: l2, limbs: b }) =
-            (&self.repr, &rhs.repr)
-        {
-            let max_len = max(*l1, *l2);
-            let mut arr = [0; INLINE_LIMBS];
-            for (i, v) in arr.iter_mut().enumerate().take(usize::from(max_len)) {
-                let a_val = if i < usize::from(*l1) {
-                    // SAFETY: i < l1 <= INLINE_LIMBS, so the index is within the array bounds
-                    unsafe { *a.get_unchecked(i) }
-                } else {
-                    0
-                };
-                let b_val = if i < usize::from(*l2) {
-                    // SAFETY: i < l2 <= INLINE_LIMBS, so the index is within the array bounds
-                    unsafe { *b.get_unchecked(i) }
-                } else {
-                    0
-                };
-                *v = a_val | b_val;
-            }
-            let mut res = Self {
-                repr: UintRepr::Inline {
-                    len: max_len,
-                    limbs: arr,
-                },
-            };
-            res.normalize();
-            return res;
+        if self.limbs().len() <= INLINE_LIMBS && rhs.limbs().len() <= INLINE_LIMBS {
+            let [a0, a1, a2, a3] = self.extract_4();
+            let [b0, b1, b2, b3] = rhs.extract_4();
+            return Self::from_limbs_4(a0 | b0, a1 | b1, a2 | b2, a3 | b3);
         }
 
         let a = self.limbs();
@@ -132,34 +94,10 @@ impl InternalMpUint {
     #[inline]
     #[must_use]
     pub fn bitxor(&self, rhs: &Self) -> Self {
-        if let (UintRepr::Inline { len: l1, limbs: a }, UintRepr::Inline { len: l2, limbs: b }) =
-            (&self.repr, &rhs.repr)
-        {
-            let max_len = max(*l1, *l2);
-            let mut arr = [0; INLINE_LIMBS];
-            for (i, v) in arr.iter_mut().enumerate().take(usize::from(max_len)) {
-                let a_val = if i < usize::from(*l1) {
-                    // SAFETY: i < l1 <= INLINE_LIMBS, so the index is within the array bounds
-                    unsafe { *a.get_unchecked(i) }
-                } else {
-                    0
-                };
-                let b_val = if i < usize::from(*l2) {
-                    // SAFETY: i < l2 <= INLINE_LIMBS, so the index is within the array bounds
-                    unsafe { *b.get_unchecked(i) }
-                } else {
-                    0
-                };
-                *v = a_val ^ b_val;
-            }
-            let mut res = Self {
-                repr: UintRepr::Inline {
-                    len: max_len,
-                    limbs: arr,
-                },
-            };
-            res.normalize();
-            return res;
+        if self.limbs().len() <= INLINE_LIMBS && rhs.limbs().len() <= INLINE_LIMBS {
+            let [a0, a1, a2, a3] = self.extract_4();
+            let [b0, b1, b2, b3] = rhs.extract_4();
+            return Self::from_limbs_4(a0 ^ b0, a1 ^ b1, a2 ^ b2, a3 ^ b3);
         }
 
         let a = self.limbs();

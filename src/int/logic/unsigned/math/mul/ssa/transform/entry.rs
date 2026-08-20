@@ -7,10 +7,11 @@
 
 use crate::parallel::ParallelExecutor;
 
-use super::{
-    ArchKernels, Limb, SsaRing, SsaTransform, fft_recursive_dif_with_executor,
-    fft_recursive_dit_with_executor, recurse_dif_pair,
-};
+use super::{ArchKernels, Limb, SsaRing, SsaTransform};
+
+/// Minimum transform width for recursive fork/join. Smaller transforms stay
+/// contiguous and sequential because scheduling overhead dominates their work.
+const MIN_PARALLEL_TRANSFORM_LEN: usize = 8;
 
 /// Namespace for the Fermat-ring FFT: the butterflies, the matrix addressing
 /// they run over, and the transforms that drive them end to end.
@@ -72,6 +73,9 @@ impl SsaTransform {
         executor: &E,
         scratch: &mut [Limb],
     ) {
+        if transform_len < 2 {
+            return;
+        }
         let cl = SsaRing::coeff_limbs(mod_bits);
         let period = mod_bits.wrapping_mul(2);
         let add_sub_kernel = ArchKernels::selected_add_sub_from_limbs_unchecked();
@@ -80,23 +84,25 @@ impl SsaTransform {
             if upper_half_zero {
                 let half_len = transform_len >> 1;
                 let half_matrix_len = half_len.wrapping_mul(cl);
-                // SAFETY: the validated matrix contains exactly two halves of
-                // `half_len` complete coefficients.
+                // SAFETY: `upper_half_zero` is asserted by the caller, so the
+                // upper half is non-aliased and valid.
                 let (low_matrix, high_matrix) =
                     unsafe { matrix.split_at_mut_unchecked(half_matrix_len) };
-                debug_assert!(
-                    high_matrix.iter().all(|limb| *limb == 0),
-                    "the specialized DIF stage requires a zero upper matrix half"
-                );
                 let mut twiddle_shift = 0_usize;
-                for (low_slot, high_slot) in low_matrix
-                    .chunks_exact_mut(cl)
-                    .zip(high_matrix.chunks_exact_mut(cl))
-                {
-                    // With high=0, the first DIF butterfly is exactly
-                    // (low+high, (low-high)*w) = (low, low*w).
+                for i in 0..half_len {
+                    let offset = i.wrapping_mul(cl);
+                    // SAFETY: `i < half_len` ensures the slot is within the first half.
+                    let low_slot =
+                        unsafe { low_matrix.get_unchecked_mut(offset..offset.wrapping_add(cl)) };
+                    // SAFETY: `i < half_len` ensures the slot is within the second half.
+                    let high_slot =
+                        unsafe { high_matrix.get_unchecked_mut(offset..offset.wrapping_add(cl)) };
                     if twiddle_shift == 0 {
-                        high_slot.copy_from_slice(low_slot);
+                        // SAFETY: both slots have cl limbs and are disjoint.
+                        let dest = unsafe { high_slot.get_unchecked_mut(..cl) };
+                        // SAFETY: low_slot has at least cl limbs.
+                        let src = unsafe { low_slot.get_unchecked(..cl) };
+                        dest.copy_from_slice(src);
                     } else {
                         // SAFETY: low_slot and high_slot are disjoint cl-limb
                         // spans and the low coefficient is canonical.
@@ -114,11 +120,11 @@ impl SsaTransform {
                 let next_root = SsaRing::reduce_mod_period(root_shift.wrapping_mul(2), period);
                 // SAFETY: both halves are complete `half_len * cl` coefficient spans
                 // and `scratch` still holds at least `cl` limbs.
-                if should_parallelize(half_len, cl, scratch.len(), executor) {
+                if Self::should_parallelize(half_len, cl, scratch.len(), executor) {
                     // SAFETY: the helper partitions scratch into private slots;
                     // the two matrix halves are disjoint.
                     unsafe {
-                        recurse_dif_pair(
+                        Self::recurse_dif_pair(
                             low_matrix,
                             high_matrix,
                             half_len,
@@ -133,7 +139,7 @@ impl SsaTransform {
                     // SAFETY: both halves are complete and the sequential path
                     // reuses scratch only after each child returns.
                     unsafe {
-                        fft_recursive_dif_with_executor(
+                        Self::fft_recursive_dif_with_executor(
                             low_matrix,
                             half_len,
                             next_root,
@@ -142,7 +148,7 @@ impl SsaTransform {
                             add_sub_kernel,
                             executor,
                         );
-                        fft_recursive_dif_with_executor(
+                        Self::fft_recursive_dif_with_executor(
                             high_matrix,
                             half_len,
                             next_root,
@@ -157,7 +163,7 @@ impl SsaTransform {
                 // SAFETY: the caller guarantees `transform_len * cl` limbs and a
                 // `cl`-limb scratch slot.
                 unsafe {
-                    fft_recursive_dif_with_executor(
+                    Self::fft_recursive_dif_with_executor(
                         matrix,
                         transform_len,
                         SsaRing::reduce_mod_period(root_shift, period),
@@ -174,7 +180,7 @@ impl SsaTransform {
         // SAFETY: the caller guarantees `transform_len * cl` limbs and a `cl`-limb
         // scratch slot.
         unsafe {
-            fft_recursive_dit_with_executor(
+            Self::fft_recursive_dit_with_executor(
                 matrix,
                 transform_len,
                 SsaRing::reduce_mod_period(root_shift, period),
@@ -213,11 +219,11 @@ impl SsaTransform {
         let next_root = SsaRing::reduce_mod_period(root_shift.wrapping_mul(2), period);
         // SAFETY: both halves are complete `half_len * cl` coefficient spans
         // and `scratch` still holds at least `cl` limbs.
-        if should_parallelize(half_len, cl, scratch.len(), executor) {
+        if Self::should_parallelize(half_len, cl, scratch.len(), executor) {
             // SAFETY: the helper partitions scratch into private slots; the two
             // matrix halves are disjoint.
             unsafe {
-                recurse_dif_pair(
+                Self::recurse_dif_pair(
                     low_matrix,
                     high_matrix,
                     half_len,
@@ -232,7 +238,7 @@ impl SsaTransform {
             // SAFETY: both halves are complete and the sequential path reuses
             // scratch only after each child returns.
             unsafe {
-                fft_recursive_dif_with_executor(
+                Self::fft_recursive_dif_with_executor(
                     low_matrix,
                     half_len,
                     next_root,
@@ -241,7 +247,7 @@ impl SsaTransform {
                     add_sub_kernel,
                     executor,
                 );
-                fft_recursive_dif_with_executor(
+                Self::fft_recursive_dif_with_executor(
                     high_matrix,
                     half_len,
                     next_root,
@@ -253,33 +259,29 @@ impl SsaTransform {
             }
         }
     }
-}
 
-/// Minimum transform width for recursive fork/join. Smaller transforms stay
-/// contiguous and sequential because scheduling overhead dominates their work.
-const MIN_PARALLEL_TRANSFORM_LEN: usize = 8;
+    /// Centralized grain and scratch policy for recursive transform splitting.
+    pub fn should_parallelize<E: ParallelExecutor>(
+        transform_len: usize,
+        coeff_limbs: usize,
+        scratch_len: usize,
+        executor: &E,
+    ) -> bool {
+        let workers = executor.parallelism().get();
+        let Some(two_slots) = coeff_limbs.checked_mul(2) else {
+            return false;
+        };
+        transform_len >= MIN_PARALLEL_TRANSFORM_LEN
+            && transform_len >= workers.saturating_mul(2)
+            && scratch_len >= two_slots
+    }
 
-/// Centralized grain and scratch policy for recursive transform splitting.
-pub fn should_parallelize<E: ParallelExecutor>(
-    transform_len: usize,
-    coeff_limbs: usize,
-    scratch_len: usize,
-    executor: &E,
-) -> bool {
-    let workers = executor.parallelism().get();
-    let Some(two_slots) = coeff_limbs.checked_mul(2) else {
-        return false;
-    };
-    transform_len >= MIN_PARALLEL_TRANSFORM_LEN
-        && transform_len >= workers.saturating_mul(2)
-        && scratch_len >= two_slots
-}
-
-/// A radix-4 level can expose two independent child pairs when four private
-/// coefficient slots are available. This is a structural scratch condition,
-/// not a machine-specific grain threshold.
-pub fn can_fork_four(coeff_limbs: usize, scratch_len: usize) -> bool {
-    coeff_limbs
-        .checked_mul(4)
-        .is_some_and(|four_slots| scratch_len >= four_slots)
+    /// A radix-4 level can expose two independent child pairs when four private
+    /// coefficient slots are available. This is a structural scratch condition,
+    /// not a machine-specific grain threshold.
+    pub fn can_fork_four(coeff_limbs: usize, scratch_len: usize) -> bool {
+        coeff_limbs
+            .checked_mul(4)
+            .is_some_and(|four_slots| scratch_len >= four_slots)
+    }
 }

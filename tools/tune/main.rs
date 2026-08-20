@@ -213,7 +213,7 @@ fn start_tuning_session() -> session::TuneSession {
     );
     let date = platform::today();
     let machine_dir = store::machine_dir(&cpu);
-    let mut session = session::TuneSession::new(defaults, calibration, machine_dir, cpu, date);
+    let mut session = session::TuneSession::new(&defaults, calibration, machine_dir, cpu, date);
     session.record(
         "MEASUREMENT_CALIBRATION",
         format!(

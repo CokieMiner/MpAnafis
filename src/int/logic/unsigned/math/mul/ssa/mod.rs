@@ -61,7 +61,7 @@ use super::{
     Addition, ArchKernels, LIMB_BITS, Limb, MulPlan, Multiplication, SSA_BASE_MODULUS_BITS,
     SSA_BASECASE_COST_WEIGHT_16THS, SSA_BNM1_BASECASE_LIMBS, SSA_COEFFICIENT_VISIT_OVERHEAD,
     SSA_DIRECT_SHIFT_MAX_LIMBS, SSA_NEGACYCLIC_FACTOR3_THRESHOLD, SSA_NEGACYCLIC_FACTOR5_THRESHOLD,
-    SSA_NESTED_COST_PENALTY_16THS, SharedEval, TierCeiling,
+    SSA_NESTED_COST_PENALTY_16THS, SharedEval, SquarePlan, TierCeiling,
 };
 
 // Every submodule reaches its siblings' namespaces through `super::`, so this is

@@ -21,14 +21,14 @@ products, transform backends, scratch ownership, dispatch, and tuning.
 - Multiplication and squaring have independent thresholds and scratch models.
 - Thresholds and hardware-sensitive kernel choices come from the generated
   tuning profile. Generic algorithm files contain no personal-machine values.
-- NTT remains registered but production-disabled until its correctness,
-  scratch, coverage, and performance gates below are complete.
+- Multi-prime NTT is archived in `discarded/ntt/`; production large-integer
+  transform multiplication is driven by the cache-oblivious Fermat-ring SSA engine.
 
 ## 2. Implemented tower
 
 | Family | Status | Role |
 |---|---|---|
-| Schoolbook | production | Quadratic basecase; architecture kernels own the hot limb loops (`mul_basecase_unchecked`, `mul_2_limbs_unchecked`, `add_mul_2_limbs_unchecked`). |
+| Schoolbook | production | Quadratic basecase; architecture kernels own the hot limb loops (`mul_basecase_unchecked`, `mul_2_limbs_unchecked`, `add_mul_2_limbs_unchecked`, unrolled `sqr_1..6, 8`). |
 | Karatsuba / Toom-2 | production | First subquadratic balanced tier and recursive child tier; stack scratch buffer for shallow depths. |
 | Toom-3 | production | Five point products; also retained where higher splits collapse. |
 | Toom-4 | production | Seven point products for the middle balanced range. |
@@ -38,8 +38,7 @@ products, transform backends, scratch ownership, dispatch, and tuning.
 | Toom-4×3 | production | Fractional split for selected ratios from 4:3 toward 2:1. |
 | Lopsided blocking | production | Partitions a long operand into blocks that land on an efficient balanced tier. |
 | Low product | production | Computes only the required low limbs for consumers (division, Barrett reduction, reciprocal iteration). |
-| Schönhage-Strassen (SSA) | production | Exact large multiplication over Fermat rings $2^N + 1$, including dedicated squaring, memoized scratch bounds, and optional multithreaded pointwise products. |
-| Multi-prime NTT | incomplete, disabled | Exact one-, two-, or three-prime convolution; registered for tests and tuning work only. |
+| Schönhage-Strassen (SSA) | production | Exact large multiplication over Fermat rings $2^N + 1$, including dedicated squaring, odd-factor negacyclic factor-3 & factor-5 splits, $8 \times 8$ matrix cache-blocking, and parallel pointwise execution. |
 
 The production selector offers large transforms before conventional shape
 tests, then fractional Toom, lopsided blocking, and finally the balanced tower.
@@ -80,72 +79,31 @@ benchmarks. Revisit one only with a new mechanism and isolated evidence.
 
 ## 4. Priority roadmap
 
-### 4.1 Finish the existing exact NTT
+### 4.1 Production Fermat-Ring SSA Transform
 
-This is the main opportunity to change the large-size scaling curve. The
-current NTT already has exact coefficient bounds, fixed roots, one Goldilocks
-prime, three 31-bit primes, CRT reconstruction, forced-plan tests, and a
-capability predicate. It is not production-ready because it allocates vectors
-inside the convolution, uses only radix-2 scalar transforms, has a fixed
-power-of-two length ceiling, and is not yet competitive with SSA.
+The primary large-integer multiplication transform is the cache-oblivious
+Fermat-ring SSA engine ($Z/(2^N+1)$). Because twiddle multiplications by $\omega = 2^k$
+are pure bit-shifts and limb rotations ($0$ arithmetic multiplications), SSA eliminates
+the 3-prime FMA and CRT overhead of floating-point NTTs on multi-megabyte integers.
 
-Required order:
+Key architectural features:
+1. **Cache-oblivious 4-way radix-4 bisection**: Subtransforms recursively decompose
+   down to L1/L2 cache lines.
+2. **2D Matrix Transposition with $8 \times 8$ Cache Blocking**: Prevents L3 cache line
+   thrashing on multi-megabyte working sets.
+3. **Negacyclic Factor-3 and Factor-5 Decompositions**: Eliminates power-of-two padding
+   cliffs with exact $3 \cdot 2^k$ and $5 \cdot 2^k$ transforms.
+4. **SIMD ADX Dual-Carry Butterfly**: Executes `adcxq` for sum and `notq` + `adoxq` for difference
+   simultaneously in physical CPU condition codes.
+5. **Caller-Owned Reusable Scratch**: Guarantees zero heap allocation on the hot path.
 
-1. Give `Ntt` an exact caller-owned scratch layout for digit conversion,
-   transforms, CRT, and carry reconstruction.
-2. Add dedicated squaring instead of routing a square through general
-   multiplication.
-3. Extend the prime/root budget far enough that every intended production size
-   has a proved coefficient range and transform length.
-4. Fuse input conversion and output CRT/carry passes where this reduces memory
-   traffic without weakening the bounds.
-5. Add radix-4 or radix-8 butterflies and lazy reduction, retaining a scalar
-   portable implementation.
-6. Tune forced NTT against forced SSA and Toom-8.5, then tune production
-   dispatch separately.
-7. Set `NTT_THRESHOLD` only after threshold-neighbour properties, architecture
-   checks, and fresh pinned A/B/B/A measurements pass.
+### 4.2 Multi-Prime Floating-Point NTT (Archived Reference)
 
-Small-prime NTT multiplication is a production-proven algorithm class. FLINT's
-`fft_small` uses multiple word-size primes, CRT contexts, and truncated FFTs;
-its documentation requires AVX2 or NEON for that implementation. The algorithm
-does not inherently require SIMD, so the scalar version remains the portability
-baseline. See [FLINT `fft_small`](https://flintlib.org/doc/fft_small.html).
+The 3-prime 50-bit floating-point Harvey NTT engine (with AVX2 FMA butterflies,
+Truncated Fourier Transform codelets, and Garner CRT reconstruction) is preserved
+in `discarded/ntt/` for reference and future multidimensional polynomial exploration.
 
-### 4.2 Make the NTT backend family explicit
-
-These are alternative kernels under one exact NTT plan, not three unrelated
-top-level algorithms:
-
-- **I31 scalar/SIMD.** Residues below `2^31`, `u32 × u32 -> u64`, with Barrett,
-  Montgomery, or Shoup reduction. Scalar is portable; AVX2 and AVX-512 can
-  process independent residue lanes.
-- **FP50.** FLINT-style word-prime arithmetic held in floating-point lanes.
-  This is attractive on AVX2/NEON hardware, but its exactness proof must cover
-  every intermediate and cannot be inferred from FLINT's implementation.
-- **IFMA52.** An experimental AVX-512 backend using 52-bit fused multiply-add
-  primitives. It needs its own modulus family, reduction proof, overflow
-  accounting, and frequency-sensitive benchmarks.
-
-The tuner chooses among available kernels. No architecture backend is allowed
-to change the exact digit/CRT contract seen by the planner.
-
-### 4.3 Reduce transform padding
-
-After the radix-2 NTT is competitive, add in this order:
-
-1. mixed lengths `2^k`, `3*2^k`, and `5*2^k` through small outer codelets;
-2. truncated forward and inverse transforms;
-3. in-place variants only if peak memory is a real constraint.
-
-A truncated Fourier transform computes only the coefficients that the product
-needs and smooths the power-of-two cliffs. In-place TFTs with `O(1)` auxiliary
-space and cache-friendly TFTs for large coefficients are published, but their
-extra control flow is worthwhile only after the underlying butterfly is fast.
-See [Harvey and Roche](https://arxiv.org/abs/1001.5272) and
-[Harvey's cache-friendly TFT](https://arxiv.org/abs/0810.3203).
-
-### 4.4 Improve partial products
+### 4.3 Improve partial products
 
 `LowProduct` exists. Add high and middle products only through real consumers:
 

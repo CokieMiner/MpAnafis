@@ -16,8 +16,8 @@
 use alloc::{vec, vec::Vec};
 
 use super::super::{
-    KARATSUBA_THRESHOLD, Limb, NTT_THRESHOLD, SQR_KARATSUBA_THRESHOLD, SQR_TOOM_COOK_THRESHOLD,
-    SSA_THRESHOLD, TOOM_COOK_85_THRESHOLD, TOOM_COOK_THRESHOLD,
+    KARATSUBA_THRESHOLD, Limb, SQR_KARATSUBA_THRESHOLD, SQR_TOOM_COOK_THRESHOLD, SSA_THRESHOLD,
+    TOOM_COOK_85_THRESHOLD, TOOM_COOK_THRESHOLD,
     dispatch::{LargePlan, MulPlan, Multiplication, SquarePlan, TierCeiling, Widths},
 };
 
@@ -369,13 +369,7 @@ fn disabled_crossovers_are_never_selected() {
     // through any shape.
     for (larger, smaller) in probe_shapes() {
         let plan = Multiplication::select_plan(larger, smaller, TierCeiling::Full);
-        if NTT_THRESHOLD == 0 {
-            assert_ne!(
-                plan,
-                MulPlan::Large(LargePlan::Ntt),
-                "{larger}x{smaller} selected a disabled tier"
-            );
-        }
+        #[cfg(not(target_pointer_width = "16"))]
         if SSA_THRESHOLD == 0 {
             assert_ne!(
                 plan,

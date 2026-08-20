@@ -281,6 +281,14 @@ impl Division {
         let v_limbs = Self::significant_limbs(den_b.limbs());
         let u_limbs = Self::significant_limbs(num_a.limbs());
 
+        if v_limbs.len() == 1 {
+            // SAFETY: v_limbs.len() == 1 so index 0 is valid.
+            let v0 = unsafe { *v_limbs.get_unchecked(0) };
+            let rem = Self::div_rem_1::<true>(u_limbs, v0, quotient_out);
+            *rem_out = InternalMpUint::from_limb(rem);
+            return;
+        }
+
         if u_limbs.len() <= v_limbs.len().wrapping_add(1) {
             Self::algorithm_d(num_a, den_b, quotient_out, rem_out, scratch);
             return;
@@ -311,7 +319,12 @@ impl Division {
         if !Self::trivial::<false, true>(num_a, den_b, &mut dummy_quot, rem_out) {
             let v_limbs = Self::significant_limbs(den_b.limbs());
             let u_limbs = Self::significant_limbs(num_a.limbs());
-            if u_limbs.len() <= v_limbs.len().wrapping_add(1) {
+            if v_limbs.len() == 1 {
+                // SAFETY: v_limbs.len() == 1 so index 0 is valid.
+                let v0 = unsafe { *v_limbs.get_unchecked(0) };
+                let rem = Self::div_rem_1::<false>(u_limbs, v0, &mut dummy_quot);
+                *rem_out = InternalMpUint::from_limb(rem);
+            } else if u_limbs.len() <= v_limbs.len().wrapping_add(1) {
                 Self::algorithm_d_rem(num_a, den_b, rem_out, scratch);
             } else if v_limbs.len() >= NEWTON_RAPHSON_THRESHOLD {
                 Self::newton(num_a, den_b, &mut dummy_quot, rem_out, scratch);

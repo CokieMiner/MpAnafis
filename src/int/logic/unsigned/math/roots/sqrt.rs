@@ -37,17 +37,19 @@ impl SqrtScratch {
             return Some(a.clone());
         }
 
-        let limbs = a.limbs();
-        if limbs.len() == 1 {
-            // SAFETY: len == 1 so get_unchecked is safe.
-            let val = unsafe { *limbs.get_unchecked(0) };
-            return Some(InternalMpUint::from_limb(val.isqrt()));
+        let len = a.limbs().len();
+        if len > 4 {
+            return None;
         }
 
-        if limbs.len() == 2 {
-            // SAFETY: limbs length is exactly 2, so 0 and 1 are in bounds.
-            let (lo, hi) = unsafe { (*limbs.get_unchecked(0), *limbs.get_unchecked(1)) };
-            let val = ((hi as DoubleLimb) << LIMB_BITS) | (lo as DoubleLimb);
+        let [a0, a1, a2, a3] = a.extract_4();
+
+        if len == 1 {
+            return Some(InternalMpUint::from_limb(a0.isqrt()));
+        }
+
+        if len == 2 {
+            let val = ((a1 as DoubleLimb) << LIMB_BITS) | (a0 as DoubleLimb);
             let root = val.isqrt() as Limb;
             return Some(InternalMpUint::from_limb(root));
         }
@@ -55,84 +57,73 @@ impl SqrtScratch {
         // Zimmermann 2-by-1 step: assembles 4 limbs into two DoubleLimb halves
         // and computes isqrt via a single correction round. All arithmetic uses
         // DoubleLimb so the step is portable across 16-, 32-, and 64-bit targets.
-        if limbs.len() == 3 || limbs.len() == 4 {
-            // SAFETY: limbs length is 3 or 4, so 0, 1, 2 exist, and 3 exists if len == 4.
-            let (a0, a1, a2, a3) = unsafe {
-                let a0 = *limbs.get_unchecked(0);
-                let a1 = *limbs.get_unchecked(1);
-                let a2 = *limbs.get_unchecked(2);
-                let a3 = if limbs.len() == 4 {
-                    *limbs.get_unchecked(3)
-                } else {
-                    0
-                };
-                (a0, a1, a2, a3)
-            };
+        let np_hi = ((a3 as DoubleLimb) << LIMB_BITS) | (a2 as DoubleLimb);
+        let np_lo = ((a1 as DoubleLimb) << LIMB_BITS) | (a0 as DoubleLimb);
 
-            let np_hi = ((a3 as DoubleLimb) << LIMB_BITS) | (a2 as DoubleLimb);
-            let np_lo = ((a1 as DoubleLimb) << LIMB_BITS) | (a0 as DoubleLimb);
-
-            if np_hi == 0 {
-                let root = np_lo.isqrt() as Limb;
-                return Some(InternalMpUint::from_limb(root));
-            }
-
-            let lz = (np_hi.leading_zeros() & !1) as usize;
-            let (norm_hi, norm_lo) = if lz == 0 {
-                (np_hi, np_lo)
-            } else {
-                let hi = (np_hi << lz) | (np_lo >> ((LIMB_BITS * 2).wrapping_sub(lz)));
-                let lo = np_lo << lz;
-                (hi, lo)
-            };
-
-            let sp0 = norm_hi.isqrt();
-            let rp0_init = norm_hi.wrapping_sub(sp0.wrapping_mul(sp0));
-
-            let rp0 = (rp0_init << (LIMB_BITS.wrapping_sub(1)))
-                | (norm_lo >> (LIMB_BITS.wrapping_add(1)));
-            // SAFETY: np_hi > 0 guarantees norm_hi >= 1, so sp0 = isqrt(norm_hi) >= 1 (non-zero).
-            let mut q = unsafe { rp0.checked_div(sp0).unwrap_unchecked() };
-            let one = DoubleLimb::from(1_u8);
-            if q >= one << LIMB_BITS {
-                q = (one << LIMB_BITS).wrapping_sub(1);
-            }
-            let u = rp0.wrapping_sub(q.wrapping_mul(sp0));
-            let mut root_128 = (sp0 << LIMB_BITS) | q;
-            let mut cc: isize = (u >> (LIMB_BITS.wrapping_sub(1))) as isize;
-            let mut rem_128 = (u << (LIMB_BITS.wrapping_add(1)))
-                | (norm_lo & ((one << (LIMB_BITS.wrapping_add(1))).wrapping_sub(1)));
-            let q2 = q.wrapping_mul(q);
-            if rem_128 < q2 {
-                cc = cc.wrapping_sub(1);
-            }
-            rem_128 = rem_128.wrapping_sub(q2);
-
-            while cc < 0 {
-                let (r1, c1) = rem_128.overflowing_add(root_128);
-                if c1 {
-                    cc = cc.wrapping_add(1);
-                }
-                root_128 = root_128.wrapping_sub(1);
-                let (r2, c2) = r1.overflowing_add(root_128);
-                if c2 {
-                    cc = cc.wrapping_add(1);
-                }
-                rem_128 = r2;
-                cc = cc.wrapping_add(1);
-            }
-
-            if lz > 0 {
-                root_128 >>= lz >> 1;
-            }
-
-            let r_lo = root_128 as Limb;
-            let r_hi = (root_128 >> LIMB_BITS) as Limb;
-
-            return Some(InternalMpUint::from_limbs_2(r_lo, r_hi));
+        if np_hi == 0 {
+            let root = np_lo.isqrt() as Limb;
+            return Some(InternalMpUint::from_limb(root));
         }
 
-        None
+        let lz = (np_hi.leading_zeros() & !1) as usize;
+        let (norm_hi, norm_lo) = if lz == 0 {
+            (np_hi, np_lo)
+        } else {
+            let hi = (np_hi << lz) | (np_lo >> ((LIMB_BITS * 2).wrapping_sub(lz)));
+            let lo = np_lo << lz;
+            (hi, lo)
+        };
+
+        let sp0 = norm_hi.isqrt();
+        let rp0_init = norm_hi.wrapping_sub(sp0.wrapping_mul(sp0));
+
+        let rp0 =
+            (rp0_init << (LIMB_BITS.wrapping_sub(1))) | (norm_lo >> (LIMB_BITS.wrapping_add(1)));
+        // SAFETY: np_hi > 0 guarantees norm_hi >= 1, so sp0 = isqrt(norm_hi) >= 1 (non-zero).
+        let mut q = unsafe { rp0.checked_div(sp0).unwrap_unchecked() };
+        let one = DoubleLimb::from(1_u8);
+        if q >= one << LIMB_BITS {
+            q = (one << LIMB_BITS).wrapping_sub(1);
+        }
+        let u = rp0.wrapping_sub(q.wrapping_mul(sp0));
+        let mut root_128 = (sp0 << LIMB_BITS) | q;
+        #[allow(
+            clippy::as_conversions,
+            clippy::cast_possible_wrap,
+            clippy::cast_possible_truncation,
+            reason = "u >> (LIMB_BITS - 1) is a single bit in {0, 1} and fits in isize on 16/32/64-bit targets"
+        )]
+        let mut cc: isize = (u >> (LIMB_BITS.wrapping_sub(1))) as isize;
+        let mut rem_128 = (u << (LIMB_BITS.wrapping_add(1)))
+            | (norm_lo & ((one << (LIMB_BITS.wrapping_add(1))).wrapping_sub(1)));
+        let q2 = q.wrapping_mul(q);
+        if rem_128 < q2 {
+            cc = cc.wrapping_sub(1);
+        }
+        rem_128 = rem_128.wrapping_sub(q2);
+
+        while cc < 0 {
+            let (r1, c1) = rem_128.overflowing_add(root_128);
+            if c1 {
+                cc = cc.wrapping_add(1);
+            }
+            root_128 = root_128.wrapping_sub(1);
+            let (r2, c2) = r1.overflowing_add(root_128);
+            if c2 {
+                cc = cc.wrapping_add(1);
+            }
+            rem_128 = r2;
+            cc = cc.wrapping_add(1);
+        }
+
+        if lz > 0 {
+            root_128 >>= lz >> 1;
+        }
+
+        let r_lo = root_128 as Limb;
+        let r_hi = (root_128 >> LIMB_BITS) as Limb;
+
+        Some(InternalMpUint::from_limbs_2(r_lo, r_hi))
     }
 
     /// Computes the floor square root with Newton iteration.

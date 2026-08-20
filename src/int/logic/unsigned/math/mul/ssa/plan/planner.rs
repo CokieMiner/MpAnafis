@@ -177,8 +177,8 @@ impl FftPlan {
     }
 
     /// Scratch for the coefficient square stage with the given slot budget.
-    pub fn square_scratch_for_slots(&self, _slots: usize) -> usize {
-        self.pointwise_leaf_scratch()
+    pub fn square_scratch_for_slots(&self, slots: usize) -> usize {
+        self.pointwise_scratch_for_parallelism(slots)
     }
 
     /// Returns the per-operand twiddle-slot budget for an executor.
@@ -214,10 +214,14 @@ impl FftPlan {
     /// Scratch for a square transform with `slots` twiddle slots.
     pub fn transform_sqr_scratch_for_slots(&self, slots: usize) -> usize {
         let slot_count = slots.max(1);
+        let Some(twiddle) = self.inner_cl.checked_mul(slot_count) else {
+            return usize::MAX;
+        };
         self.mat_limbs
-            .saturating_add(self.inner_cl.saturating_mul(slot_count))
-            .saturating_add(self.square_scratch_for_slots(1))
-            .saturating_add(self.recon_len)
+            .checked_add(twiddle)
+            .and_then(|n| n.checked_add(self.square_scratch_for_slots(slot_count)))
+            .and_then(|n| n.checked_add(self.recon_len))
+            .unwrap_or(usize::MAX)
     }
 
     /// Computes the nested coefficient scratch needed by the pointwise stage.
