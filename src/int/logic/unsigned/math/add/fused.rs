@@ -56,12 +56,12 @@ impl InternalMpUint {
                     short_len,
                 )
             };
-            let (long_limbs, long_len) = if a_len >= b_len {
-                (a_limbs, a_len)
-            } else {
-                (b_limbs, b_len)
-            };
-            if long_len > short_len {
+            if a_len != b_len {
+                let (long_limbs, long_len) = if a_len > b_len {
+                    (a_limbs, a_len)
+                } else {
+                    (b_limbs, b_len)
+                };
                 let rem = long_len.wrapping_sub(short_len);
                 // SAFETY: both tails cover `rem` elements.
                 unsafe {
@@ -99,14 +99,15 @@ impl InternalMpUint {
         }
 
         if let UintRepr::Heap(ref mut limbs) = dst.repr {
-            if limbs.capacity() < max_len {
-                limbs.reserve(max_len.wrapping_sub(limbs.len()));
+            let required_capacity = max_len.wrapping_add(1);
+            if limbs.capacity() < required_capacity {
+                limbs.reserve(required_capacity.wrapping_sub(limbs.len()));
             }
             #[allow(
                 clippy::uninit_vec,
                 reason = "add_limbs_3_unchecked plus fused tail copy fill all max_len slots"
             )]
-            // SAFETY: capacity covers `max_len`; all slots are initialized below.
+            // SAFETY: capacity covers `required_capacity >= max_len + 1`; all slots are initialized below.
             unsafe {
                 limbs.set_len(max_len);
             }
@@ -120,12 +121,12 @@ impl InternalMpUint {
                     short_len,
                 )
             };
-            let (long_limbs, long_len) = if a_len >= b_len {
-                (a_limbs, a_len)
-            } else {
-                (b_limbs, b_len)
-            };
-            if long_len > short_len {
+            if a_len != b_len {
+                let (long_limbs, long_len) = if a_len > b_len {
+                    (a_limbs, a_len)
+                } else {
+                    (b_limbs, b_len)
+                };
                 let rem = long_len.wrapping_sub(short_len);
                 // SAFETY: both tails cover `rem` elements.
                 unsafe {
@@ -138,34 +139,40 @@ impl InternalMpUint {
                 }
             }
             if carry != 0 {
-                limbs.push(carry);
+                // SAFETY: capacity covers `max_len + 1` as ensured above.
+                unsafe {
+                    *dst_ptr.add(max_len) = carry;
+                    limbs.set_len(max_len.wrapping_add(1));
+                }
             }
             return;
         }
 
-        // SAFETY: storage is grown to `max_len`, and every returned slot is
-        // overwritten below.
-        let dst_limbs = unsafe { dst.ensure_capacity_set_len_get_limbs(max_len) };
+        let required_capacity = max_len.wrapping_add(1);
+        // SAFETY: storage is grown to `required_capacity`, and all `max_len` slots
+        // are overwritten below.
+        let dst_limbs = unsafe { dst.ensure_capacity_set_len_get_limbs(required_capacity) };
+        let dst_ptr = dst_limbs.as_mut_ptr();
         // SAFETY: all pointers cover `short_len`.
         let mut carry = unsafe {
             ArchKernels::add_limbs_3_unchecked(
-                dst_limbs.as_mut_ptr(),
+                dst_ptr,
                 a_limbs.as_ptr(),
                 b_limbs.as_ptr(),
                 short_len,
             )
         };
-        let (long_limbs, long_len) = if a_len >= b_len {
-            (a_limbs, a_len)
-        } else {
-            (b_limbs, b_len)
-        };
-        if long_len > short_len {
+        if a_len != b_len {
+            let (long_limbs, long_len) = if a_len > b_len {
+                (a_limbs, a_len)
+            } else {
+                (b_limbs, b_len)
+            };
             let rem = long_len.wrapping_sub(short_len);
             // SAFETY: both tails cover `rem` elements.
             unsafe {
                 carry = Addition::copy_tail_with_carry(
-                    dst_limbs.as_mut_ptr().add(short_len),
+                    dst_ptr.add(short_len),
                     long_limbs.as_ptr().add(short_len),
                     rem,
                     carry,
@@ -173,23 +180,15 @@ impl InternalMpUint {
             }
         }
         if carry != 0 {
-            if max_len < INLINE_LIMBS {
-                // SAFETY: the next inline slot exists and the length fits u8.
-                unsafe {
-                    if let UintRepr::Inline {
-                        ref mut len,
-                        ref mut limbs,
-                    } = dst.repr
-                    {
-                        *limbs.as_mut_ptr().add(max_len) = carry;
-                        *len = u8::try_from(max_len.wrapping_add(1)).unwrap_unchecked();
-                    }
-                }
-            } else {
-                // SAFETY: `carry` is the normalized next limb.
-                unsafe {
-                    Addition::append_carry(dst, carry);
-                }
+            // SAFETY: capacity is at least `max_len + 1`.
+            unsafe {
+                *dst_ptr.add(max_len) = carry;
+                dst.set_len(max_len.wrapping_add(1));
+            }
+        } else {
+            // SAFETY: `max_len` is the exact sum length when carry is zero.
+            unsafe {
+                dst.set_len(max_len);
             }
         }
     }

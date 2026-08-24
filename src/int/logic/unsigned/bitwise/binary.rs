@@ -16,24 +16,10 @@ impl InternalMpUint {
     #[inline]
     #[must_use]
     pub fn bitand(&self, rhs: &Self) -> Self {
-        if let (UintRepr::Inline { len: l1, limbs: a }, UintRepr::Inline { len: l2, limbs: b }) =
-            (&self.repr, &rhs.repr)
-        {
-            let min_len = min(*l1, *l2);
-            let mut arr = [0; INLINE_LIMBS];
-            for (i, v) in arr.iter_mut().enumerate().take(usize::from(min_len)) {
-                // SAFETY: i < min_len <= INLINE_LIMBS, and both inline arrays
-                // have exactly INLINE_LIMBS elements.
-                *v = unsafe { a.get_unchecked(i) & b.get_unchecked(i) };
-            }
-            let mut res = Self {
-                repr: UintRepr::Inline {
-                    len: min_len,
-                    limbs: arr,
-                },
-            };
-            res.normalize();
-            return res;
+        if self.limbs().len() <= INLINE_LIMBS && rhs.limbs().len() <= INLINE_LIMBS {
+            let [a0, a1, a2, a3] = self.extract_4();
+            let [b0, b1, b2, b3] = rhs.extract_4();
+            return Self::from_limbs_4(a0 & b0, a1 & b1, a2 & b2, a3 & b3);
         }
 
         let a = self.limbs();
@@ -62,34 +48,10 @@ impl InternalMpUint {
     #[inline]
     #[must_use]
     pub fn bitor(&self, rhs: &Self) -> Self {
-        if let (UintRepr::Inline { len: l1, limbs: a }, UintRepr::Inline { len: l2, limbs: b }) =
-            (&self.repr, &rhs.repr)
-        {
-            let max_len = max(*l1, *l2);
-            let mut arr = [0; INLINE_LIMBS];
-            for (i, v) in arr.iter_mut().enumerate().take(usize::from(max_len)) {
-                let a_val = if i < usize::from(*l1) {
-                    // SAFETY: i < l1 <= INLINE_LIMBS, so the index is within the array bounds
-                    unsafe { *a.get_unchecked(i) }
-                } else {
-                    0
-                };
-                let b_val = if i < usize::from(*l2) {
-                    // SAFETY: i < l2 <= INLINE_LIMBS, so the index is within the array bounds
-                    unsafe { *b.get_unchecked(i) }
-                } else {
-                    0
-                };
-                *v = a_val | b_val;
-            }
-            let mut res = Self {
-                repr: UintRepr::Inline {
-                    len: max_len,
-                    limbs: arr,
-                },
-            };
-            res.normalize();
-            return res;
+        if self.limbs().len() <= INLINE_LIMBS && rhs.limbs().len() <= INLINE_LIMBS {
+            let [a0, a1, a2, a3] = self.extract_4();
+            let [b0, b1, b2, b3] = rhs.extract_4();
+            return Self::from_limbs_4(a0 | b0, a1 | b1, a2 | b2, a3 | b3);
         }
 
         let a = self.limbs();
@@ -132,34 +94,10 @@ impl InternalMpUint {
     #[inline]
     #[must_use]
     pub fn bitxor(&self, rhs: &Self) -> Self {
-        if let (UintRepr::Inline { len: l1, limbs: a }, UintRepr::Inline { len: l2, limbs: b }) =
-            (&self.repr, &rhs.repr)
-        {
-            let max_len = max(*l1, *l2);
-            let mut arr = [0; INLINE_LIMBS];
-            for (i, v) in arr.iter_mut().enumerate().take(usize::from(max_len)) {
-                let a_val = if i < usize::from(*l1) {
-                    // SAFETY: i < l1 <= INLINE_LIMBS, so the index is within the array bounds
-                    unsafe { *a.get_unchecked(i) }
-                } else {
-                    0
-                };
-                let b_val = if i < usize::from(*l2) {
-                    // SAFETY: i < l2 <= INLINE_LIMBS, so the index is within the array bounds
-                    unsafe { *b.get_unchecked(i) }
-                } else {
-                    0
-                };
-                *v = a_val ^ b_val;
-            }
-            let mut res = Self {
-                repr: UintRepr::Inline {
-                    len: max_len,
-                    limbs: arr,
-                },
-            };
-            res.normalize();
-            return res;
+        if self.limbs().len() <= INLINE_LIMBS && rhs.limbs().len() <= INLINE_LIMBS {
+            let [a0, a1, a2, a3] = self.extract_4();
+            let [b0, b1, b2, b3] = rhs.extract_4();
+            return Self::from_limbs_4(a0 ^ b0, a1 ^ b1, a2 ^ b2, a3 ^ b3);
         }
 
         let a = self.limbs();
@@ -364,9 +302,50 @@ impl InternalMpUint {
         let src = self.limbs();
         let src_limb_count = src.len();
         let result_limb_count = width.div_ceil(LIMB_BITS);
+        let rem = width.wrapping_rem(LIMB_BITS);
+
+        if result_limb_count <= INLINE_LIMBS {
+            let mut inline = [0_usize; INLINE_LIMBS];
+            for i in 0..result_limb_count {
+                let src_idx = result_limb_count.wrapping_sub(1).wrapping_sub(i);
+                let mut val = if src_idx < src_limb_count {
+                    // SAFETY: src_idx < src_limb_count checked above
+                    unsafe { *src.get_unchecked(src_idx) }
+                } else {
+                    0
+                };
+                if src_idx == result_limb_count.wrapping_sub(1) && rem != 0 {
+                    val &= low_bits_mask(rem);
+                }
+                // SAFETY: i < result_limb_count <= INLINE_LIMBS
+                unsafe {
+                    *inline.get_unchecked_mut(i) = val.reverse_bits();
+                }
+            }
+
+            let total_shift = result_limb_count
+                .wrapping_mul(LIMB_BITS)
+                .wrapping_sub(width);
+            if total_shift > 0 {
+                #[allow(
+                    clippy::as_conversions,
+                    clippy::cast_possible_truncation,
+                    reason = "total_shift < LIMB_BITS fits in u32"
+                )]
+                let shift_u32 = total_shift as u32;
+                // SAFETY: inline has length INLINE_LIMBS >= result_limb_count, shift_u32 < LIMB_BITS
+                unsafe {
+                    let _ = ArchKernels::rshift_unchecked(
+                        inline.as_mut_ptr(),
+                        result_limb_count,
+                        shift_u32,
+                    );
+                }
+            }
+            return Self::from_limbs_4(inline[0], inline[1], inline[2], inline[3]);
+        }
 
         let mut result_limbs = alloc::vec![0; result_limb_count];
-        let rem = width.wrapping_rem(LIMB_BITS);
 
         for i in 0..result_limb_count {
             let src_idx = result_limb_count.wrapping_sub(1).wrapping_sub(i);
@@ -429,8 +408,6 @@ impl InternalMpUint {
             .wrapping_add(LIMB_BYTES.wrapping_sub(1))
             .wrapping_div(LIMB_BYTES);
 
-        let mut result_limbs = alloc::vec![0; result_limb_count];
-
         // If the original top limb was partial, the result is left-shifted by
         // (LIMB_BYTES - top_bytes) bytes. Compute the right-shift needed to
         // correct it (0 when all limbs are full).
@@ -440,6 +417,26 @@ impl InternalMpUint {
         } else {
             0
         };
+
+        if result_limb_count <= INLINE_LIMBS {
+            let mut inline = [0_usize; INLINE_LIMBS];
+            let mut carry: Limb = 0;
+            for i in 0..result_limb_count {
+                let src_limb = limbs.get(i).copied().unwrap_or(0);
+                let dst = result_limb_count.wrapping_sub(1).wrapping_sub(i);
+                let swapped = src_limb.swap_bytes();
+                // SAFETY: dst < result_limb_count <= INLINE_LIMBS
+                unsafe {
+                    *inline.get_unchecked_mut(dst) = swapped.wrapping_shr(shift_bits) | carry;
+                }
+                if shift_bits != 0 {
+                    carry = swapped.wrapping_shl((LIMB_BITS as u32).wrapping_sub(shift_bits));
+                }
+            }
+            return Self::from_limbs_4(inline[0], inline[1], inline[2], inline[3]);
+        }
+
+        let mut result_limbs = alloc::vec![0; result_limb_count];
 
         let mut carry: Limb = 0;
         for i in 0..result_limb_count {

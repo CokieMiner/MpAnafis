@@ -53,12 +53,9 @@ pub unsafe fn mul_2_limbs_unchecked(
         asm!(
             // [Initial Step: Limb 0 of src]
             "movq ({src}), %rdx",                        // Load src[0] into %rdx for mulxq
-            "mulxq {s0}, %r10, %r11",                    // %r11:%r10 = src[0] * s0
-            "mulxq {s1}, %rax, %rcx",                    // %rcx:%rax = src[0] * s1
+            "mulxq {s0}, %r10, %r8",                     // %r8:%r10 = src[0] * s0 (%r8 = row 0 carry)
+            "mulxq {s1}, %rsi, %r9",                     // %r9:%rsi = src[0] * s1 (%r9 = row 1 carry, %rsi = prev_s1_lo)
             "movq %r10, ({dst})",                        // Write low product directly to dst[0]
-            "movq %r11, %r8",                            // %r8 = row 0 running carry
-            "movq %rax, 8({dst})",                       // Write (src[0]*s1).lo directly to dst[1]
-            "movq %rcx, %r9",                            // %r9 = row 1 running carry
             "leaq 8({src}), {src}",                      // Advance src pointer by 8 bytes
             "leaq 8({dst}), {dst}",                      // Advance dst pointer by 8 bytes
             "decq {len}",                                // Decrement limb counter
@@ -71,17 +68,17 @@ pub unsafe fn mul_2_limbs_unchecked(
             "mulxq {s1}, %rax, %rcx",                    // %rcx:%rax = src[i] * s1
 
             // [Row 0 Carry & Destination Accumulation]
-            "addq %r8, %r10",                            // %r10 += row 0 running carry
-            "adcq $0, %r11",                             // %r11 += CF (high product carry)
-            "addq ({dst}), %r10",                        // %r10 += dst[i] (accumulate previous s1 row)
+            "addq %rsi, %r10",                           // %r10 += prev_s1_lo (pure register, no reload from memory!)
             "adcq $0, %r11",                             // %r11 += CF
-            "movq %r10, ({dst})",                        // Store combined limb to dst[i]
+            "addq %r8, %r10",                            // %r10 += row 0 running carry
+            "adcq $0, %r11",                             // %r11 += CF
+            "movq %r10, ({dst})",                        // Store fully resolved limb to dst[i]
             "movq %r11, %r8",                            // %r8 = updated row 0 carry
 
             // [Row 1 Carry Accumulation]
             "addq %r9, %rax",                            // %rax += row 1 running carry
             "adcq $0, %rcx",                             // %rcx += CF
-            "movq %rax, 8({dst})",                       // Store row 1 limb to dst[i+1]
+            "movq %rax, %rsi",                           // %rsi = updated prev_s1_lo for next iteration
             "movq %rcx, %r9",                            // %r9 = updated row 1 carry
 
             "leaq 8({src}), {src}",                      // Advance src by 8 bytes
@@ -91,10 +88,9 @@ pub unsafe fn mul_2_limbs_unchecked(
 
             // [Final Carry Flush into dst[len] and dst[len+1]]
             "2:",
-            "movq ({dst}), %r10",                        // Load dst[len]
-            "addq %r8, %r10",                            // Accumulate remaining row 0 carry
-            "movq %r10, ({dst})",                        // Store final dst[len]
+            "addq %r8, %rsi",                            // Accumulate remaining row 0 carry into %rsi
             "adcq $0, %r9",                              // Propagate overflow into row 1 carry
+            "movq %rsi, ({dst})",                        // Store final dst[len]
             "movq %r9, 8({dst})",                        // Store final dst[len+1]
 
             len = inout(reg) len => _,
@@ -105,6 +101,7 @@ pub unsafe fn mul_2_limbs_unchecked(
             out("rax") _,
             out("rcx") _,
             out("rdx") _,
+            out("rsi") _,
             out("r8") _,
             out("r9") _,
             out("r10") _,

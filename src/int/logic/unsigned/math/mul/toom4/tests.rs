@@ -1,5 +1,10 @@
 //! Property tests for the Toom-Cook 4 tier.
 
+#![expect(
+    clippy::panic,
+    reason = "the nonempty generated-width invariant is a test construction failure"
+)]
+
 use alloc::{vec, vec::Vec};
 
 use proptest::prelude::*;
@@ -196,7 +201,10 @@ fn toom4_square_operands() -> impl Strategy<Value = Vec<Limb>> {
     proptest::collection::vec(limb, len).prop_map(|mut v| {
         // Keep the operand normalized so the tier shape is stable. The length
         // range starts at 320, so the operand is never empty here.
-        *v.last_mut().expect("length range 320..398 is never empty") |= 1;
+        let Some(last) = v.last_mut() else {
+            panic!("length range 320..398 must never be empty");
+        };
+        *last |= 1;
         v
     })
 }

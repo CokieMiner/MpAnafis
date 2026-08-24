@@ -20,7 +20,7 @@ use crate::int::support::rug_uint_pairs;
 use crate::int::support::{flint_uint_pairs, pin_flint_to_one_thread, verify_flint_matches_mp};
 use crate::int::{
     ladders::{EXTENDED_GCD, THEORY},
-    support::{SAMPLE_COUNT_WIDE, SAMPLE_SIZE_FAST, SAMPLE_SIZE_WIDE, mp_uint_pairs},
+    support::{SAMPLE_COUNT_WIDE, SAMPLE_SIZE_WIDE, mp_uint_pairs},
 };
 
 mod gcd {
@@ -162,7 +162,7 @@ mod gcd_lcm {
 mod extended_gcd {
     use super::*;
 
-    #[divan::bench(args = EXTENDED_GCD, sample_size = SAMPLE_SIZE_FAST)]
+    #[divan::bench(args = EXTENDED_GCD, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
     fn mp(bencher: divan::Bencher, bits: usize) {
         let inputs = mp_uint_pairs(bits);
         bencher.bench_local(|| {
@@ -173,7 +173,7 @@ mod extended_gcd {
     }
 
     #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
-    #[divan::bench(args = EXTENDED_GCD, sample_size = SAMPLE_SIZE_FAST)]
+    #[divan::bench(args = EXTENDED_GCD, sample_size = SAMPLE_SIZE_WIDE, sample_count = SAMPLE_COUNT_WIDE)]
     fn rug(bencher: divan::Bencher, bits: usize) {
         let inputs = rug_uint_pairs(bits);
         bencher.bench_local(|| {

@@ -15,11 +15,37 @@
 
 use alloc::{vec, vec::Vec};
 
+use crate::parallel::SequentialExecutor;
+
 use super::super::{
-    KARATSUBA_THRESHOLD, Limb, NTT_THRESHOLD, SQR_KARATSUBA_THRESHOLD, SQR_TOOM_COOK_THRESHOLD,
-    SSA_THRESHOLD, TOOM_COOK_85_THRESHOLD, TOOM_COOK_THRESHOLD,
+    BALANCED_TOOM8_THRESHOLD, KARATSUBA_THRESHOLD, Limb, SQR_KARATSUBA_THRESHOLD,
+    SQR_TOOM_COOK_THRESHOLD, SSA_THRESHOLD, TOOM_COOK_85_THRESHOLD, TOOM_COOK_THRESHOLD,
     dispatch::{LargePlan, MulPlan, Multiplication, SquarePlan, TierCeiling, Widths},
 };
+
+#[test]
+fn measured_balanced_toom8_gate_only_applies_at_the_full_root() {
+    if BALANCED_TOOM8_THRESHOLD == 0 {
+        return;
+    }
+    let threshold = BALANCED_TOOM8_THRESHOLD;
+    assert_ne!(
+        Multiplication::select_plan(
+            threshold.saturating_sub(1),
+            threshold.saturating_sub(1),
+            TierCeiling::Full,
+        ),
+        MulPlan::Toom8,
+    );
+    assert_eq!(
+        Multiplication::select_plan(threshold, threshold, TierCeiling::Full),
+        MulPlan::Toom8,
+    );
+    assert_ne!(
+        Multiplication::select_plan(threshold, threshold, TierCeiling::Toom6),
+        MulPlan::Toom8,
+    );
+}
 
 /// Operand widths spanning every crossover, both sides of each, and the ratios
 /// that decide a Toom split shape.
@@ -157,6 +183,7 @@ fn every_named_tier_computes_the_product_it_was_named_for() {
     // admitted the widths. If that predicate and the entry point ever disagree,
     // the executor writes nothing and the product is silently wrong, so this
     // sweeps the two against each other across every shape in the grid.
+    let executor = SequentialExecutor;
     for (larger, smaller) in probe_shapes() {
         let left = operand(larger, 0x1234_5678);
         let right = operand(smaller, 0x8765_4321);
@@ -164,7 +191,14 @@ fn every_named_tier_computes_the_product_it_was_named_for() {
         let plan = Multiplication::select_plan(larger, smaller, TierCeiling::Full);
         let mut produced = vec![0; larger + smaller];
         let mut scratch = vec![0; Multiplication::scratch_len(plan, larger, smaller)];
-        Multiplication::execute_plan(plan, &mut produced, &left, &right, &mut scratch);
+        Multiplication::execute_plan_with_executor(
+            plan,
+            &mut produced,
+            &left,
+            &right,
+            &mut scratch,
+            &executor,
+        );
 
         // The conventional tower, capped below every transform, is the
         // independent reference: it shares no code with the transform tiers.
@@ -172,12 +206,13 @@ fn every_named_tier_computes_the_product_it_was_named_for() {
         let mut expected = vec![0; larger + smaller];
         let mut reference_scratch =
             vec![0; Multiplication::scratch_len(reference_plan, larger, smaller)];
-        Multiplication::execute_plan(
+        Multiplication::execute_plan_with_executor(
             reference_plan,
             &mut expected,
             &left,
             &right,
             &mut reference_scratch,
+            &executor,
         );
 
         assert_eq!(produced, expected, "{plan:?} at {larger}x{smaller}");
@@ -187,23 +222,31 @@ fn every_named_tier_computes_the_product_it_was_named_for() {
 #[cfg_attr(miri, ignore = "full tier execution is prohibitively slow under Miri")]
 #[test]
 fn every_named_square_tier_computes_the_square_it_was_named_for() {
+    let executor = SequentialExecutor;
     for len in probe_widths() {
         let value = operand(len, 0x1234_5678);
 
         let plan = Multiplication::select_square_plan(len, TierCeiling::Full);
         let mut produced = vec![0; len * 2];
         let mut scratch = vec![0; Multiplication::square_scratch_len(plan, len)];
-        Multiplication::execute_square_plan(plan, &mut produced, &value, &mut scratch);
+        Multiplication::execute_square_plan_with_executor(
+            plan,
+            &mut produced,
+            &value,
+            &mut scratch,
+            &executor,
+        );
 
         let reference_plan = Multiplication::select_square_plan(len, TierCeiling::Toom6);
         let mut expected = vec![0; len * 2];
         let mut reference_scratch =
             vec![0; Multiplication::square_scratch_len(reference_plan, len)];
-        Multiplication::execute_square_plan(
+        Multiplication::execute_square_plan_with_executor(
             reference_plan,
             &mut expected,
             &value,
             &mut reference_scratch,
+            &executor,
         );
 
         assert_eq!(produced, expected, "{plan:?} at {len}^2");
@@ -216,6 +259,7 @@ fn the_dispatched_product_matches_the_planned_one() {
     // `uint_mul_limbs_into_slice_scratch` re-derives the plan and may take a
     // stack-scratch shortcut. It must still agree with executing the plan the
     // selector names, or the scratch sizing and the execution have diverged.
+    let executor = SequentialExecutor;
     for (larger, smaller) in probe_shapes() {
         let left = operand(larger, 0xdead_beef);
         let right = operand(smaller, 0xfeed_face);
@@ -223,7 +267,14 @@ fn the_dispatched_product_matches_the_planned_one() {
         let plan = Multiplication::select_plan(larger, smaller, TierCeiling::Full);
         let mut planned = vec![0; larger + smaller];
         let mut scratch = vec![0; Multiplication::scratch_len(plan, larger, smaller)];
-        Multiplication::execute_plan(plan, &mut planned, &left, &right, &mut scratch);
+        Multiplication::execute_plan_with_executor(
+            plan,
+            &mut planned,
+            &left,
+            &right,
+            &mut scratch,
+            &executor,
+        );
 
         let mut dispatched = vec![0; larger + smaller];
         let mut dispatch_scratch = vec![0; Multiplication::scratch_len(plan, larger, smaller)];
@@ -241,13 +292,20 @@ fn the_dispatched_product_matches_the_planned_one() {
 #[cfg_attr(miri, ignore = "full tier execution is prohibitively slow under Miri")]
 #[test]
 fn the_dispatched_square_matches_the_planned_one() {
+    let executor = SequentialExecutor;
     for len in probe_widths() {
         let value = operand(len, 0xdead_beef);
 
         let plan = Multiplication::select_square_plan(len, TierCeiling::Full);
         let mut planned = vec![0; len * 2];
         let mut scratch = vec![0; Multiplication::square_scratch_len(plan, len)];
-        Multiplication::execute_square_plan(plan, &mut planned, &value, &mut scratch);
+        Multiplication::execute_square_plan_with_executor(
+            plan,
+            &mut planned,
+            &value,
+            &mut scratch,
+            &executor,
+        );
 
         let mut dispatched = vec![0; len * 2];
         let mut dispatch_scratch = vec![0; Multiplication::square_scratch_len(plan, len)];
@@ -369,13 +427,7 @@ fn disabled_crossovers_are_never_selected() {
     // through any shape.
     for (larger, smaller) in probe_shapes() {
         let plan = Multiplication::select_plan(larger, smaller, TierCeiling::Full);
-        if NTT_THRESHOLD == 0 {
-            assert_ne!(
-                plan,
-                MulPlan::Large(LargePlan::Ntt),
-                "{larger}x{smaller} selected a disabled tier"
-            );
-        }
+        #[cfg(not(target_pointer_width = "16"))]
         if SSA_THRESHOLD == 0 {
             assert_ne!(
                 plan,
@@ -384,26 +436,6 @@ fn disabled_crossovers_are_never_selected() {
             );
         }
     }
-}
-
-#[test]
-fn owned_specializations_do_not_override_basecase_or_lopsided() {
-    for len in [20, 32, 48] {
-        let production = Multiplication::select_plan(len, len, TierCeiling::Full);
-        let owned = Multiplication::select_owned_plan(len, len);
-        let expected = if matches!(production, MulPlan::Schoolbook | MulPlan::Lopsided) {
-            production
-        } else {
-            MulPlan::Karatsuba
-        };
-        assert_eq!(owned, expected);
-    }
-
-    let unbalanced_len = 48_usize.saturating_mul(8);
-    assert_eq!(
-        Multiplication::select_owned_plan(unbalanced_len, 48),
-        MulPlan::Lopsided
-    );
 }
 
 #[test]

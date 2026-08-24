@@ -41,6 +41,14 @@ macro_rules! select_arch_kernel {
             $item
         )*
     };
+    (@import_limb ntt_float_f64) => {};
+    (@import_limb $other:ident) => {
+        use super::Limb;
+    };
+    (@import_kernel_types NttFloatKernel) => {
+        use super::kernels::NttFloatKernels;
+    };
+    (@import_kernel_types $other:ident) => {};
     (
         function: $function:ident;
         surface: direct;
@@ -80,7 +88,9 @@ macro_rules! select_arch_kernel {
         fallback_imports: [$($fallback_import:ident),* $(,)?];
         test_backends: [$($test_alias:ident => $test_backend:ident),* $(,)?];
     ) => {
-        use super::{Limb, kernels::$kernel};
+        use super::kernels::$kernel;
+        select_arch_kernel!(@import_kernel_types $kernel);
+        select_arch_kernel!(@import_limb $function);
         $(
             select_arch_kernel!(
                 @backend $function, $kernel, $backend, $availability
@@ -460,34 +470,18 @@ macro_rules! select_arch_kernel {
     (@powerpc64 $function:ident, $kernel:ident, []) => {};
 
     (@kernel_import $kernel:ident, [bmi2]) => {
-        #[cfg(any(
-            test,
-            not(all(
-                feature = "std",
-                not(miri),
-                target_arch = "x86_64",
-                target_pointer_width = "64",
-                not(all(target_feature = "adx", target_feature = "bmi2"))
-            ))
-        ))]
-        use super::kernels::$kernel;
+        with_direct_basecase_components! {
+            use super::kernels::$kernel;
+        }
     };
     (@kernel_import $kernel:ident, $x86_policy:tt) => {
         use super::kernels::$kernel;
     };
 
     (@surface $function:ident, [bmi2]) => {
-        #[cfg(any(
-            test,
-            not(all(
-                feature = "std",
-                not(miri),
-                target_arch = "x86_64",
-                target_pointer_width = "64",
-                not(all(target_feature = "adx", target_feature = "bmi2"))
-            ))
-        ))]
-        pub use selected::kernel;
+        with_direct_basecase_components! {
+            pub use selected::kernel;
+        }
     };
     (@surface $function:ident, $x86_policy:tt) => {
         pub use selected::$function;

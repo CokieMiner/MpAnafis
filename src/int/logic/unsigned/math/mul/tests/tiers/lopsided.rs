@@ -3,7 +3,10 @@ use alloc::{vec, vec::Vec};
 use proptest::prelude::*;
 
 use super::*;
-use crate::int::logic::math::mul::{KARATSUBA_THRESHOLD, Schoolbook};
+use crate::{
+    int::logic::math::mul::{KARATSUBA_THRESHOLD, Schoolbook},
+    parallel::SequentialExecutor,
+};
 
 fn lopsided_operands() -> impl Strategy<Value = (Vec<Limb>, Vec<Limb>, Limb)> {
     let minimum_len = KARATSUBA_THRESHOLD.max(2);
@@ -60,16 +63,22 @@ proptest! {
             .div_ceil(2)
             // SAFETY: smaller.len() > 0 by test precondition.
             .wrapping_add(unsafe { dirty_limb.checked_rem(smaller.len()).unwrap_unchecked() });
-        let forced_scratch_len =
-            Lopsided::mul_forced_scratch_len(larger.len(), smaller.len(), forced_block_len);
+        let forced_scratch_len = Lopsided::mul_forced_scratch_len(
+            larger.len(),
+            smaller.len(),
+            forced_block_len,
+            1,
+        );
         let mut forced_scratch = vec![Limb::MIN; forced_scratch_len];
         actual.fill(dirty_limb.wrapping_add(2));
+        let executor = SequentialExecutor;
         Lopsided::mul_forced(
             &mut actual,
             &larger,
             &smaller,
             &mut forced_scratch,
             forced_block_len,
+            &executor,
         );
         prop_assert_eq!(actual, expected);
     }

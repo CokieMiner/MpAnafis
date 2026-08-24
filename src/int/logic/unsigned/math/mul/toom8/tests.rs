@@ -1,11 +1,17 @@
 //! Property tests for balanced Toom-8 and unbalanced Toom-8.5.
 
+#[cfg(feature = "std")]
+use std::{sync::Barrier, thread};
+
+#[cfg(feature = "std")]
+use alloc::sync::Arc;
 use alloc::{vec, vec::Vec};
 
 use proptest::prelude::*;
 
-use super::*;
 use crate::int::logic::math::mul::{Multiplication, Schoolbook, dispatch::Widths};
+
+use super::*;
 
 fn balanced_operands() -> impl Strategy<Value = (Vec<Limb>, Vec<Limb>)> {
     prop_oneof![
@@ -103,5 +109,45 @@ proptest! {
         let mut scratch = vec![Limb::MAX; scratch_len];
         Toom8::sqr(&mut actual, &a, &mut scratch);
         prop_assert_eq!(actual, expected);
+    }
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn concurrent_scratch_prefix_growth_is_stable() {
+    const WIDTHS: [usize; 8] = [8192, 12_288, 16_384, 20_480, 24_576, 28_672, 32_768, 36_864];
+
+    let start = Arc::new(Barrier::new(WIDTHS.len()));
+    let handles: Vec<_> = WIDTHS
+        .into_iter()
+        .map(|width| {
+            let worker_start = Arc::clone(&start);
+            thread::spawn(move || {
+                let _ = worker_start.wait();
+                let mul = Multiplication::toom8_mul_scratch_len(width, width);
+                let square = Multiplication::toom8_sqr_scratch_len(width);
+                assert!(
+                    mul != 0 && square != 0,
+                    "wide Toom-8 scratch must be nonempty"
+                );
+                assert_eq!(
+                    mul,
+                    Multiplication::toom8_mul_scratch_len(width, width),
+                    "cached multiplication prefix changed after concurrent growth"
+                );
+                assert_eq!(
+                    square,
+                    Multiplication::toom8_sqr_scratch_len(width),
+                    "cached square prefix changed after concurrent growth"
+                );
+            })
+        })
+        .collect();
+
+    for handle in handles {
+        assert!(
+            handle.join().is_ok(),
+            "concurrent Toom-8 prefix worker panicked"
+        );
     }
 }

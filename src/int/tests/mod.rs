@@ -36,6 +36,7 @@ mod bitwise;
 mod bounded;
 mod comparison;
 mod conversions;
+mod executor;
 mod fused;
 mod gcd;
 mod memory;

@@ -27,8 +27,10 @@ pub use convert::FormatCache;
 pub use math::{ArchKernels, MulScratch};
 #[cfg(feature = "_internal-tune")]
 pub use math::{
-    DivScratch, Division, Karatsuba, Lopsided, LowProduct, Multiplication, Ntt, Schoolbook, Ssa,
-    Toom3, Toom4, Toom6, Toom8, Toom32, Toom43, TransformBench, TransformChoice,
+    DivScratch, Division, Karatsuba, Lopsided, LowProduct, Multiplication, Schoolbook, Toom3,
+    Toom4, Toom6, Toom8, Toom32, Toom43,
 };
+#[cfg(all(feature = "_internal-tune", not(target_pointer_width = "16")))]
+pub use math::{Ssa, SsaMultiplicationPlan, SsaSquaringPlan, TransformBench, TransformChoice};
 pub use memory::ScratchBuffer;
 pub use storage::{InternalMpUint, UintRepr};

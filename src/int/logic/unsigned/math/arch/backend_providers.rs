@@ -1,5 +1,43 @@
 //! Backend-provider policy used by complete runtime-dispatched operations.
 
+/// Emits paired-row component surfaces only when the direct basecase
+/// composition is built. Runtime-dispatched x86-64 builds select these
+/// components once as part of the complete basecase operation instead.
+macro_rules! with_direct_basecase_components {
+    ($($item:item)*) => {
+        $(
+            #[cfg(any(
+                test,
+                not(all(
+                    feature = "std",
+                    not(miri),
+                    target_arch = "x86_64",
+                    target_pointer_width = "64",
+                    not(all(target_feature = "adx", target_feature = "bmi2"))
+                ))
+            ))]
+            $item
+        )*
+    };
+}
+
+/// Emits helpers used only by the direct basecase composition. Unlike the
+/// component kernel surface, these helpers are not needed by backend tests.
+macro_rules! with_direct_basecase_composition {
+    ($($item:item)*) => {
+        $(
+            #[cfg(not(all(
+                feature = "std",
+                not(miri),
+                target_arch = "x86_64",
+                target_pointer_width = "64",
+                not(all(target_feature = "adx", target_feature = "bmi2"))
+            )))]
+            $item
+        )*
+    };
+}
+
 macro_rules! select_arch_provider {
     (
         function: $function:ident;

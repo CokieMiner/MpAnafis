@@ -34,16 +34,20 @@ include = [
 # ============================================================================
 [features]
 default = []
+# `std` enables host-only facilities but never creates threads and pulls in no
+# scheduler dependency.
 std = []
 num-traits = ["dep:num-traits"]
+# Enables threaded execution through Rayon's global or currently active pool.
+rayon = ["std", "dep:rayon"]
 # Internal: enables the host-side tuner and the multiplication benchmarks. The
 # latter link the system FLINT (`pacman -S flint`, `apt install libflint-dev`)
 # for the `compare` group.
 _internal-tune = ["std"]
 
-
 [dependencies]
 num-traits = { version = "0.2", optional = true, default-features = false }
+rayon = { version = "1.10", optional = true, default-features = false }
 
 [dev-dependencies]
 divan = "0.1.21"
@@ -81,6 +85,9 @@ strip = true      # Strip symbols and debug info from release binaries
 
 [profile.release.build-override]
 opt-level = 3     # Ensure build scripts and auto-tuner run at maximum optimization speed
+
+[profile.test]
+opt-level = 2     # Optimize test binaries: heavy SSA/negacyclic coverage is unusable at opt-level 0
 
 [profile.bench]
 strip = false     # Keep symbols in benchmarks for profiling (e.g. flamegraphs, samply)
@@ -153,7 +160,7 @@ same_name_method = "deny"                # Avoid confusing method names
 self_named_module_files = "deny"         # Consistent module naming
 semicolon_inside_block = "deny"          # Consistent semicolon style
 shadow_reuse = "deny"                    # Prevent accidental variable reuse
-std_instead_of_alloc = "deny"            # Use alloc for better portability 
+std_instead_of_alloc = "deny"            # Use alloc for better portability
 std_instead_of_core = "deny"             # Use core for better portability
 shadow_unrelated = "deny"                # Prevent confusing variable shadowing
 single_char_lifetime_names = "deny"      # Descriptive lifetime names

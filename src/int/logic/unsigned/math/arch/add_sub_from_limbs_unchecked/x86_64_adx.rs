@@ -47,7 +47,7 @@ pub unsafe fn add_sub_from_limbs_unchecked(
     let block_count = len >> 3;
     let tail_count = len & 7;
     let sum_carry: u8;
-    let difference_carry: u8;
+    let difference_borrow: u8;
 
     // SAFETY:
     // 1. `sum_ptr`, `difference_ptr`, and `source_ptr` are valid for `len` 64-bit `Limb` elements.
@@ -56,12 +56,12 @@ pub unsafe fn add_sub_from_limbs_unchecked(
     unsafe {
         asm!(
             // Seed CF=0 and OF=1 (OF=1 seeds two's complement borrow-to-carry inversion)
-            "movabsq $0x7fffffffffffffff, %r8",           // %r8 = MAX_INT
-            "addq $1, %r8",                              // Clears CF (0), sets OF (1)
-            "jrcxz 1f",                                  // If block_count == 0, jump to remainder (1f)
+            "movl $0x7fffffff, %r8d",                    // %r8d = MAX_INT
+            "addl $1, %r8d",                             // Clears CF (0), sets OF (1)
+            "jrcxz 1f",                                  // If block_count == 0, jump to trampoline (1f)
             "jmp 2f",                                    // Jump to 8-way loop (2f)
-            "1:",                                        // Jump stub label
-            "jmp 3f",                                    // Jump to tail entry (3f)
+            "1:",                                        // Trampoline label for 8-bit jrcxz displacement
+            "jmp 3f",                                    // 32-bit jump to tail entry (3f)
 
             ".p2align 4",                                // Align loop header
             // Main 8-way unrolled butterfly loop
@@ -178,7 +178,7 @@ pub unsafe fn add_sub_from_limbs_unchecked(
             // Capture final carry and borrow
             "5:",                                        // Exit label
             "setc {sum_carry}",                          // sum_carry = 1 if CF == 1 (addition carry)
-            "seto {difference_carry}",                   // difference_carry = 1 if OF == 1 (inverted borrow)
+            "setno {difference_borrow}",                 // borrow = 1 exactly when the final OF is clear
 
             sum_ptr = inout(reg) sum_ptr => _,
             difference_ptr = inout(reg) difference_ptr => _,
@@ -186,12 +186,12 @@ pub unsafe fn add_sub_from_limbs_unchecked(
             inout("rcx") block_count => _,
             tail_count = in(reg) tail_count,
             sum_carry = lateout(reg_byte) sum_carry,
-            difference_carry = lateout(reg_byte) difference_carry,
+            difference_borrow = lateout(reg_byte) difference_borrow,
             out("r8") _,
             out("r9") _,
             out("r10") _,
             options(nostack, att_syntax)
         );
     }
-    (Limb::from(sum_carry), Limb::from(difference_carry ^ 1))
+    (Limb::from(sum_carry), Limb::from(difference_borrow))
 }

@@ -338,8 +338,8 @@ fn algorithm_d_normalization_boundary_covers_output_modes() {
             &mut expected_remainder,
             &mut stack_scratch,
         );
-        assert!(stack_scratch.u_norm.is_empty());
-        assert!(stack_scratch.v_norm.is_empty());
+        assert_eq!(stack_scratch.u_norm.len(), 0);
+        assert_eq!(stack_scratch.v_norm.len(), 0);
         assert_eq!(
             expected_quotient.mul(&denominator).add(&expected_remainder),
             stack_numerator

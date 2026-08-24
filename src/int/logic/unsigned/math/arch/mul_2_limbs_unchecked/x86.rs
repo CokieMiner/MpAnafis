@@ -177,8 +177,8 @@ pub unsafe fn mul_2_limbs_unchecked(
             "movl {carry1}, 4({dst})",                   // Store final high limb dst[len+1]
             "addl $12, %esp",                            // Restore stack pointer
 
-            carry0 = out(reg) _,
-            carry1 = out(reg) _,
+            carry0 = lateout(reg) _,
+            carry1 = lateout(reg) _,
             dst = inout(reg) dst => _,
             src = inout(reg) src => _,
             len = in(reg) len,

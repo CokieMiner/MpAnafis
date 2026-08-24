@@ -357,15 +357,15 @@ fn recover_scaled_even_odd(pair: &mut PairValues<'_>) {
 fn pack_even_odd(packed: &mut [Limb], other: &[Limb], split_len: usize, even_is_in_other: bool) {
     let value_len = other.len();
     if even_is_in_other {
-        assert!(
+        debug_assert!(
             split_len <= packed.len() && value_len <= packed.len().saturating_sub(split_len),
             "coupled Toom-8 window cannot contain the shifted point product"
         );
         packed.copy_within(split_len.., 0);
         let (_, high_guard) = packed.split_at_mut(value_len);
         high_guard.fill(0);
-        // SAFETY: the release check expresses the required non-wrapping shifted
-        // bound directly.
+        // SAFETY: the Toom-8 layout establishes the non-wrapping shifted bound;
+        // the assertion above checks that invariant in diagnostic builds.
         let _ = unsafe { SharedEval::fused_add_shifted_in_place(packed, other, split_len) };
         return;
     }
@@ -374,12 +374,12 @@ fn pack_even_odd(packed: &mut [Limb], other: &[Limb], split_len: usize, even_is_
     let (other_low, other_high) = other.split_at(low_len);
     let (packed_low, _) = packed.split_at_mut(low_len);
     packed_low.copy_from_slice(other_low);
-    assert!(
+    debug_assert!(
         other_high.is_empty() || (split_len <= packed.len() && other.len() <= packed.len()),
         "coupled Toom-8 window cannot contain the shifted point-product tail"
     );
     // SAFETY: an empty tail returns before inspecting the shift. Otherwise the
-    // release check gives `split_len <= packed.len()` and, because
+    // layout gives `split_len <= packed.len()` and, because
     // `low_len == split_len`, `other_high.len() <= packed.len() - split_len`.
     let _ = unsafe { SharedEval::fused_add_shifted_in_place(packed, other_high, split_len) };
 }

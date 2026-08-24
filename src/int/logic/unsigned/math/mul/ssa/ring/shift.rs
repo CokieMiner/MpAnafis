@@ -3,58 +3,98 @@
 //! Contributes the in-place shifts to [`SsaRing`]. The out-of-place variant
 //! `SsaRing::shift_from` lives in the [`shift_from`](super::shift_from)
 //! module.
+//!
+//! [`SsaRing::shift_in_place`] is the transform butterflies' twiddle: it
+//! multiplies a semi-normalized coefficient by a power of two without staging
+//! the whole coefficient, removing the scratch round trip an out-of-place
+//! shift plus copy-back would pay on every butterfly. [`SsaRing::shift`] is
+//! the zero-test wrapper the twist sweeps keep for sparse operands.
 
-#![allow(
-    clippy::too_many_lines,
-    reason = "Unrolled hybrid shift loops use raw slice chunks"
-)]
-
-use super::{Addition, LIMB_BITS, Limb, SSA_DIRECT_SHIFT_MAX_LIMBS, SsaCarry, SsaRing};
-
-/// Widest run of limbs the shift loops process in their unrolled four-at-a-time
-/// form before falling back to the plain limb-at-a-time loop.
-///
-/// The unrolled form keeps four independent shift chains in flight, which pays
-/// while the run stays cache-resident and stops paying once it does not. Two
-/// thousand forty-eight limbs is 16 KiB on a 64-bit target, so the crossover sits
-/// near a typical L1 capacity — it is a hardware-sensitive value that has not yet
-/// been moved into the generated tuning profile.
-///
-/// Shared with [`shift_from`](super::shift_from), whose two branch loops make the
-/// same trade on the same runs.
-pub const UNROLLED_SHIFT_MAX_LIMBS: usize = 2048;
+use super::{
+    Addition, ArchKernels, LIMB_BITS, Limb, SSA_DIRECT_SHIFT_MAX_LIMBS, SsaCarry, SsaRing,
+};
 
 impl SsaRing {
     /// Computes `dst = dst * 2^shift mod (2^n + 1)` in-place.
     ///
-    /// Uses the identity $2^n \equiv -1 \pmod{2^n + 1}$: after left-shifting,
-    /// the high part above bit `n` is subtracted from the low part.
-    /// `SSA_DIRECT_SHIFT_MAX_LIMBS` selects the target-tuned crossover between the
-    /// single-loop out-of-place shift and the bulk architecture-shift path.
+    /// A zero coefficient is left untouched, which is what the twist sweeps on
+    /// freshly split operands want: their padding tail is all zero and a shift
+    /// would only rewrite it. `SSA_DIRECT_SHIFT_MAX_LIMBS` selects the
+    /// target-tuned crossover between the single-loop out-of-place shift and
+    /// the fused in-place path, both inside [`Self::shift_in_place`].
     ///
     /// `scratch` must have length >= `SsaRing::coeff_limbs(mod_bits)` and is used as a
     /// temporary buffer.
     ///
     /// # Safety
+    /// - `mod_bits` is nonzero and `2 * mod_bits` fits in `usize`.
     /// - `dst.len() >= SsaRing::coeff_limbs(mod_bits)`.
     /// - `scratch.len() >= SsaRing::coeff_limbs(mod_bits)`.
+    /// - The active `dst` prefix contains a canonical Fermat-ring residue.
+    /// - The active `dst` and `scratch` prefixes are disjoint. Exact or partial
+    ///   overlap is forbidden because the fused path stages the discarded high
+    ///   part in `scratch` while `dst` is overwritten.
     pub unsafe fn shift(dst: &mut [Limb], shift: usize, mod_bits: usize, scratch: &mut [Limb]) {
-        let ml = Self::mod_limbs(mod_bits);
-        let cl = ml.wrapping_add(1);
+        let cl = Self::mod_limbs(mod_bits).wrapping_add(1);
         let full_period = mod_bits.wrapping_mul(2);
         debug_assert!(full_period > 0, "a Fermat shift period is nonzero");
         let reduced_shift = Self::reduce_mod_period(shift, full_period);
-        // SAFETY: caller guarantees dst.len() >= cl and scratch.len() >= cl.
+        // SAFETY: caller guarantees dst.len() >= cl.
         if reduced_shift == 0 || unsafe { dst.get_unchecked(..cl) }.iter().all(|l| *l == 0) {
             return;
         }
+        // SAFETY: the zero test proved dst nonzero; the caller guarantees a
+        // disjoint cl-limb scratch.
+        unsafe {
+            Self::shift_in_place(dst, reduced_shift, mod_bits, scratch);
+        }
+    }
+
+    /// Computes `dst = dst * 2^shift mod (2^n + 1)` in-place without staging
+    /// the whole coefficient.
+    ///
+    /// The data limbs are swept twice instead of the out-of-place shift plus
+    /// copy-back three sweeps: the discarded high part `H = dst >> (n - s)` is
+    /// saved into `scratch` first, `L << s` is written over the coefficient
+    /// from the top limb down so every read stays below the writes, and `H` is
+    /// subtracted through the low limbs using `2^n = -1`. A semi-normalized
+    /// input guard is corrected after the main sweep, and a shift of half a
+    /// period or more negates the result first; the negation runs *before* the
+    /// guard correction so the correction's sign matches the negated path of
+    /// [`Self::shift_from`].
+    ///
+    /// # Safety
+    /// - `mod_bits` is nonzero and `2 * mod_bits` fits in `usize`.
+    /// - `dst.len() >= SsaRing::coeff_limbs(mod_bits)` and holds a
+    ///   semi-normalized residue: its guard limb is at most one.
+    /// - `scratch.len() >= SsaRing::coeff_limbs(mod_bits)` and the two buffers
+    ///   are disjoint.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the fused in-place shift keeps its three phases in one coefficient sweep"
+    )]
+    pub unsafe fn shift_in_place(
+        dst: &mut [Limb],
+        shift: usize,
+        mod_bits: usize,
+        scratch: &mut [Limb],
+    ) {
+        let ml = Self::mod_limbs(mod_bits);
+        let cl = ml.wrapping_add(1);
+        let full_period = mod_bits.wrapping_mul(2);
+        let reduced_shift = Self::reduce_mod_period(shift, full_period);
+        if reduced_shift == 0 {
+            return;
+        }
         if cl <= SSA_DIRECT_SHIFT_MAX_LIMBS {
-            // SAFETY: the caller guarantees two disjoint cl-limb spans and dst is
-            // canonical. The direct loop won through this measured width.
+            // SAFETY: the caller guarantees two disjoint cl-limb spans and dst
+            // is semi-normalized, which the out-of-place shift accepts. The
+            // direct loop won through this measured width.
             unsafe {
                 Self::shift_from(scratch, dst, reduced_shift, mod_bits);
             }
-            // SAFETY: both spans contain cl limbs.
+            // SAFETY: both spans contain cl limbs and the shift fully wrote
+            // its destination.
             unsafe { dst.get_unchecked_mut(..cl) }
                 .copy_from_slice(unsafe { scratch.get_unchecked(..cl) });
             return;
@@ -66,43 +106,25 @@ impl SsaRing {
         } else {
             reduced_shift
         };
+        // SAFETY: ml < cl and the caller guarantees dst has cl limbs.
+        let guard = unsafe { *dst.get_unchecked(ml) };
+        debug_assert!(guard <= 1, "a semi-normalized Fermat guard is at most one");
+
         if positive_shift == 0 {
-            // SAFETY: dst has cl limbs and is canonical by contract.
+            // The reduced shift is exactly half a period: a pure negation.
+            if guard != 0 {
+                // SAFETY: dst has cl limbs and mod_bits matches.
+                unsafe {
+                    Self::normalize(dst, mod_bits);
+                }
+            }
+            // SAFETY: dst is canonical after the optional normalization.
             unsafe {
                 Self::negate(dst, mod_bits);
             }
             return;
         }
 
-        // The only canonical residue with a set guard is 2^n = -1. Convert it to
-        // the ordinary power 2^positive_shift and apply its combined sign below.
-        // SAFETY: ml < cl and both buffers have at least cl limbs.
-        let guard = unsafe { *dst.get_unchecked(ml) };
-        if guard == 1 {
-            debug_assert!(
-                // SAFETY: caller guarantees dst contains cl > ml limbs.
-                unsafe { dst.get_unchecked(..ml) }.iter().all(|l| *l == 0),
-                "the only canonical residue with a guard is 2^n"
-            );
-            // SAFETY: dst has cl limbs and 0 < positive_shift < mod_bits. Its
-            // canonical guard proves that it represents exactly 2^n = -1; the
-            // debug assertion documents the representation invariant without a
-            // second release-mode scan.
-            unsafe {
-                write_shifted_guard_residue(dst, positive_shift, negate_result, mod_bits);
-            }
-            return;
-        }
-
-        // All other canonical residues have a zero guard. Preserve the n data bits
-        // in scratch while dst receives the low half of the shifted product.
-        debug_assert_eq!(
-            guard, 0,
-            "an ordinary canonical Fermat residue has a zero guard"
-        );
-        // SAFETY: caller guarantees scratch and dst each have cl > ml limbs.
-        unsafe { scratch.get_unchecked_mut(..ml) }
-            .copy_from_slice(unsafe { dst.get_unchecked(..ml) });
         let whole_limbs = positive_shift.wrapping_div(LIMB_BITS);
         #[allow(
             clippy::as_conversions,
@@ -110,76 +132,104 @@ impl SsaRing {
             reason = "LIMB_BITS is at most 64, so the remainder fits in u32"
         )]
         let bit_shift = positive_shift.wrapping_rem(LIMB_BITS) as u32;
+        // positive_shift < mod_bits proves whole_limbs < ml, so every derived
+        // range below stays inside the data span.
+        let high_len = whole_limbs.wrapping_add(usize::from(bit_shift != 0));
+        let high_start = ml.wrapping_sub(high_len);
         let low_len = ml.wrapping_sub(whole_limbs);
-        // Only the prefix below the whole-limb shift is zero; every remaining data
-        // limb is overwritten by the copy/shift loop below.
-        // SAFETY: whole_limbs < ml < cl <= dst.len().
-        unsafe { dst.get_unchecked_mut(..whole_limbs) }.fill(0);
+
+        // Phase 1 — save `H = dst >> (n - s)` before the shifted write
+        // overwrites its source limbs.
         if bit_shift == 0 {
-            // SAFETY: these two ranges contain low_len limbs and do not overlap.
-            unsafe { dst.get_unchecked_mut(whole_limbs..ml) }
-                .copy_from_slice(unsafe { scratch.get_unchecked(..low_len) });
-        } else if low_len < UNROLLED_SHIFT_MAX_LIMBS {
-            let right_shift = Limb::BITS.wrapping_sub(bit_shift);
-            let mut carry = 0;
-            // SAFETY: low_len <= ml <= scratch.len().
-            let (chunks, remainder) = unsafe { scratch.get_unchecked(..low_len) }.as_chunks::<4>();
-            let mut dst_target = whole_limbs;
-            for chunk in chunks {
-                let [s0, s1, s2, s3] = *chunk;
-
-                let shifted0 = s0.wrapping_shl(bit_shift) | carry;
-                let shifted1 = s1.wrapping_shl(bit_shift) | s0.wrapping_shr(right_shift);
-                let shifted2 = s2.wrapping_shl(bit_shift) | s1.wrapping_shr(right_shift);
-                let shifted3 = s3.wrapping_shl(bit_shift) | s2.wrapping_shr(right_shift);
-
-                // SAFETY: dst_target + 3 < whole_limbs + low_len = ml.
-                unsafe {
-                    *dst.get_unchecked_mut(dst_target) = shifted0;
-                    *dst.get_unchecked_mut(dst_target.wrapping_add(1)) = shifted1;
-                    *dst.get_unchecked_mut(dst_target.wrapping_add(2)) = shifted2;
-                    *dst.get_unchecked_mut(dst_target.wrapping_add(3)) = shifted3;
-                }
-                carry = s3.wrapping_shr(right_shift);
-                dst_target = dst_target.wrapping_add(4);
-            }
-            for &source in remainder {
-                let shifted = source.wrapping_shl(bit_shift) | carry;
-                // SAFETY: dst_target < whole_limbs + low_len = ml.
-                unsafe {
-                    *dst.get_unchecked_mut(dst_target) = shifted;
-                }
-                carry = source.wrapping_shr(right_shift);
-                dst_target = dst_target.wrapping_add(1);
-            }
+            // SAFETY: both prefixes hold high_len <= ml limbs.
+            unsafe { scratch.get_unchecked_mut(..high_len) }
+                .copy_from_slice(unsafe { dst.get_unchecked(high_start..ml) });
         } else {
-            let right_shift = Limb::BITS.wrapping_sub(bit_shift);
-            let mut carry = 0;
-            for index in 0..low_len {
-                // SAFETY: index < low_len <= ml <= scratch.len().
-                let source = unsafe { *scratch.get_unchecked(index) };
-                let shifted = source.wrapping_shl(bit_shift) | carry;
-                // SAFETY: whole_limbs + index < whole_limbs + low_len = ml.
-                unsafe {
-                    *dst.get_unchecked_mut(whole_limbs.wrapping_add(index)) = shifted;
-                }
-                carry = source.wrapping_shr(right_shift);
-            }
+            // SAFETY: the spans are disjoint, both cover high_len limbs, and
+            // 0 < Limb::BITS - bit_shift < Limb::BITS.
+            let _ = unsafe {
+                ArchKernels::rshift_into_unchecked(
+                    scratch.as_mut_ptr(),
+                    dst.as_ptr().add(high_start),
+                    high_len,
+                    Limb::BITS.wrapping_sub(bit_shift),
+                )
+            };
         }
+
+        // Phase 2 — write `L << s` over the data limbs. `L * 2^s < 2^n` proves
+        // the result fits the written window exactly, so the discarded carry is
+        // zero and the architecture kernel applies.
+        if bit_shift == 0 {
+            // An overlap-safe memmove; whole_limbs + low_len = ml.
+            dst.copy_within(..low_len, whole_limbs);
+        } else if whole_limbs >= low_len {
+            // The shifted destination suffix is disjoint from its source
+            // prefix, so the vectorized kernel writes it in place directly.
+            // SAFETY: dst covers ml data limbs; the source window
+            // `[0, low_len)` and destination `[whole_limbs, ml)` do not
+            // overlap because whole_limbs >= low_len; 0 < bit_shift < Limb::BITS.
+            let _ = unsafe {
+                ArchKernels::lshift_into_unchecked(
+                    dst.as_mut_ptr().add(whole_limbs),
+                    dst.as_ptr(),
+                    low_len,
+                    bit_shift,
+                )
+            };
+        } else {
+            // Shifts below half the ring width overlap their source. The
+            // selected backend traverses high to low, consuming every source
+            // before a higher destination store can overwrite it. This fuses
+            // the former staging copy and shift into one memory pass.
+            // SAFETY: dst covers ml limbs, whole_limbs + low_len = ml, and
+            // 0 < bit_shift < Limb::BITS.
+            let _ = unsafe {
+                ArchKernels::lshift_overlapping_unchecked(
+                    dst.as_mut_ptr(),
+                    low_len,
+                    whole_limbs,
+                    bit_shift,
+                )
+            };
+        }
+        // SAFETY: whole_limbs < ml, proved from positive_shift < mod_bits.
+        unsafe { dst.get_unchecked_mut(..whole_limbs) }.fill(0);
+
+        // Phase 3 — subtract the saved high part: `L << s - H`.
+        // SAFETY: both prefixes hold high_len limbs.
+        let borrow =
+            Addition::sub_slice_in_place(unsafe { dst.get_unchecked_mut(..high_len) }, unsafe {
+                scratch.get_unchecked(..high_len)
+            }) != 0;
+        // SAFETY: high_len <= ml < dst.len().
+        let escaped =
+            borrow && SsaCarry::propagate_borrow(unsafe { dst.get_unchecked_mut(high_len..ml) });
         // SAFETY: ml < cl <= dst.len().
         unsafe {
             *dst.get_unchecked_mut(ml) = 0;
         }
-
-        // SAFETY: both buffers have cl limbs, scratch still contains the original
-        // data, and dst contains the complete low half with a zero guard.
-        unsafe {
-            subtract_discarded_high(dst, scratch, ml, whole_limbs, bit_shift);
+        if escaped {
+            // SAFETY: the wrapped n-limb subtraction borrowed exactly once and
+            // dst has cl > ml limbs.
+            unsafe {
+                SsaCarry::correct_wrapped_shift_difference(dst, ml);
+            }
         }
+
         if negate_result {
-            // SAFETY: the low-minus-high reduction above produced a canonical residue.
+            // SAFETY: the phases above produced a canonical residue, which is
+            // what negation requires.
             unsafe {
                 Self::negate(dst, mod_bits);
+            }
+        }
+        if guard != 0 {
+            // SAFETY: dst is a complete coefficient for this ring, and the
+            // negation above ran first so this correction lands with the sign
+            // the value algebra requires.
+            unsafe {
+                Self::correct_guard_shift(dst, ml, cl, mod_bits, positive_shift, negate_result);
             }
         }
     }
@@ -219,137 +269,6 @@ impl SsaRing {
         // SAFETY: staged is disjoint from dst and both carry cl limbs.
         unsafe {
             Self::sub_in_place(dst, staged, mod_bits);
-        }
-    }
-
-    /// Computes `dst = dst * 2^(shift_half / 2) mod (2^n + 1)`.
-    ///
-    /// Twist exponents are carried in half-bit units so the negacyclic pre-twist
-    /// stays available when `2n / transform_len` is odd. Without it the planner has
-    /// to round the inner ring up to the next whole multiple of `transform_len`,
-    /// which at the widest operands doubles the pointwise work. An odd `shift_half`
-    /// is exactly one extra [`Self::mul_sqrt2`].
-    ///
-    /// # Safety
-    /// - `dst.len() >= SsaRing::coeff_limbs(mod_bits)`.
-    /// - `scratch.len() >= 2 * SsaRing::coeff_limbs(mod_bits)`.
-    pub unsafe fn shift_half(
-        dst: &mut [Limb],
-        shift_half: usize,
-        mod_bits: usize,
-        scratch: &mut [Limb],
-    ) {
-        // SAFETY: scratch covers 2 * cl limbs, so its first half satisfies the
-        // whole-bit shift's contract.
-        unsafe {
-            Self::shift(dst, shift_half.wrapping_shr(1), mod_bits, scratch);
-        }
-        if shift_half.is_multiple_of(2) {
-            return;
-        }
-        // SAFETY: the caller's 2 * cl scratch is exactly what the factor needs.
-        unsafe {
-            Self::mul_sqrt2(dst, mod_bits, scratch);
-        }
-    }
-}
-
-/// Subtracts the discarded high half of an in-place Fermat shift.
-///
-/// The high part is `x >> (n - shift)`. It is built at the start of `scratch`
-/// and subtracted from the already-written low half because `2^n = -1` in the
-/// coefficient ring. A borrow is canonicalized modulo `2^n + 1`.
-///
-/// # Safety
-/// - `dst` and `scratch` each contain at least `ml + 1` limbs.
-/// - `scratch[..ml]` is the original ordinary residue and `dst[..ml]` is its
-///   shifted low half with a zero guard.
-/// - `whole_limbs < ml` and `bit_shift < Limb::BITS`.
-unsafe fn subtract_discarded_high(
-    dst: &mut [Limb],
-    scratch: &mut [Limb],
-    ml: usize,
-    whole_limbs: usize,
-    bit_shift: u32,
-) {
-    let high_len = whole_limbs.wrapping_add(usize::from(bit_shift != 0));
-    let high_start = ml.wrapping_sub(high_len);
-    if bit_shift == 0 {
-        for index in 0..high_len {
-            // SAFETY: high_start + index < ml and index < high_len <= ml.
-            unsafe {
-                *scratch.get_unchecked_mut(index) =
-                    *scratch.get_unchecked(high_start.wrapping_add(index));
-            }
-        }
-    } else {
-        let right_shift = Limb::BITS.wrapping_sub(bit_shift);
-        for index in 0..high_len {
-            let source_index = high_start.wrapping_add(index);
-            // SAFETY: source_index < ml; the next limb is read only when it exists.
-            let low = unsafe { *scratch.get_unchecked(source_index) }.wrapping_shr(right_shift);
-            let high = if source_index.wrapping_add(1) < ml {
-                // SAFETY: this branch proves source_index + 1 < ml <= scratch.len().
-                unsafe { *scratch.get_unchecked(source_index.wrapping_add(1)) }
-                    .wrapping_shl(bit_shift)
-            } else {
-                0
-            };
-            // SAFETY: index < high_len <= ml.
-            unsafe {
-                *scratch.get_unchecked_mut(index) = low | high;
-            }
-        }
-    }
-    // The high part occupies only high_len limbs. Subtract that active prefix,
-    // then propagate its borrow through the untouched high destination limbs.
-    // SAFETY: both ranges contain exactly high_len <= ml limbs.
-    let borrow =
-        Addition::sub_slice_in_place(unsafe { dst.get_unchecked_mut(..high_len) }, unsafe {
-            scratch.get_unchecked(..high_len)
-        });
-    // SAFETY: high_len <= ml < dst.len().
-    let final_borrow =
-        borrow != 0 && SsaCarry::propagate_borrow(unsafe { dst.get_unchecked_mut(high_len..ml) });
-    if final_borrow {
-        // SAFETY: the wrapped n-limb subtraction borrowed and dst has ml + 1
-        // limbs, so adding the missing +1 canonicalizes it modulo 2^n + 1.
-        unsafe {
-            SsaCarry::correct_wrapped_shift_difference(dst, ml);
-        }
-    }
-}
-
-/// Writes the shifted image of the canonical guard residue `2^n = -1`.
-///
-/// # Safety
-/// - `dst` contains at least `SsaRing::coeff_limbs(mod_bits)` limbs.
-/// - `0 < positive_shift < mod_bits`.
-unsafe fn write_shifted_guard_residue(
-    dst: &mut [Limb],
-    positive_shift: usize,
-    negate_result: bool,
-    mod_bits: usize,
-) {
-    let ml = SsaRing::mod_limbs(mod_bits);
-    let cl = ml.wrapping_add(1);
-    // SAFETY: the caller guarantees dst contains the full coefficient span.
-    unsafe { dst.get_unchecked_mut(..cl) }.fill(0);
-    #[allow(
-        clippy::as_conversions,
-        clippy::cast_possible_truncation,
-        reason = "positive_shift modulo LIMB_BITS is below 64 and therefore fits in u32"
-    )]
-    let bit_index = positive_shift.wrapping_rem(LIMB_BITS) as u32;
-    // SAFETY: 0 < positive_shift < mod_bits, so the index is below ml < cl.
-    unsafe {
-        *dst.get_unchecked_mut(positive_shift.wrapping_div(LIMB_BITS)) =
-            1_usize.wrapping_shl(bit_index);
-    }
-    if !negate_result {
-        // SAFETY: dst contains the canonical value 2^positive_shift.
-        unsafe {
-            SsaRing::negate(dst, mod_bits);
         }
     }
 }

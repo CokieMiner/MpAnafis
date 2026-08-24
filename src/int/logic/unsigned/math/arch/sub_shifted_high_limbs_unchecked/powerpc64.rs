@@ -111,6 +111,7 @@ pub unsafe fn sub_shifted_high_limbs_unchecked(
             minuend = out(reg) _,
             out("ctr") _,
             out("xer") _,
+            out("cr0") _,
             options(nostack)
         );
     }

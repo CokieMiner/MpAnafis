@@ -1,5 +1,10 @@
 //! Property tests for negacyclic multiplication.
 
+#![expect(
+    clippy::panic,
+    reason = "fixed test widths must expose an odd negacyclic factor"
+)]
+
 use alloc::{vec, vec::Vec};
 
 use proptest::prelude::*;
@@ -13,7 +18,7 @@ fn dense_operand(len: usize, mut state: u64) -> Vec<Limb> {
         state ^= state.wrapping_shl(13);
         state ^= state.wrapping_shr(7);
         state ^= state.wrapping_shl(17);
-        #[allow(
+        #[expect(
             clippy::as_conversions,
             clippy::cast_possible_truncation,
             reason = "the deterministic test stream is intentionally truncated to the target limb width"
@@ -25,7 +30,9 @@ fn dense_operand(len: usize, mut state: u64) -> Vec<Limb> {
 }
 
 fn check_factorized_product(modulus_limbs: usize, left_seed: u64, right_seed: u64) {
-    let plan = NegacyclicPlan::new(modulus_limbs).expect("test width has an odd factor");
+    let Some(plan) = NegacyclicPlan::new(modulus_limbs) else {
+        panic!("test width must have an odd factor");
+    };
     let modulus_bits = modulus_limbs.wrapping_mul(LIMB_BITS);
     let mut left = dense_operand(modulus_limbs, left_seed);
     let mut right = dense_operand(modulus_limbs, right_seed);
@@ -71,4 +78,27 @@ proptest! {
 fn factorized_product_handles_sparse_boundaries() {
     check_factorized_product(288, 0, u64::MAX);
     check_factorized_product(320, u64::MAX, 0);
+}
+
+#[test]
+fn quotient_modulus_comparison_progresses_across_exact_blocks() {
+    let quotient = [1, 0, Limb::MAX, Limb::MAX, 0];
+    assert_eq!(
+        compare_with_quotient_modulus(&quotient, 2, 3),
+        core::cmp::Ordering::Equal
+    );
+
+    let mut below = quotient;
+    below[0] = 0;
+    assert_eq!(
+        compare_with_quotient_modulus(&below, 2, 3),
+        core::cmp::Ordering::Less
+    );
+
+    let mut above = quotient;
+    above[0] = 2;
+    assert_eq!(
+        compare_with_quotient_modulus(&above, 2, 3),
+        core::cmp::Ordering::Greater
+    );
 }

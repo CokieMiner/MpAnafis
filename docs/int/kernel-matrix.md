@@ -50,7 +50,7 @@ microarchitecture.
 | `add_mul_2_limbs_unchecked` | two overlapping multiply-add rows | x86/x86-64 vanilla/BMI2, AArch64, ARM (ARMv7 `umaal`), POWER32/64 (POWER9 ISA 3.0 variant, register carry-forward), s390x, RISC-V32/64, LoongArch32/64, MIPS32/64 |
 | `mul_2_limbs_unchecked` | write-only initialization of two product rows | x86/x86-64 vanilla/BMI2, AArch64, ARM (ARMv7 `umaal`), POWER64, RISC-V64, s390x |
 | `add_sub_limbs_unchecked` | in-place simultaneous sum and difference | x86-64 ADX; fallback elsewhere |
-| `add_sub_from_limbs_unchecked` | simultaneous sum and difference from two sources | x86-64 ADX; fallback elsewhere |
+| `add_sub_from_limbs_unchecked` | simultaneous sum and difference from two sources | x86-64 ADX; x86-64 AVX2 (RT/compile-time); fallback on AArch64, ARMv7, and other targets |
 | `add_reverse_sub_limbs_unchecked` | simultaneous sum and reverse difference | x86-64 ADX; fallback elsewhere |
 | `add_two_limbs_unchecked` | two independent addition chains | x86-64 ADX; fallback elsewhere |
 | `monty_redc_unchecked` | one CIOS Montgomery reduction step | x86-64 BMI2/ADX, AArch64, POWER64, s390x, RISC-V64, LoongArch64 |
@@ -69,12 +69,6 @@ row. Off x86-64 it is a portable loop over `mul_2`, `add_mul_2`, and
 `add_mul_1`, each of which already selects its own backend, so the composed
 path is architecture-specific everywhere without a per-target driver file.
 
-In total this table lists all 22 kernel directories under `math/arch/`.
-`lshift_into_unchecked` and `rshift_into_unchecked` are separate ownership rows
-from the in-place shifts, and the shifted subtraction kernel is
-`sub_shifted_high_limbs_unchecked`.
-
-## The shifted-high subtraction backend rule
 
 `sub_shifted_high_limbs_unchecked` needs a hardware borrow chain that survives a
 variable-count shift, a merge, loads and stores, and loop control. Where that
@@ -200,7 +194,7 @@ turn cross-compilation into a foreign-hardware speed claim.
 | `add_mul_2_limbs_unchecked` | ARM32, SPARC32/64, wasm32/64, Xtensa, other | ARM LLVM combines the widened row sums with `umull`/`umlal`/`umaal`, which is better than pinning register pairs in inline assembly. The remaining families either lack inline assembly or offer no dual-row instruction beyond the same two products. |
 | `mul_2_limbs_unchecked` | ARM32, POWER32, RISC-V32, LoongArch32/64, MIPS32/64, SPARC32/64, wasm32/64, Xtensa, other | Optimized codegen was already compact: ARM uses `umull`/`umaal`/`umlal`, POWER32 uses `mullw`/`mulhwu`, RISC-V M uses `mul`/`mulhu`, and LoongArch64 uses `mul.d`/`mulh.du`. s390x is the exception: LLVM expanded the fallback into a spill-heavy multi-block body, so it now has a compact `mlgr` kernel. |
 | `add_sub_limbs_unchecked` | x86-64 without ADX and every non-ADX ISA | Only ADX provides independent CF and OF chains. Elsewhere, assembly would serialize the two operations on one flag register; LLVM can interleave the two explicit Boolean carry values instead. |
-| `add_sub_from_limbs_unchecked` | x86-64 without ADX and every non-ADX ISA | Exact source aliasing is already visible to the Rust loop, while non-ADX machines still have only one hardware flag chain. The portable form gives LLVM more scheduling freedom. |
+| `add_sub_from_limbs_unchecked` | AArch64, ARMv7, and other non-x86 targets | x86-64 selects ADX first, then AVX2, then the scalar fallback through the central selector. A reviewed NEON prototype duplicated scalar loads and carry arithmetic around every vector pair, so without native evidence that it wins, both AArch64 and ARMv7 intentionally retain the scalar alias-safe loop. Native ARM speed is not claimed. |
 | `add_reverse_sub_limbs_unchecked` | x86-64 without ADX and every non-ADX ISA | Reversing subtraction does not change the single-flag limitation. The ADX backend is the only implementation with a genuinely different two-chain schedule. |
 | `add_two_limbs_unchecked` | x86-64 without ADX and every non-ADX ISA | Two independent additions benefit from ADX’s CF/OF split. On other ISAs, compiler-visible Boolean carries avoid artificial serialization through one condition-code register. |
 | `monty_redc_unchecked` | x86-64 baseline/ADX-only, x86, ARM32, POWER32, RISC-V32, LoongArch32, MIPS32/64, SPARC32/64, wasm32/64, Xtensa, other | The i686 fused assembly candidate lost at common lengths while LLVM retained one allocator-visible traversal and selected BMI2 `mulx` when enabled. ARM32 codegen uses `umaal`; the other portable paths expose the two widened carry chains without forcing fixed multiply registers. |

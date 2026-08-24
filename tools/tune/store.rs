@@ -6,6 +6,7 @@
 //! JSON: the store only carries numbers and short strings, and adding a
 //! serialization dependency for that would outsize the code.
 
+use core::{fmt::Write as _, num::NonZeroUsize};
 use std::{
     collections::HashMap,
     env,
@@ -16,12 +17,79 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::tuning_profile::TuningProfile;
+use crate::{platform::platform_identity, tuning_profile::TuningProfile};
 
 /// Machine-stable cache file, shared across runs on one host.
 pub const SCORE_CACHE_NAME: &str = "score-cache.json";
 
 const SCORE_SCHEMA_VERSION: &str = "mp-tune-score-v1";
+
+/// Hardware and toolchain context that makes a timing reusable.
+///
+/// The context is rendered once and hashed into every candidate score key.
+/// Fields intentionally remain owned strings: platform discovery is
+/// best-effort and may produce partial values on hosts without Linux sysfs.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MeasurementContext {
+    platform: String,
+    target: String,
+    compiler: String,
+    flags: String,
+    executor: String,
+}
+
+impl MeasurementContext {
+    /// Build the context for the current tuner process.
+    #[must_use]
+    pub fn current() -> Self {
+        let platform = platform_identity().key();
+        let target = format!(
+            "arch={};os={};family={};pointer_bits={}",
+            env::consts::ARCH,
+            env::consts::OS,
+            env::consts::FAMILY,
+            usize::BITS,
+        );
+        let compiler = compiler_identity();
+        let flags = ["RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"]
+            .iter()
+            .filter_map(|name| env::var(name).ok().map(|value| format!("{name}={value}")))
+            .collect::<Vec<_>>()
+            .join(",");
+        let workers = std::thread::available_parallelism().map_or(1, NonZeroUsize::get);
+        let executor = format!(
+            "{};workers={workers}",
+            if cfg!(feature = "rayon") {
+                "rayon"
+            } else {
+                "sequential"
+            },
+        );
+        Self {
+            platform,
+            target,
+            compiler,
+            flags,
+            executor,
+        }
+    }
+
+    /// Stable single-line rendering suitable for score keys and reports.
+    #[must_use]
+    pub fn key(&self) -> String {
+        [
+            ("platform", self.platform.as_str()),
+            ("target", self.target.as_str()),
+            ("compiler", self.compiler.as_str()),
+            ("flags", self.flags.as_str()),
+            ("executor", self.executor.as_str()),
+        ]
+        .into_iter()
+        .map(|(name, value)| format!("{name}={}:{}", value.len(), compact_context(value)))
+        .collect::<Vec<_>>()
+        .join("|")
+    }
+}
 
 /// FNV-1a 64-bit hash over the rendered profile source.
 ///
@@ -68,9 +136,7 @@ fn workspace_context_hash() -> Option<u64> {
             bytes.extend_from_slice(value.to_string_lossy().as_bytes());
         }
     }
-    let rustc = env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-    let version = Command::new(rustc).arg("-vV").output().ok()?;
-    bytes.extend_from_slice(&version.stdout);
+    bytes.extend_from_slice(MeasurementContext::current().key().as_bytes());
     for path in files {
         if path.ends_with("src/int/tuned_thresholds.rs") {
             continue;
@@ -80,6 +146,29 @@ fn workspace_context_hash() -> Option<u64> {
         bytes.extend_from_slice(&fs::read(path).ok()?);
     }
     Some(fnv1a(&bytes))
+}
+
+fn compiler_identity() -> String {
+    let rustc = env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    Command::new(rustc)
+        .arg("-vV")
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map_or_else(|| "unknown".to_owned(), |value| value.trim().to_owned())
+}
+
+fn compact_context(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| match character {
+            '\\' => "\\\\".to_owned(),
+            '\n' => "\\n".to_owned(),
+            '\r' => "\\r".to_owned(),
+            '|' => "\\|".to_owned(),
+            _ => character.to_string(),
+        })
+        .collect()
 }
 
 fn collect_files(directory: &Path, files: &mut Vec<PathBuf>) -> Option<()> {
@@ -196,6 +285,7 @@ pub fn write_report(
         }
     };
     let rendered = profile.render("// Final tuned profile");
+    let context = MeasurementContext::current().key();
     let decisions_json = decisions
         .iter()
         .map(|(knob, outcome)| {
@@ -210,9 +300,10 @@ pub fn write_report(
     drop(
         file.write_all(
             format!(
-                "{{\"cpu\":{},\"date\":{},\"decisions\":[{}],\"profile_source\":{}}}\n",
+                "{{\"cpu\":{},\"date\":{},\"measurement_context\":{},\"decisions\":[{}],\"profile_source\":{}}}\n",
                 json_string(cpu),
                 json_string(date),
+                json_string(&context),
                 decisions_json,
                 json_string(&rendered),
             )
@@ -222,7 +313,26 @@ pub fn write_report(
 }
 
 fn json_string(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    let mut escaped = String::with_capacity(value.len().saturating_add(2));
+    escaped.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\u{08}' => escaped.push_str("\\b"),
+            '\u{0c}' => escaped.push_str("\\f"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            control if control <= '\u{1f}' => {
+                write!(escaped, "\\u{:04x}", u32::from(control))
+                    .expect("writing into a String cannot fail");
+            }
+            ordinary => escaped.push(ordinary),
+        }
+    }
+    escaped.push('"');
+    escaped
 }
 
 /// FNV-1a 64-bit over arbitrary bytes.
@@ -321,6 +431,32 @@ mod tests {
         assert!(
             !rendered.contains('(') && !rendered.contains(' '),
             "{rendered}"
+        );
+    }
+
+    #[test]
+    fn measurement_context_key_is_stable_and_single_line() {
+        let context = MeasurementContext {
+            platform: "model=test|cpu=3".to_owned(),
+            target: "arch=x86_64".to_owned(),
+            compiler: "rustc 1.90\ncommit".to_owned(),
+            flags: "RUSTFLAGS=-C opt".to_owned(),
+            executor: "built-in-thread-pool;workers=4".to_owned(),
+        };
+        let key = context.key();
+        assert_eq!(key, context.key());
+        assert!(key.contains("platform="));
+        assert!(key.contains("\\|"));
+        assert!(key.contains("\\n"));
+        assert!(!key.contains('\n'));
+        assert!(key.contains("executor="));
+    }
+
+    #[test]
+    fn report_strings_escape_every_json_control_character() {
+        assert_eq!(
+            json_string("profile\n\t\u{07}\\\""),
+            "\"profile\\n\\t\\u0007\\\\\\\"\""
         );
     }
 }

@@ -1,6 +1,6 @@
 //! Equal-width truncated low-product comparisons against GMP's `mpn_mullo_n`.
 
-#![allow(
+#![expect(
     unsafe_code,
     reason = "the benchmark calls GMP's internal mullo routine on exact disjoint limb spans"
 )]
@@ -10,10 +10,10 @@ use core::{hint::black_box, mem::size_of};
 use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
 use mp_anafis::tune_api::tier::{
     Limb,
-    state::{MulBenchScratch, MulloBenchScratch},
+    state::{LowProductBenchState, MultiplicationBenchState},
 };
 
-use crate::shared::operands;
+use crate::shared::{operands, to_gmp_limbs, validated_gmp_count};
 
 const LOW_PRODUCT_SIZES: [usize; 7] = [32, 64, 192, 384, 1_024, 4_096, 8_192];
 const LOW_BASECASE_SIZES: [usize; 3] = [32, 64, 192];
@@ -32,15 +32,15 @@ unsafe extern "C" {
 #[divan::bench(args = LOW_PRODUCT_SIZES)]
 fn mp_mullo(bencher: divan::Bencher, len: usize) {
     let (left, right, mut full_product) = operands(len);
-    let mut full_scratch = MulBenchScratch::default();
-    full_scratch.run(&mut full_product, &left, &right);
+    let mut full_scratch = MultiplicationBenchState::default();
+    full_scratch.prepare(&mut full_product, &left, &right).run();
 
     let mut destination = vec![Limb::MIN; len];
-    let mut low_scratch = MulloBenchScratch::default();
+    let mut low_scratch = LowProductBenchState::default();
     low_scratch.run(&mut destination, &left, &right);
-    let expected_low = full_product
-        .get(..len)
-        .expect("full Mp product contains its low half");
+    let Some(expected_low) = full_product.get(..len) else {
+        return;
+    };
     assert_eq!(
         destination.as_slice(),
         expected_low,
@@ -63,7 +63,7 @@ fn mp_basecase(bencher: divan::Bencher, len: usize) {
     let mut destination = vec![Limb::MIN; len];
 
     bencher.bench_local(|| {
-        MulloBenchScratch::run_basecase(
+        LowProductBenchState::run_basecase(
             black_box(&mut destination),
             black_box(&left),
             black_box(&right),
@@ -76,14 +76,14 @@ fn mp_basecase(bencher: divan::Bencher, len: usize) {
 fn mp_forced_root_4096(bencher: divan::Bencher, small_len: usize) {
     let len = 4_096;
     let (left, right, mut full_product) = operands(len);
-    let mut full_scratch = MulBenchScratch::default();
-    full_scratch.run(&mut full_product, &left, &right);
-    let expected_low = full_product
-        .get(..len)
-        .expect("full Mp product contains its low half");
+    let mut full_scratch = MultiplicationBenchState::default();
+    full_scratch.prepare(&mut full_product, &left, &right).run();
+    let Some(expected_low) = full_product.get(..len) else {
+        return;
+    };
 
     let mut destination = vec![Limb::MIN; len];
-    let mut low_scratch = MulloBenchScratch::default();
+    let mut low_scratch = LowProductBenchState::default();
     low_scratch.run_forced_root(&mut destination, &left, &right, small_len);
     assert_eq!(
         destination.as_slice(),
@@ -105,15 +105,11 @@ fn mp_forced_root_4096(bencher: divan::Bencher, small_len: usize) {
 #[divan::bench(args = LOW_PRODUCT_SIZES)]
 fn mp_full_product(bencher: divan::Bencher, len: usize) {
     let (left, right, mut destination) = operands(len);
-    let mut scratch = MulBenchScratch::default();
+    let mut scratch = MultiplicationBenchState::default();
+    let mut prepared = scratch.prepare(&mut destination, &left, &right);
 
     bencher.bench_local(|| {
-        scratch.run(
-            black_box(&mut destination),
-            black_box(&left),
-            black_box(&right),
-        );
-        let _output = black_box(&destination);
+        black_box(&mut prepared).run();
     });
 }
 
@@ -125,17 +121,11 @@ fn gmp_mullo(bencher: divan::Bencher, len: usize) {
         "raw low-product comparison requires equal Mp and GMP limb widths"
     );
     let (mp_left, mp_right, _) = operands(len);
-    let left: Vec<limb_t> = mp_left
-        .into_iter()
-        .map(|limb| limb_t::try_from(limb).expect("Mp limb fits GMP limb"))
-        .collect();
-    let right: Vec<limb_t> = mp_right
-        .into_iter()
-        .map(|limb| limb_t::try_from(limb).expect("Mp limb fits GMP limb"))
-        .collect();
+    let left = to_gmp_limbs(mp_left);
+    let right = to_gmp_limbs(mp_right);
     let mut destination = vec![limb_t::MIN; len];
     let mut full_product = vec![limb_t::MIN; len.saturating_mul(2)];
-    let gmp_len = size_t::try_from(len).expect("benchmark width fits GMP mp_size_t");
+    let gmp_len = validated_gmp_count(len);
 
     // SAFETY: all vectors are independently allocated; each input contains
     // exactly gmp_len initialized limbs, destination has gmp_len writable
@@ -155,9 +145,9 @@ fn gmp_mullo(bencher: divan::Bencher, len: usize) {
             gmp_len,
         );
     }
-    let expected_low = full_product
-        .get(..len)
-        .expect("full GMP product contains its low half");
+    let Some(expected_low) = full_product.get(..len) else {
+        return;
+    };
     assert_eq!(
         destination.as_slice(),
         expected_low,

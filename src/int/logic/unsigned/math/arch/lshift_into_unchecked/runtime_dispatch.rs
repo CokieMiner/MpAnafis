@@ -6,6 +6,7 @@
 //! ## Testing override (debug builds only)
 //!
 //! ```bash
+//! MP_ANAFIS_TEST_BACKEND=avx512 cargo test test_
 //! MP_ANAFIS_TEST_BACKEND=avx2 cargo test test_
 //! MP_ANAFIS_TEST_BACKEND=sse2 cargo test test_
 //! ```
@@ -16,6 +17,7 @@ use super::{
     Limb, X86SimdTier, selected_x86_simd_tier,
     x86_64::lshift_into_unchecked as lshift_into_unchecked_sse2,
     x86_64_avx2::lshift_into_unchecked as lshift_into_unchecked_avx2,
+    x86_64_avx512::lshift_into_unchecked as lshift_into_unchecked_avx512,
 };
 
 type LshiftIntoKernel = unsafe fn(*mut Limb, *const Limb, usize, u32) -> Limb;
@@ -24,6 +26,7 @@ static KERNEL: OnceLock<LshiftIntoKernel> = OnceLock::new();
 
 fn select_kernel() -> LshiftIntoKernel {
     match selected_x86_simd_tier() {
+        X86SimdTier::Avx512 => lshift_into_unchecked_avx512,
         X86SimdTier::Avx2 => lshift_into_unchecked_avx2,
         X86SimdTier::Sse2 => lshift_into_unchecked_sse2,
     }

@@ -23,36 +23,113 @@ use super::{Division, DoubleLimb, InternalMpUint, LIMB_BITS, Limb, SqrtScratch};
 /// correction suffices and the total cost is dominated by the final division
 /// rather than by `log2(bits)` of them.
 impl SqrtScratch {
+    /// Computes the floor square root of inline representations (up to 4 limbs)
+    /// without scratch structures or allocations.
+    #[allow(
+        clippy::similar_names,
+        clippy::as_conversions,
+        clippy::cast_possible_truncation,
+        reason = "Mathematical notation maps intermediate columns and carries for Zimmermann 2-by-1 isqrt"
+    )]
+    #[must_use]
+    pub fn isqrt_inline(a: &InternalMpUint) -> Option<InternalMpUint> {
+        if a.is_zero() || a.is_one() {
+            return Some(a.clone());
+        }
+
+        let len = a.limbs().len();
+        if len > 4 {
+            return None;
+        }
+
+        let [a0, a1, a2, a3] = a.extract_4();
+
+        if len == 1 {
+            return Some(InternalMpUint::from_limb(a0.isqrt()));
+        }
+
+        if len == 2 {
+            let val = ((a1 as DoubleLimb) << LIMB_BITS) | (a0 as DoubleLimb);
+            let root = val.isqrt() as Limb;
+            return Some(InternalMpUint::from_limb(root));
+        }
+
+        // Zimmermann 2-by-1 step: assembles 4 limbs into two DoubleLimb halves
+        // and computes isqrt via a single correction round. All arithmetic uses
+        // DoubleLimb so the step is portable across 16-, 32-, and 64-bit targets.
+        let np_hi = ((a3 as DoubleLimb) << LIMB_BITS) | (a2 as DoubleLimb);
+        let np_lo = ((a1 as DoubleLimb) << LIMB_BITS) | (a0 as DoubleLimb);
+
+        if np_hi == 0 {
+            let root = np_lo.isqrt() as Limb;
+            return Some(InternalMpUint::from_limb(root));
+        }
+
+        let lz = (np_hi.leading_zeros() & !1) as usize;
+        let (norm_hi, norm_lo) = if lz == 0 {
+            (np_hi, np_lo)
+        } else {
+            let hi = (np_hi << lz) | (np_lo >> ((LIMB_BITS * 2).wrapping_sub(lz)));
+            let lo = np_lo << lz;
+            (hi, lo)
+        };
+
+        let sp0 = norm_hi.isqrt();
+        let rp0_init = norm_hi.wrapping_sub(sp0.wrapping_mul(sp0));
+
+        let rp0 =
+            (rp0_init << (LIMB_BITS.wrapping_sub(1))) | (norm_lo >> (LIMB_BITS.wrapping_add(1)));
+        // SAFETY: np_hi > 0 guarantees norm_hi >= 1, so sp0 = isqrt(norm_hi) >= 1 (non-zero).
+        let mut q = unsafe { rp0.checked_div(sp0).unwrap_unchecked() };
+        let one = DoubleLimb::from(1_u8);
+        if q >= one << LIMB_BITS {
+            q = (one << LIMB_BITS).wrapping_sub(1);
+        }
+        let u = rp0.wrapping_sub(q.wrapping_mul(sp0));
+        let mut root_128 = (sp0 << LIMB_BITS) | q;
+        #[allow(
+            clippy::as_conversions,
+            clippy::cast_possible_wrap,
+            clippy::cast_possible_truncation,
+            reason = "u >> (LIMB_BITS - 1) is a single bit in {0, 1} and fits in isize on 16/32/64-bit targets"
+        )]
+        let mut cc: isize = (u >> (LIMB_BITS.wrapping_sub(1))) as isize;
+        let mut rem_128 = (u << (LIMB_BITS.wrapping_add(1)))
+            | (norm_lo & ((one << (LIMB_BITS.wrapping_add(1))).wrapping_sub(1)));
+        let q2 = q.wrapping_mul(q);
+        if rem_128 < q2 {
+            cc = cc.wrapping_sub(1);
+        }
+        rem_128 = rem_128.wrapping_sub(q2);
+
+        while cc < 0 {
+            let (r1, c1) = rem_128.overflowing_add(root_128);
+            if c1 {
+                cc = cc.wrapping_add(1);
+            }
+            root_128 = root_128.wrapping_sub(1);
+            let (r2, c2) = r1.overflowing_add(root_128);
+            if c2 {
+                cc = cc.wrapping_add(1);
+            }
+            rem_128 = r2;
+            cc = cc.wrapping_add(1);
+        }
+
+        if lz > 0 {
+            root_128 >>= lz >> 1;
+        }
+
+        let r_lo = root_128 as Limb;
+        let r_hi = (root_128 >> LIMB_BITS) as Limb;
+
+        Some(InternalMpUint::from_limbs_2(r_lo, r_hi))
+    }
+
     /// Computes the floor square root with Newton iteration.
     pub fn isqrt_basecase(&mut self, a: &InternalMpUint) -> InternalMpUint {
-        if a.is_zero() || a.is_one() {
-            return a.clone();
-        }
-
-        let limbs = a.limbs();
-        if limbs.len() == 1 {
-            // SAFETY: len == 1 so get_unchecked is safe
-            let val = unsafe { *limbs.get_unchecked(0) };
-            return InternalMpUint::from_limb(val.isqrt());
-        }
-
-        if limbs.len() == 2 {
-            // SAFETY: limbs length is exactly 2, so 0 and 1 are in bounds
-            let lo = unsafe { *limbs.get_unchecked(0) };
-            // SAFETY: limbs length is exactly 2, so 0 and 1 are in bounds
-            let hi = unsafe { *limbs.get_unchecked(1) };
-            #[allow(
-                clippy::as_conversions,
-                reason = "Limb is guaranteed to fit within DoubleLimb"
-            )]
-            let val = ((hi as DoubleLimb) << LIMB_BITS) | (lo as DoubleLimb);
-            #[allow(
-                clippy::as_conversions,
-                clippy::cast_possible_truncation,
-                reason = "isqrt fits in Limb"
-            )]
-            let root = val.isqrt() as Limb;
-            return InternalMpUint::from_limb(root);
+        if let Some(root) = Self::isqrt_inline(a) {
+            return root;
         }
 
         let bits = a.significant_bits();
@@ -64,8 +141,7 @@ impl SqrtScratch {
 
         let root = loop {
             Division::div_rem_into(a, &x, &mut quotient, &mut rem, &mut self.div_scratch);
-            next.clone_from(&x);
-            next.add_assign(&quotient);
+            next.assign_sum(&x, &quotient);
             next.shr_assign(1);
 
             if next.cmp(&x) != Ordering::Less {
@@ -84,7 +160,7 @@ impl SqrtScratch {
     pub fn sqrt_rem_basecase(&mut self, a: &InternalMpUint) -> (InternalMpUint, InternalMpUint) {
         let root = self.isqrt_basecase(a);
         let mut square = self.get_temp();
-        square.assign_product_with_scratch(&root, &root, &mut self.mul_scratch);
+        square.assign_square_with_scratch(&root, &mut self.mul_scratch);
         let mut rem = self.get_temp();
         rem.clone_from(a);
         rem.sub_assign(&square);
@@ -102,7 +178,7 @@ impl SqrtScratch {
 fn seed_estimate(a: &InternalMpUint, bits: usize, scratch: &mut SqrtScratch) -> InternalMpUint {
     // Below this the recursion costs more than the corrections it saves: the
     // two-limb basecase above already answers everything narrower.
-    const HALVING_FLOOR_BITS: usize = 4 * LIMB_BITS;
+    const HALVING_FLOOR_BITS: usize = 2 * LIMB_BITS;
 
     if bits < HALVING_FLOOR_BITS {
         let mut estimate = InternalMpUint::one();
@@ -148,7 +224,7 @@ impl SqrtScratch {
     ) -> (InternalMpUint, InternalMpUint) {
         let scratch = self;
         let len = a.limbs().len();
-        if len <= 2 {
+        if len <= 4 {
             return scratch.sqrt_rem_basecase(a);
         }
 
@@ -196,39 +272,65 @@ impl SqrtScratch {
         s.shl_assign(k.wrapping_mul(LIMB_BITS));
         s.add_assign(&q);
 
-        let mut a0 = scratch.get_temp();
-        let end = min(k, limbs.len());
-        // SAFETY: 0..end is within bounds of limbs
-        let a0_slice = unsafe { limbs.get_unchecked(0..end) };
-        a0.clone_from_slice(a0_slice);
+        let remainder = if u.cmp(&q) == Ordering::Less {
+            // u < q: A borrow is possible, so we must construct u_b and compare with q^2.
+            let mut a0 = scratch.get_temp();
+            let end = min(k, limbs.len());
+            // SAFETY: 0..end is within bounds of limbs
+            let a0_slice = unsafe { limbs.get_unchecked(0..end) };
+            a0.clone_from_slice(a0_slice);
 
-        let mut u_b = u;
-        u_b.shl_assign(k.wrapping_mul(LIMB_BITS));
-        u_b.add_assign(&a0);
-        scratch.return_temp(a0);
+            let mut u_b = u;
+            u_b.shl_assign(k.wrapping_mul(LIMB_BITS));
+            u_b.add_assign(&a0);
+            scratch.return_temp(a0);
 
-        let mut q_sq = scratch.get_temp();
-        q_sq.assign_product_with_scratch(&q, &q, &mut scratch.mul_scratch);
-        scratch.return_temp(q);
+            let mut q_sq = scratch.get_temp();
+            q_sq.assign_square_with_scratch(&q, &mut scratch.mul_scratch);
 
-        let remainder = if u_b.cmp(&q_sq) == Ordering::Less {
-            let remainder = need_remainder.then(|| {
-                let r_val = q_sq.sub(&u_b);
+            let rem = if u_b.cmp(&q_sq) == Ordering::Less {
+                let remainder = need_remainder.then(|| {
+                    let r_val = q_sq.sub(&u_b);
 
-                let mut two_s_minus_1 = s.clone();
-                two_s_minus_1.shl_assign(1);
-                two_s_minus_1.sub_assign(&InternalMpUint::one());
+                    let mut two_s_minus_1 = s.clone();
+                    two_s_minus_1.shl_assign(1);
+                    two_s_minus_1.sub_assign(&InternalMpUint::one());
 
-                two_s_minus_1.sub(&r_val)
-            });
-            s.sub_assign(&InternalMpUint::one());
-            remainder
-        } else if need_remainder {
-            Some(u_b.sub(&q_sq))
+                    two_s_minus_1.sub(&r_val)
+                });
+                s.sub_assign(&InternalMpUint::one());
+                remainder
+            } else if need_remainder {
+                Some(u_b.sub(&q_sq))
+            } else {
+                None
+            };
+            scratch.return_temp(q_sq);
+            rem
         } else {
-            None
+            // Mathematical invariant: Since q < B^k and u >= q,
+            // u * B^k + A_0 >= q * B^k > q(B^k - 1) >= q^2.
+            // Therefore u_b > q_sq strictly holds without squaring q.
+            need_remainder.then(|| {
+                let mut a0 = scratch.get_temp();
+                let end = min(k, limbs.len());
+                // SAFETY: 0..end is within bounds of limbs
+                let a0_slice = unsafe { limbs.get_unchecked(0..end) };
+                a0.clone_from_slice(a0_slice);
+
+                let mut u_b = u;
+                u_b.shl_assign(k.wrapping_mul(LIMB_BITS));
+                u_b.add_assign(&a0);
+                scratch.return_temp(a0);
+
+                let mut q_sq = scratch.get_temp();
+                q_sq.assign_square_with_scratch(&q, &mut scratch.mul_scratch);
+                let rem = u_b.sub(&q_sq);
+                scratch.return_temp(q_sq);
+                rem
+            })
         };
-        scratch.return_temp(q_sq);
+        scratch.return_temp(q);
 
         (s, remainder.unwrap_or_else(InternalMpUint::zero))
     }

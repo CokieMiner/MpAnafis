@@ -41,7 +41,7 @@ impl SharedEval {
 
     /// Copy a polynomial part into an evaluation buffer and clear its guard.
     pub fn copy_part(dst: &mut [Limb], src: &[Limb]) {
-        assert!(
+        debug_assert!(
             src.len() < dst.len(),
             "evaluation part must leave at least one guard limb"
         );
@@ -153,7 +153,7 @@ impl SharedEval {
                     return index.wrapping_add(1);
                 }
             }
-            assert_eq!(carry, 0, "reconstruction buffer dropped a final carry");
+            debug_assert_eq!(carry, 0, "reconstruction buffer dropped a final carry");
             return dst.len();
         }
         carry_start
@@ -168,7 +168,7 @@ impl SharedEval {
     /// # Safety
     ///
     /// If `src` is nonempty, `dst.len() >= src.len()`.
-    #[allow(clippy::inline_always, reason = "Critical for Toom-Cook evaluation")]
+    #[expect(clippy::inline_always, reason = "Critical for Toom-Cook evaluation")]
     #[inline(always)]
     pub unsafe fn add_part(dst: &mut [Limb], src: &[Limb]) {
         // SAFETY: the caller guarantees the source fits at offset zero.
@@ -204,7 +204,7 @@ impl SharedEval {
     /// *before* the pass, which is what lets the pass itself run on the fused
     /// add-and-subtract kernel instead of branching per limb.
     pub fn sum_and_absolute_difference(even_sum: &mut [Limb], odd_difference: &mut [Limb]) -> bool {
-        assert_eq!(
+        debug_assert_eq!(
             even_sum.len(),
             odd_difference.len(),
             "paired evaluation widths must match"
@@ -230,7 +230,7 @@ impl SharedEval {
         odd_difference: &mut [Limb],
         odd_is_larger: bool,
     ) {
-        assert_eq!(
+        debug_assert_eq!(
             even_sum.len(),
             odd_difference.len(),
             "paired evaluation widths must match"
@@ -258,7 +258,7 @@ impl SharedEval {
         odd: &mut [Limb],
         odd_is_larger: bool,
     ) {
-        assert_eq!(
+        debug_assert_eq!(
             even_sum.len(),
             odd.len(),
             "paired evaluation widths must match"
@@ -290,7 +290,7 @@ impl SharedEval {
         debug_assert_eq!(carry, 0, "evaluation exceeded its retained guard limb");
     }
 
-    #[allow(clippy::inline_always, reason = "Critical for Toom-Cook evaluation")]
+    #[expect(clippy::inline_always, reason = "Critical for Toom-Cook evaluation")]
     /// Add `scalar * src` into `dst`, selecting the backend for this one call.
     ///
     /// The convenience form of [`Self::add_mul_word_with_kernel_in_place`], for callers
@@ -312,12 +312,12 @@ impl SharedEval {
         if scalar == 0 || src.is_empty() {
             return;
         }
-        assert!(
+        debug_assert!(
             src.len() <= dst.len(),
             "scalar-product source exceeds evaluation destination"
         );
-        // SAFETY: the release check above proves both pointer spans cover
-        // `src.len()` initialized limbs. Rust's borrows make them disjoint.
+        // SAFETY: the guarded-evaluation contract proves both pointer spans
+        // cover `src.len()` initialized limbs. Rust's borrows make them disjoint.
         let mut carry = unsafe { kernel(dst.as_mut_ptr(), src.as_ptr(), src.len(), scalar) };
         if carry != 0 {
             let (_, suffix) = dst.split_at_mut(src.len());
@@ -332,7 +332,7 @@ impl SharedEval {
         }
     }
 
-    #[allow(clippy::inline_always, reason = "Critical for Toom-Cook interpolation")]
+    #[expect(clippy::inline_always, reason = "Critical for Toom-Cook interpolation")]
     /// Subtract `scalar * src` from `dst`, borrowing through the guard.
     ///
     /// The interpolation counterpart of [`Self::add_mul_word_in_place`]. The kernel
@@ -344,12 +344,12 @@ impl SharedEval {
         if scalar == 0 || src.is_empty() {
             return;
         }
-        assert!(
+        debug_assert!(
             src.len() <= dst.len(),
             "scalar-product source exceeds interpolation destination"
         );
-        // SAFETY: the release check above proves both pointer spans cover
-        // `src.len()` initialized limbs. Rust's borrows make them disjoint.
+        // SAFETY: the interpolation-buffer contract proves both pointer spans
+        // cover `src.len()` initialized limbs. Rust's borrows make them disjoint.
         let (carry, initial_borrow) = unsafe {
             ArchKernels::sub_mul_limbs_unchecked(dst.as_mut_ptr(), src.as_ptr(), src.len(), scalar)
         };
@@ -472,7 +472,7 @@ impl SharedEval {
 
     /// Replace `dst` with `positive-dst` modulo its fixed width.
     pub fn reverse_difference_in_place(dst: &mut [Limb], positive: &[Limb]) {
-        assert_eq!(
+        debug_assert_eq!(
             dst.len(),
             positive.len(),
             "reverse-difference widths must match"

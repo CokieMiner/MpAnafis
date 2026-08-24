@@ -25,8 +25,6 @@
 
 use super::{Addition, ArchKernels, LIMB_BITS, Limb, SSA_DIRECT_SHIFT_MAX_LIMBS, SsaCarry};
 
-use shift::UNROLLED_SHIFT_MAX_LIMBS;
-
 mod arith;
 mod shift;
 mod shift_from;

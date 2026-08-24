@@ -126,8 +126,8 @@ pub unsafe fn add_mul_limbs_unchecked(
             carry = inout(reg) carry,
             chunks = inout(reg) chunks => _,
             rem = inout(reg) rem => _,
-            src = inout(reg) src => _,
-            dst = inout(reg) dst => _,
+            src = inout(reg_nonzero) src => _,
+            dst = inout(reg_nonzero) dst => _,
             scalar = in(reg) scalar,
             src_v0 = out(reg) _,
             src_v1 = out(reg) _,
@@ -145,6 +145,9 @@ pub unsafe fn add_mul_limbs_unchecked(
             c1 = out(reg) _,
             c2 = out(reg) _,
             c3 = out(reg) _,
+            out("ctr") _,
+            out("xer") _,
+            out("cr0") _,
             options(nostack)
         );
     }

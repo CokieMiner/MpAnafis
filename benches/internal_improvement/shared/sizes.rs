@@ -76,29 +76,6 @@ pub const FERMAT_TRANSFORM_SIZES: [usize; 12] = [
     256, 512, 1_024, 2_048, 4_096, 8_192, 16_384, 524_288, 1_048_576, 2_097_152, 4_194_304,
     8_388_608,
 ];
-/// Widths whose exact coefficient bound fits one Goldilocks modulus at 23 bits per digit.
-#[cfg(debug_assertions)]
-pub const GOLDILOCKS_23_SIZES: [usize; 3] = [2_048, 4_096, 16_384];
-/// Release widths whose exact coefficient bound fits one Goldilocks modulus at 23 bits per digit.
-#[cfg(not(debug_assertions))]
-pub const GOLDILOCKS_23_SIZES: [usize; 6] = [2_048, 4_096, 8_192, 16_384, 24_576, 32_768];
-/// Widths whose exact coefficient bound fits two 31-bit moduli at 20 bits per digit.
-#[cfg(debug_assertions)]
-pub const TWO_PRIME_20_SIZES: [usize; 4] = [2_048, 4_096, 16_384, 65_536];
-/// Release widths whose exact coefficient bound fits two 31-bit moduli at 20 bits per digit.
-#[cfg(not(debug_assertions))]
-pub const TWO_PRIME_20_SIZES: [usize; 12] = [
-    2_048, 4_096, 8_192, 16_384, 24_576, 32_768, 49_152, 65_536, 98_304, 131_072, 196_608, 262_144,
-];
-/// Widths whose exact coefficient bound fits two 31-bit moduli at 19 bits per digit.
-#[cfg(debug_assertions)]
-pub const TWO_PRIME_19_SIZES: [usize; 4] = [2_048, 4_096, 16_384, 65_536];
-/// Release widths whose exact coefficient bound fits two 31-bit moduli at 19 bits per digit.
-#[cfg(not(debug_assertions))]
-pub const TWO_PRIME_19_SIZES: [usize; 14] = [
-    2_048, 4_096, 8_192, 16_384, 24_576, 32_768, 49_152, 65_536, 98_304, 131_072, 196_608, 262_144,
-    524_288, 1_048_576,
-];
 pub const HALF_SIZES: [(usize, usize); 6] = [
     (140, 120),
     (280, 240),
@@ -134,15 +111,32 @@ pub const SCALING_SIZES: [usize; 9] = [
     1_024, 2_048, 4_096, 8_192, 16_384, 32_768, 65_536, 131_072, 262_144,
 ];
 
-/// The continuation of `SCALING_SIZES` past the point where one product costs
-/// enough that divan's default sampling would run for hours.
+/// Cache-sized SSA planning probes, kept separate from production comparisons
+/// because forced-SSA preparation is not meaningful at basecase widths.
+pub const SSA_PLANNING_SIZES: [usize; 28] = [
+    256, 384, 512, 640, 768, 896, 1_024, 1_280, 1_536, 1_792, 2_048, 2_560, 3_072, 3_584, 4_096,
+    5_120, 6_144, 7_168, 8_192, 10_240, 12_288, 14_336, 16_384, 20_480, 24_576, 32_768, 49_152,
+    65_536,
+];
+
+/// Full production-tower comparison ladder through the cache-sized range.
 ///
-/// Benchmarks over these widths pin `sample_size = 1` so a sample is a single
-/// product. The top cell holds 134 MB per operand and a 268 MB destination, far
-/// outside any cache level — these points measure the memory system as much as
-/// the algorithm, which is the regime a scaling claim has to survive.
-pub const HUGE_SIZES: [usize; 6] = [
-    524_288, 1_048_576, 2_097_152, 4_194_304, 8_388_608, 16_777_216,
+/// Exact neighbors surround the measured schoolbook/Karatsuba, direct
+/// balanced-Toom-8, and SSA crossovers. Remaining points keep the ladder dense
+/// enough to expose geometry cliffs while preserving powers of two for scaling
+/// fits.
+pub const PRODUCTION_COMPARE_SIZES: [usize; 63] = [
+    2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 16, 19, 20, 21, 24, 32, 48, 64, 96, 128, 192, 256, 287, 288,
+    289, 384, 512, 535, 536, 537, 640, 768, 799, 800, 801, 896, 1_024, 1_280, 1_536, 1_792, 2_048,
+    2_560, 2_944, 2_960, 2_975, 2_976, 2_977, 3_072, 3_584, 4_096, 5_120, 6_144, 7_168, 8_192,
+    10_240, 12_288, 14_336, 16_384, 20_480, 24_576, 32_768, 49_152, 65_536,
+];
+
+/// Continuation of the production comparison through 33,554,432 limbs (2 Gibit).
+pub const PRODUCTION_COMPARE_HUGE_SIZES: [usize; 19] = [
+    98_304, 131_072, 196_608, 262_144, 393_216, 524_288, 786_432, 1_048_576, 1_572_864, 2_097_152,
+    3_145_728, 4_194_304, 6_291_456, 8_388_608, 16_777_216, 20_971_520, 25_165_824, 29_360_128,
+    33_554_432,
 ];
 
 /// Longer width crossed with the seven ratios the shape matrix tracks:

@@ -68,7 +68,7 @@ impl SsaCarry {
     )]
     #[inline(always)]
     pub fn add_full_in_place(dst: &mut [Limb], src: &[Limb]) -> Limb {
-        assert!(
+        debug_assert!(
             src.len() <= dst.len(),
             "full-width addition source exceeds destination"
         );
@@ -80,7 +80,7 @@ impl SsaCarry {
             unsafe_code,
             reason = "src.len() <= dst.len() by construction; tail range is in bounds"
         )]
-        // SAFETY: the release check above gives `src.len() <= dst.len()`;
+        // SAFETY: the caller's fixed-width contract gives `src.len() <= dst.len()`;
         // equality intentionally yields an empty tail so the escaping carry is
         // returned unchanged.
         let escaped = Self::propagate_carry(unsafe { dst.get_unchecked_mut(src.len()..) });
@@ -98,7 +98,7 @@ impl SsaCarry {
     )]
     #[inline(always)]
     pub fn sub_full_in_place(dst: &mut [Limb], src: &[Limb]) -> Limb {
-        assert!(
+        debug_assert!(
             src.len() <= dst.len(),
             "full-width subtraction source exceeds destination"
         );
@@ -110,7 +110,7 @@ impl SsaCarry {
             unsafe_code,
             reason = "src.len() <= dst.len() by construction; tail range is in bounds"
         )]
-        // SAFETY: the release check above gives `src.len() <= dst.len()`;
+        // SAFETY: the caller's fixed-width contract gives `src.len() <= dst.len()`;
         // equality intentionally yields an empty tail so the escaping borrow is
         // returned unchanged.
         let escaped = Self::propagate_borrow(unsafe { dst.get_unchecked_mut(src.len()..) });

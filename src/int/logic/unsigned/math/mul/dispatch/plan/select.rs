@@ -1,29 +1,15 @@
 //! Tier selection: turning a pair of widths into one plan.
 
 use super::{
-    KARATSUBA_THRESHOLD, LargePlan, MulPlan, Multiplication, NTT_THRESHOLD, Ntt,
+    BALANCED_TOOM8_THRESHOLD, KARATSUBA_THRESHOLD, MulPlan, Multiplication,
     SQR_KARATSUBA_THRESHOLD, SQR_TOOM_COOK_4_THRESHOLD, SQR_TOOM_COOK_6_THRESHOLD,
     SQR_TOOM_COOK_85_THRESHOLD, SQR_TOOM_COOK_THRESHOLD, SquarePlan, TOOM_COOK_4_THRESHOLD,
     TOOM_COOK_6_THRESHOLD, TOOM_COOK_85_THRESHOLD, TOOM_COOK_THRESHOLD, TierCeiling, Widths,
 };
 #[cfg(not(target_pointer_width = "16"))]
-use super::{SQR_SSA_THRESHOLD, SSA_THRESHOLD, Ssa};
+use super::{LargePlan, SQR_SSA_THRESHOLD, SSA_THRESHOLD, Ssa};
 
-/// Select the owned-result strategy, including its benchmark-backed fixed
-/// Karatsuba stack specializations.
 impl Multiplication {
-    #[inline]
-    pub fn select_owned_plan(len_a: usize, len_b: usize) -> MulPlan {
-        let production_plan = Self::select_plan(len_a, len_b, TierCeiling::Full);
-        if matches!(production_plan, MulPlan::Schoolbook | MulPlan::Lopsided) {
-            return production_plan;
-        }
-        if len_a == len_b && matches!(len_a, 20 | 32 | 48) {
-            return MulPlan::Karatsuba;
-        }
-        production_plan
-    }
-
     /// Select a multiplication strategy whose conventional tier cannot exceed
     /// `ceiling`.
     ///
@@ -47,20 +33,31 @@ impl Multiplication {
             return MulPlan::Schoolbook;
         }
 
+        #[cfg(not(target_pointer_width = "16"))]
         if ceiling == TierCeiling::Full {
             // Keying the crossover on the longer operand lets extreme ratios clear
             // it very early, where the padding is most of the ring: at 4091 by 255
             // limbs the transform pads a 255-limb operand into a 2173-limb ring and
             // measured 1.43x behind the reference against the blocked path's 0.91x.
-            if widths.transform_padding_is_affordable() {
-                #[cfg(not(target_pointer_width = "16"))]
-                if Self::crossover_admits(SSA_THRESHOLD, widths) && Ssa::admits_mul(len_a, len_b) {
-                    return MulPlan::Large(LargePlan::Ssa);
-                }
-                if Self::crossover_admits(NTT_THRESHOLD, widths) && Ntt::admits_mul(len_a, len_b) {
-                    return MulPlan::Large(LargePlan::Ntt);
-                }
+            if widths.transform_padding_is_affordable()
+                && Self::crossover_admits(SSA_THRESHOLD, widths)
+                && Ssa::admits_mul(len_a, len_b)
+            {
+                return MulPlan::Large(LargePlan::Ssa);
             }
+        }
+
+        // Balanced Toom-8 has a substantially earlier top-level crossover on
+        // the measured x86-64 profile than the ordinary ordered Toom ladder.
+        // Keep this gate at the full ceiling: lowering the Toom-6/8 thresholds
+        // themselves would also retune every recursive child and lose the
+        // performance this direct root is intended to preserve.
+        if ceiling == TierCeiling::Full
+            && widths.smaller == widths.larger
+            && Self::crossover_admits(BALANCED_TOOM8_THRESHOLD, widths)
+            && widths.toom8_balanced()
+        {
+            return MulPlan::Toom8;
         }
 
         // Offered above the blocked path because it competes with it, not with the
@@ -112,20 +109,12 @@ impl Multiplication {
         }
         let widths = Widths::new(len, len);
 
-        if ceiling == TierCeiling::Full {
-            // Squaring asks its own crossover, not multiplication's. A dedicated
-            // squaring tower is cheaper than the general product at the same width,
-            // but the transform gains more still — its pointwise stage squares
-            // rather than multiplies — so the transform takes over earlier for
-            // squaring, at 2304 limbs against 3072. The tower leads from 1800 to
-            // 2200 limbs and trails by 9% to 12% from 2600 to 3000.
-            #[cfg(not(target_pointer_width = "16"))]
-            if Self::crossover_admits(SQR_SSA_THRESHOLD, widths) && Ssa::admits_sqr(len) {
-                return SquarePlan::Large(LargePlan::Ssa);
-            }
-            if Self::crossover_admits(NTT_THRESHOLD, widths) && Ntt::admits_mul(len, len) {
-                return SquarePlan::Large(LargePlan::Ntt);
-            }
+        #[cfg(not(target_pointer_width = "16"))]
+        if ceiling == TierCeiling::Full
+            && Self::crossover_admits(SQR_SSA_THRESHOLD, widths)
+            && Ssa::admits_sqr(len)
+        {
+            return SquarePlan::Large(LargePlan::Ssa);
         }
 
         if ceiling == TierCeiling::Toom3

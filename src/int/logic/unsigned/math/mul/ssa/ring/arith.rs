@@ -40,13 +40,25 @@ impl SsaRing {
     )]
     #[inline(always)]
     pub unsafe fn classify_residue(coeff: &[Limb], ml: usize) -> Residue {
-        // SAFETY: caller guarantees coeff.len() > ml, so both accesses are in range.
-        let data_zero = unsafe { coeff.get_unchecked(..ml) }.iter().all(|l| *l == 0);
-        if !data_zero {
+        // Fast-path: ordinary residues almost always have a non-zero low limb.
+        // Residue::Zero and Residue::NegOne strictly require all data limbs to be zero.
+        // SAFETY: caller guarantees coeff.len() > ml >= 1.
+        if unsafe { *coeff.get_unchecked(0) } != 0 {
             return Residue::Ordinary;
         }
         // SAFETY: ml < coeff.len() as guaranteed by the caller.
-        match unsafe { *coeff.get_unchecked(ml) } {
+        let guard = unsafe { *coeff.get_unchecked(ml) };
+        if guard > 1 {
+            return Residue::Ordinary;
+        }
+        // SAFETY: caller guarantees coeff.len() > ml, so 1..ml is in range.
+        let data_zero = unsafe { coeff.get_unchecked(1..ml) }
+            .iter()
+            .all(|l| *l == 0);
+        if !data_zero {
+            return Residue::Ordinary;
+        }
+        match guard {
             0 => Residue::Zero,
             1 => Residue::NegOne,
             _ => Residue::Ordinary,
@@ -90,7 +102,7 @@ impl SsaRing {
         // difference/source alias. Architecture selection, including any ADX
         // requirement, remains encapsulated in arch/.
         let (carry, borrow) =
-            unsafe { add_sub_kernel(sum.as_mut_ptr(), (*difference).as_mut_ptr(), source, ml) };
+            unsafe { add_sub_kernel(sum.as_mut_ptr(), difference.cast::<Limb>(), source, ml) };
         debug_assert!(
             carry <= 1 && borrow <= 1,
             "limb kernels return one-bit flags"
@@ -167,52 +179,66 @@ impl SsaRing {
     /// `dst.len() >= coeff_limbs(mod_bits)`.
     pub unsafe fn negate(dst: &mut [Limb], mod_bits: usize) {
         let ml = Self::mod_limbs(mod_bits);
-        let cl = ml.wrapping_add(1);
 
         // SAFETY: caller guarantees dst.len() >= cl.
-        if unsafe { dst.get_unchecked(..cl) }.iter().all(|l| *l == 0) {
+        let is_zero = unsafe { dst.get_unchecked(..ml) }.iter().all(|l| *l == 0);
+        // SAFETY: ml < cl <= dst.len().
+        let guard = unsafe { *dst.get_unchecked(ml) };
+
+        if is_zero {
+            if guard == 1 {
+                // v = 2^n = -1 mod (2^n + 1), so -v = 1.
+                // SAFETY: 0 < cl and ml < cl.
+                unsafe {
+                    *dst.get_unchecked_mut(0) = 1;
+                    *dst.get_unchecked_mut(ml) = 0;
+                }
+            }
             return;
         }
 
-        // Step 1: Negate all data limbs (two's complement of the full cl-limb value).
-        for i in 0..cl {
-            // SAFETY: i < cl, in bounds.
-            let limb_ref = unsafe { dst.get_unchecked_mut(i) };
-            *limb_ref = !*limb_ref;
+        if guard != 0 {
+            // Normalize semi-normalized residue before canonical negation.
+            // SAFETY: caller guarantees dst.len() >= cl.
+            unsafe {
+                Self::normalize(dst, mod_bits);
+            }
+            // SAFETY: caller guarantees dst.len() >= cl.
+            if unsafe { dst.get_unchecked(..ml) }.iter().all(|l| *l == 0) {
+                // SAFETY: ml < cl <= dst.len().
+                if unsafe { *dst.get_unchecked(ml) } == 1 {
+                    // SAFETY: 0 < ml < cl <= dst.len().
+                    unsafe {
+                        *dst.get_unchecked_mut(0) = 1;
+                        *dst.get_unchecked_mut(ml) = 0;
+                    }
+                }
+                return;
+            }
         }
-        // Add 2^n + 2: guard limb += 1, limb[0] += 2.
-        // SAFETY: 0 < cl, in bounds.
-        let (sum_lo, carry_lo) = unsafe { dst.get_unchecked(0) }.overflowing_add(2);
-        // SAFETY: 0 < cl, in bounds.
-        unsafe {
-            *dst.get_unchecked_mut(0) = sum_lo;
-        }
-        if carry_lo {
-            // SAFETY: 1..cl is within dst when cl > 1.
-            let _ = SsaCarry::propagate_carry(unsafe { dst.get_unchecked_mut(1..cl) });
-        }
-        // SAFETY: ml < cl, in bounds.
-        let guard_ref = unsafe { dst.get_unchecked_mut(ml) };
-        *guard_ref = guard_ref.wrapping_add(1);
 
-        // If result overflowed the modulus; subtract 2^n + 1.
-        // SAFETY: ml < cl, in bounds.
-        let guard_val = unsafe { *dst.get_unchecked(ml) };
-        if guard_val > 1 {
-            // SAFETY: ml < cl, in bounds.
+        // For canonical v in (0, 2^n), computes (2^n + 1) - v = (!v) + 2 in a single forward pass.
+        // SAFETY: 0 < ml < cl <= dst.len().
+        let (lo, c) = unsafe { (!*dst.get_unchecked(0)).overflowing_add(2) };
+        // SAFETY: 0 < ml < cl <= dst.len().
+        unsafe {
+            *dst.get_unchecked_mut(0) = lo;
+        }
+        let mut carry = c;
+        for i in 1..ml {
+            // SAFETY: i < ml < cl <= dst.len().
+            let (sum, next_c) =
+                unsafe { (!*dst.get_unchecked(i)).overflowing_add(Limb::from(carry)) };
+            // SAFETY: i < ml < cl <= dst.len().
             unsafe {
-                *dst.get_unchecked_mut(ml) = guard_val.wrapping_sub(1);
+                *dst.get_unchecked_mut(i) = sum;
             }
-            // SAFETY: 0 < cl, in bounds.
-            let (diff, borrow) = unsafe { dst.get_unchecked(0) }.overflowing_sub(1);
-            // SAFETY: 0 < cl, in bounds.
-            unsafe {
-                *dst.get_unchecked_mut(0) = diff;
-            }
-            if borrow {
-                // SAFETY: 1..ml is within dst when ml > 1.
-                let _ = SsaCarry::propagate_borrow(unsafe { dst.get_unchecked_mut(1..ml) });
-            }
+            carry = next_c;
+        }
+        // Result is in [2, 2^n], so the escaping carry is exactly the guard limb (1 when v = 1, else 0).
+        // SAFETY: ml < cl <= dst.len().
+        unsafe {
+            *dst.get_unchecked_mut(ml) = Limb::from(carry);
         }
     }
 

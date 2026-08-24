@@ -1,5 +1,11 @@
 //! Build-time target selection and tuning-profile resolution.
 
+#![allow(
+    clippy::exit,
+    clippy::print_stderr,
+    reason = "invalid build-time profile input must stop compilation with a diagnostic"
+)]
+
 use std::{
     env,
     fs::{self, File},
@@ -33,6 +39,10 @@ fn main() {
     drop(writeln!(
         stdout(),
         "cargo:rerun-if-changed=build_support/tuning.rs"
+    ));
+    drop(writeln!(
+        stdout(),
+        "cargo:rerun-if-changed=build_support/tuning"
     ));
     if tuned_path.exists() {
         drop(writeln!(
@@ -132,5 +142,19 @@ fn read_complete_profile(path: &Path) -> String {
         "mp_anafis: tuning profile {} is missing {missing:?}",
         path.display()
     );
+    let profile = tuning::TuningProfile::from_source(&source).unwrap_or_else(|error| {
+        eprintln!(
+            "mp_anafis: tuning profile {} could not be parsed: {error}",
+            path.display()
+        );
+        std::process::exit(1);
+    });
+    if let Err(error) = profile.validate() {
+        eprintln!(
+            "mp_anafis: tuning profile {} failed semantic validation: {error}",
+            path.display()
+        );
+        std::process::exit(1);
+    }
     source
 }

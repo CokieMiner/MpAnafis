@@ -14,149 +14,118 @@
 //! is not small: it made the 200- and 400-limb columns move by up to 47% between
 //! runs of one binary.
 
-#![allow(
+#![expect(
     unsafe_code,
     reason = "the benchmark calls raw GMP and FLINT mpn routines with disjoint, exactly sized vectors"
 )]
 
 use core::hint::black_box;
 
-use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
-use mp_anafis::tune_api::tier::{Limb, state::MulBenchScratch};
+use gmp_mpfr_sys::gmp::{self, limb_t};
+use mp_anafis::tune_api::tier::{Limb, state::MultiplicationBenchState};
 
 use crate::{
     compare::flint::{
-        FlintLimb, FlintSize, assert_compatible_limb_width, flint_mpn_mul, pin_to_one_thread,
+        FlintLimb, FlintSize, FlintThreadBudget, assert_one_limb_width, flint_mpn_mul,
     },
-    shared::{HUGE_SHAPES, SHAPES, operands_pair},
+    shared::{
+        HUGE_SHAPES, SHAPES, ShapeWorkerCase, ambient_shape_cases, gmp_pair_reference,
+        operands_pair, parallel_shape_cases, validate_and_warm_product, validated_gmp_counts,
+    },
 };
 
-/// Asserts the limb widths all three arms are indexed by agree.
-const fn assert_one_limb_width() {
-    assert!(
-        size_of::<Limb>() == size_of::<limb_t>(),
-        "the GMP comparison requires one limb width"
-    );
-    assert_compatible_limb_width();
+#[divan::bench(args = ambient_shape_cases(SHAPES))]
+fn mp(bencher: divan::Bencher<'_, '_>, case: ShapeWorkerCase) {
+    bench_mp(bencher, case.larger_len, case.smaller_len);
 }
 
 #[divan::bench(args = SHAPES)]
-fn mp(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
+fn gmp_production_serial(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
     let (larger_len, smaller_len) = shape;
-    let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
-    let mut reusable = MulBenchScratch::default();
-    bencher.bench_local(|| {
-        reusable.run(
-            black_box(&mut destination),
-            black_box(&larger),
-            black_box(&smaller),
-        );
-    });
+    bench_gmp(bencher, larger_len, smaller_len);
 }
 
 #[divan::bench(args = SHAPES)]
-fn gmp(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
-    const { assert_one_limb_width() }
+fn flint_production_serial(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
     let (larger_len, smaller_len) = shape;
-    let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
-    let larger_count = size_t::try_from(larger_len).expect("width fits a GMP size");
-    let smaller_count = size_t::try_from(smaller_len).expect("width fits a GMP size");
-    bencher.bench_local(|| {
-        // SAFETY: the three vectors are independently allocated and disjoint,
-        // `larger` and `smaller` hold exactly their stated limb counts with the
-        // longer operand first as mpn_mul requires, and `destination` holds
-        // their sum.
-        let _high = unsafe {
-            gmp::mpn_mul(
-                black_box(destination.as_mut_ptr().cast::<limb_t>()),
-                black_box(larger.as_ptr().cast::<limb_t>()),
-                black_box(larger_count),
-                black_box(smaller.as_ptr().cast::<limb_t>()),
-                black_box(smaller_count),
-            )
-        };
-        let _output = black_box(&destination);
-    });
+    bench_flint(bencher, larger_len, smaller_len, 1);
 }
 
-#[divan::bench(args = SHAPES)]
-fn flint(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
-    const { assert_one_limb_width() }
-    pin_to_one_thread();
-    let (larger_len, smaller_len) = shape;
-    let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
-    let larger_count = FlintSize::try_from(larger_len).expect("width fits a FLINT size");
-    let smaller_count = FlintSize::try_from(smaller_len).expect("width fits a FLINT size");
-
-    let mut expected = vec![Limb::MIN; destination.len()];
-    // SAFETY: as in the timed block below, with `expected` in place of
-    // `destination`; both hold `larger_len + smaller_len` limbs.
-    unsafe {
-        let _gmp_high = gmp::mpn_mul(
-            expected.as_mut_ptr().cast::<limb_t>(),
-            larger.as_ptr().cast::<limb_t>(),
-            size_t::try_from(larger_len).expect("width fits a GMP size"),
-            smaller.as_ptr().cast::<limb_t>(),
-            size_t::try_from(smaller_len).expect("width fits a GMP size"),
-        );
-        let _flint_high = flint_mpn_mul(
-            destination.as_mut_ptr().cast::<FlintLimb>(),
-            larger.as_ptr().cast::<FlintLimb>(),
-            larger_count,
-            smaller.as_ptr().cast::<FlintLimb>(),
-            smaller_count,
-        );
-    }
-    assert_eq!(
-        destination, expected,
-        "FLINT multiplication disagrees with GMP"
-    );
-
-    bencher.bench_local(|| {
-        // SAFETY: the three vectors are independently allocated and disjoint,
-        // both operands hold exactly their stated limb counts with the longer
-        // first as `flint_mpn_mul` requires, and `destination` holds their sum.
-        let _high = unsafe {
-            flint_mpn_mul(
-                black_box(destination.as_mut_ptr().cast::<FlintLimb>()),
-                black_box(larger.as_ptr().cast::<FlintLimb>()),
-                black_box(larger_count),
-                black_box(smaller.as_ptr().cast::<FlintLimb>()),
-                black_box(smaller_count),
-            )
-        };
-        let _output = black_box(&destination);
-    });
+#[divan::bench(args = parallel_shape_cases(SHAPES))]
+fn flint_production_parallel(bencher: divan::Bencher<'_, '_>, case: ShapeWorkerCase) {
+    bench_flint(bencher, case.larger_len, case.smaller_len, case.workers);
 }
 
 // The huge arms below extend the matrix past the transform crossover, where
 // `PLAN.md` currently reports every ratio but 1:16 as empty — a reading that
 // rests on 32769 limbs being the widest shape ever measured. One product per
-// sample, as in `balanced`.
+// sample, as in the huge production ladder.
 
-#[divan::bench(args = HUGE_SHAPES, sample_count = 3, sample_size = 1)]
-fn mp_huge(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
-    let (larger_len, smaller_len) = shape;
-    let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
-    let mut reusable = MulBenchScratch::default();
-    bencher.bench_local(|| {
-        reusable.run(
-            black_box(&mut destination),
-            black_box(&larger),
-            black_box(&smaller),
-        );
-    });
+#[divan::bench(
+    args = ambient_shape_cases(HUGE_SHAPES),
+    sample_count = 3,
+    sample_size = 1,
+)]
+fn mp_huge(bencher: divan::Bencher<'_, '_>, case: ShapeWorkerCase) {
+    bench_mp(bencher, case.larger_len, case.smaller_len);
 }
 
 #[divan::bench(args = HUGE_SHAPES, sample_count = 3, sample_size = 1)]
-fn gmp_huge(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
-    const { assert_one_limb_width() }
+fn gmp_production_serial_huge(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
     let (larger_len, smaller_len) = shape;
+    bench_gmp(bencher, larger_len, smaller_len);
+}
+
+#[divan::bench(args = HUGE_SHAPES, sample_count = 3, sample_size = 1)]
+fn flint_production_serial_huge(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
+    let (larger_len, smaller_len) = shape;
+    bench_flint(bencher, larger_len, smaller_len, 1);
+}
+
+#[divan::bench(
+    args = parallel_shape_cases(HUGE_SHAPES),
+    sample_count = 3,
+    sample_size = 1,
+)]
+fn flint_production_parallel_huge(bencher: divan::Bencher<'_, '_>, case: ShapeWorkerCase) {
+    bench_flint(bencher, case.larger_len, case.smaller_len, case.workers);
+}
+
+fn bench_mp(bencher: divan::Bencher<'_, '_>, larger_len: usize, smaller_len: usize) {
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
-    let larger_count = size_t::try_from(larger_len).expect("width fits a GMP size");
-    let smaller_count = size_t::try_from(smaller_len).expect("width fits a GMP size");
+    let mut reusable = MultiplicationBenchState::default();
+    let expected = gmp_pair_reference(&larger, &smaller);
+    validate_and_warm_product(&expected, "Mp unbalanced production product", |probe| {
+        reusable.prepare(probe, &larger, &smaller).run();
+    });
+    let mut prepared = reusable.prepare(&mut destination, &larger, &smaller);
+    bencher.bench_local(|| black_box(&mut prepared).run());
+}
+
+fn bench_gmp(bencher: divan::Bencher<'_, '_>, larger_len: usize, smaller_len: usize) {
+    const { assert_one_limb_width() }
+    let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
+    let (larger_count, smaller_count) = validated_gmp_counts(larger_len, smaller_len);
+    let mut expected = vec![Limb::MIN; larger_len.saturating_add(smaller_len)];
+    let mut oracle = MultiplicationBenchState::default();
+    oracle.prepare(&mut expected, &larger, &smaller).run();
+    validate_and_warm_product(&expected, "GMP unbalanced product", |probe| {
+        // SAFETY: the probe and both inputs are independent, initialized spans
+        // of their exact counts and the probe holds the complete product.
+        unsafe {
+            let _high_limb = gmp::mpn_mul(
+                probe.as_mut_ptr().cast::<limb_t>(),
+                larger.as_ptr().cast::<limb_t>(),
+                larger_count,
+                smaller.as_ptr().cast::<limb_t>(),
+                smaller_count,
+            );
+        }
+    });
     bencher.bench_local(|| {
-        // SAFETY: as in `gmp` above.
+        // SAFETY: the three vectors are independently allocated and disjoint,
+        // both operands hold their exact counts with the longer operand first,
+        // and `destination` holds their complete product.
         let _high = unsafe {
             gmp::mpn_mul(
                 black_box(destination.as_mut_ptr().cast::<limb_t>()),
@@ -170,16 +139,34 @@ fn gmp_huge(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
     });
 }
 
-#[divan::bench(args = HUGE_SHAPES, sample_count = 3, sample_size = 1)]
-fn flint_huge(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
+fn bench_flint(
+    bencher: divan::Bencher<'_, '_>,
+    larger_len: usize,
+    smaller_len: usize,
+    workers: usize,
+) {
     const { assert_one_limb_width() }
-    pin_to_one_thread();
-    let (larger_len, smaller_len) = shape;
+    let _threads = FlintThreadBudget::new(workers);
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
-    let larger_count = FlintSize::try_from(larger_len).expect("width fits a FLINT size");
-    let smaller_count = FlintSize::try_from(smaller_len).expect("width fits a FLINT size");
+    let (larger_count, smaller_count) = validated_flint_counts(larger_len, smaller_len);
+    let expected = gmp_pair_reference(&larger, &smaller);
+    validate_and_warm_product(&expected, "FLINT huge unbalanced product", |probe| {
+        // SAFETY: the probe and both inputs are independent, initialized spans
+        // of their exact counts and the probe holds the complete product.
+        unsafe {
+            let _high_limb = flint_mpn_mul(
+                probe.as_mut_ptr().cast::<FlintLimb>(),
+                larger.as_ptr().cast::<FlintLimb>(),
+                larger_count,
+                smaller.as_ptr().cast::<FlintLimb>(),
+                smaller_count,
+            );
+        }
+    });
     bencher.bench_local(|| {
-        // SAFETY: as in `flint` above.
+        // SAFETY: the three vectors are independently allocated and disjoint,
+        // both operands hold their exact counts with the longer operand first,
+        // and `destination` holds their complete product.
         let _high = unsafe {
             flint_mpn_mul(
                 black_box(destination.as_mut_ptr().cast::<FlintLimb>()),
@@ -191,4 +178,15 @@ fn flint_huge(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
         };
         let _output = black_box(&destination);
     });
+}
+
+fn validated_flint_counts(larger_len: usize, smaller_len: usize) -> (FlintSize, FlintSize) {
+    let larger = FlintSize::try_from(larger_len);
+    let smaller = FlintSize::try_from(smaller_len);
+    assert!(
+        larger.is_ok() && smaller.is_ok(),
+        "benchmark widths must fit FLINT sizes"
+    );
+    // SAFETY: the assertion above validates both conversions before timing.
+    unsafe { (larger.unwrap_unchecked(), smaller.unwrap_unchecked()) }
 }

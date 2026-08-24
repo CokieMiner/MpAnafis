@@ -1,6 +1,6 @@
 //! Cross-backend agreement properties for x86-64 runtime-dispatched kernels.
 
-#![allow(
+#![expect(
     unsafe_code,
     clippy::indexing_slicing,
     clippy::unreachable,
@@ -26,7 +26,14 @@ use crate::int::{
             add_mul_limbs_vanilla_test as add_mul_vanilla,
         },
         lshift_into_unchecked::{
-            lshift_into_avx2_test as lshift_into_avx2, lshift_into_sse2_test as lshift_into_sse2,
+            lshift_into_avx2_test as lshift_into_avx2,
+            lshift_into_avx512_test as lshift_into_avx512,
+            lshift_into_sse2_test as lshift_into_sse2,
+        },
+        lshift_overlapping_unchecked::{
+            lshift_overlapping_avx2_test as lshift_overlapping_avx2,
+            lshift_overlapping_avx512_test as lshift_overlapping_avx512,
+            lshift_overlapping_sse2_test as lshift_overlapping_sse2,
         },
         lshift_unchecked::{lshift_avx2_test as lshift_avx2, lshift_sse2_test as lshift_sse2},
         monty_redc_unchecked::{
@@ -62,7 +69,9 @@ use crate::int::{
             },
         },
         rshift_into_unchecked::{
-            rshift_into_avx2_test as rshift_into_avx2, rshift_into_sse2_test as rshift_into_sse2,
+            rshift_into_avx2_test as rshift_into_avx2,
+            rshift_into_avx512_test as rshift_into_avx512,
+            rshift_into_sse2_test as rshift_into_sse2,
         },
         rshift_unchecked::{rshift_avx2_test as rshift_avx2, rshift_sse2_test as rshift_sse2},
         sub_mul_limbs_unchecked::{
@@ -98,6 +107,16 @@ fn host_executes_dispatch_backends() -> bool {
 /// with the feature masked).
 fn host_executes_simd_backends() -> bool {
     is_x86_feature_detected!("avx2")
+}
+
+/// Whether this host can execute the AVX-512 shift tiers.
+///
+/// The AVX-512 properties bypass runtime dispatch to compare the 512-bit
+/// backends against the AVX2 and SSE2 tiers directly, so they must not run on
+/// a host whose CPUID does not report `avx512f` — including AVX2-only VMs and
+/// Zen 3 or older silicon.
+fn host_executes_avx512_backends() -> bool {
+    is_x86_feature_detected!("avx512f")
 }
 
 proptest! {
@@ -489,6 +508,40 @@ proptest! {
     }
 
     #[test]
+    fn prop_x86_lshift_overlapping_backends_agree(
+        mut source in proptest::collection::vec(any::<Limb>(), 0..=129),
+        offset in 0_usize..=64,
+        dirty in any::<Limb>(),
+        shift in 1_u32..Limb::BITS,
+    ) {
+        if !host_executes_simd_backends() {
+            return Ok(());
+        }
+
+        let len = source.len();
+        source.extend(vec![dirty; offset]);
+        let mut shifted_sse2 = source;
+        let mut shifted_avx2 = shifted_sse2.clone();
+
+        // SAFETY: both buffers contain exactly offset + len initialized writable
+        // limbs, and the strategy proves 0 < shift < Limb::BITS.
+        let carry_sse2 = unsafe {
+            lshift_overlapping_sse2(shifted_sse2.as_mut_ptr(), len, offset, shift)
+        };
+        // SAFETY: the same complete-span and shift proof applies, and the host
+        // feature guard above admits AVX2.
+        let carry_avx2 = unsafe {
+            lshift_overlapping_avx2(shifted_avx2.as_mut_ptr(), len, offset, shift)
+        };
+
+        prop_assert_eq!(
+            (carry_sse2, &shifted_sse2),
+            (carry_avx2, &shifted_avx2),
+            "overlapping lshift: SSE2 != AVX2",
+        );
+    }
+
+    #[test]
     fn prop_x86_rshift_into_backends_agree(
         initial in proptest::collection::vec(any::<Limb>(), 0..=64),
         shift in 1_u32..Limb::BITS,
@@ -515,5 +568,195 @@ proptest! {
             (carry_avx2, &dst_avx2),
             "rshift into: SSE2 != AVX2",
         );
+    }
+
+    #[test]
+    fn prop_x86_lshift_into_avx512_agrees(
+        initial in proptest::collection::vec(any::<Limb>(), 0..=64),
+        shift in 1_u32..Limb::BITS,
+    ) {
+        if !host_executes_avx512_backends() {
+            return Ok(());
+        }
+
+        let len = initial.len();
+        let mut dst_avx2 = vec![0; len];
+        let mut dst_avx512 = vec![0; len];
+
+        // SAFETY: each destination is writable for `len` limbs, `initial`
+        // holds that many readable limbs, the spans are disjoint, and the
+        // strategy proves 0 < shift < Limb::BITS.
+        let carry_avx2 = unsafe { lshift_into_avx2(dst_avx2.as_mut_ptr(), initial.as_ptr(), len, shift) };
+        // SAFETY: the same span, aliasing, and shift preconditions as the
+        // AVX2 call above.
+        let carry_avx512 =
+            unsafe { lshift_into_avx512(dst_avx512.as_mut_ptr(), initial.as_ptr(), len, shift) };
+
+        prop_assert_eq!(
+            (carry_avx2, &dst_avx2),
+            (carry_avx512, &dst_avx512),
+            "lshift into: AVX2 != AVX-512",
+        );
+    }
+
+    #[test]
+    fn prop_x86_rshift_into_avx512_agrees(
+        initial in proptest::collection::vec(any::<Limb>(), 0..=64),
+        shift in 1_u32..Limb::BITS,
+    ) {
+        if !host_executes_avx512_backends() {
+            return Ok(());
+        }
+
+        let len = initial.len();
+        let mut dst_avx2 = vec![0; len];
+        let mut dst_avx512 = vec![0; len];
+
+        // SAFETY: each destination is writable for `len` limbs, `initial`
+        // holds that many readable limbs, the spans are disjoint, and the
+        // strategy proves 0 < shift < Limb::BITS.
+        let carry_avx2 = unsafe { rshift_into_avx2(dst_avx2.as_mut_ptr(), initial.as_ptr(), len, shift) };
+        // SAFETY: the same span, aliasing, and shift preconditions as the
+        // AVX2 call above.
+        let carry_avx512 =
+            unsafe { rshift_into_avx512(dst_avx512.as_mut_ptr(), initial.as_ptr(), len, shift) };
+
+        prop_assert_eq!(
+            (carry_avx2, &dst_avx2),
+            (carry_avx512, &dst_avx512),
+            "rshift into: AVX2 != AVX-512",
+        );
+    }
+
+    #[test]
+    fn prop_x86_lshift_overlapping_avx512_agrees(
+        mut source in proptest::collection::vec(any::<Limb>(), 0..=129),
+        offset in 0_usize..=64,
+        dirty in any::<Limb>(),
+        shift in 1_u32..Limb::BITS,
+    ) {
+        if !host_executes_avx512_backends() {
+            return Ok(());
+        }
+
+        let len = source.len();
+        source.extend(vec![dirty; offset]);
+        let mut shifted_avx2 = source;
+        let mut shifted_avx512 = shifted_avx2.clone();
+
+        // SAFETY: both buffers contain exactly offset + len initialized writable
+        // limbs, and the strategy proves 0 < shift < Limb::BITS.
+        let carry_avx2 = unsafe {
+            lshift_overlapping_avx2(shifted_avx2.as_mut_ptr(), len, offset, shift)
+        };
+        // SAFETY: the same span and shift proof applies, and the feature guard
+        // above admits AVX-512F.
+        let carry_avx512 = unsafe {
+            lshift_overlapping_avx512(shifted_avx512.as_mut_ptr(), len, offset, shift)
+        };
+
+        prop_assert_eq!(
+            (carry_avx2, &shifted_avx2),
+            (carry_avx512, &shifted_avx512),
+            "overlapping lshift: AVX2 != AVX-512",
+        );
+    }
+}
+
+#[test]
+fn overlapping_shift_backends_agree_at_vector_boundaries() {
+    if !host_executes_simd_backends() {
+        return;
+    }
+
+    for len in [
+        0_usize, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129,
+    ] {
+        for offset in [0_usize, 1, 2, 3, 7, 8, 9, 15, 16, 17, 63] {
+            let source = (0..len)
+                .map(|index| {
+                    Limb::MAX
+                        .wrapping_sub(index.wrapping_mul(0x9E37_79B9))
+                        .rotate_left(11)
+                })
+                .collect::<Vec<_>>();
+            for shift in [1, 31, 63] {
+                let mut sse2 = source.clone();
+                sse2.extend(vec![Limb::MAX; offset]);
+                let mut avx2 = sse2.clone();
+                let mut avx512 = sse2.clone();
+
+                // SAFETY: every buffer has offset + len initialized writable
+                // limbs and each shift lies in 1..64.
+                let carry_sse2 =
+                    unsafe { lshift_overlapping_sse2(sse2.as_mut_ptr(), len, offset, shift) };
+                // SAFETY: the same span proof applies and the host supports AVX2.
+                let carry_avx2 =
+                    unsafe { lshift_overlapping_avx2(avx2.as_mut_ptr(), len, offset, shift) };
+                assert_eq!((carry_avx2, &avx2), (carry_sse2, &sse2));
+
+                if host_executes_avx512_backends() {
+                    // SAFETY: the same span proof applies and the host supports
+                    // AVX-512F.
+                    let carry_avx512 = unsafe {
+                        lshift_overlapping_avx512(avx512.as_mut_ptr(), len, offset, shift)
+                    };
+                    assert_eq!((carry_avx512, &avx512), (carry_sse2, &sse2));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn avx512_shift_into_agrees_across_multiple_vector_blocks() {
+    if !host_executes_avx512_backends() {
+        return;
+    }
+
+    for len in [
+        0_usize, 1, 7, 8, 9, 63, 64, 65, 127, 128, 129, 1_023, 1_024, 1_025,
+    ] {
+        let source = (0..len)
+            .map(|index| {
+                Limb::MAX
+                    .wrapping_sub(index.wrapping_mul(0x9E37_79B9))
+                    .rotate_left(11)
+            })
+            .collect::<Vec<_>>();
+        for shift in [1, 31, 63] {
+            let mut left_avx2 = vec![0; len];
+            let mut left_avx512 = vec![0; len];
+            let mut right_avx2 = vec![0; len];
+            let mut right_avx512 = vec![0; len];
+
+            // SAFETY: every destination is disjoint from `source`, all spans
+            // have exactly `len` limbs, and each shift is in 1..64.
+            let left_carry_avx2 =
+                unsafe { lshift_into_avx2(left_avx2.as_mut_ptr(), source.as_ptr(), len, shift) };
+            // SAFETY: the identical span and shift proof applies; the feature
+            // guard above proves this host can execute AVX-512F.
+            let left_carry_avx512 = unsafe {
+                lshift_into_avx512(left_avx512.as_mut_ptr(), source.as_ptr(), len, shift)
+            };
+            // SAFETY: every destination is disjoint from `source`, all spans
+            // have exactly `len` limbs, and each shift is in 1..64.
+            let right_carry_avx2 =
+                unsafe { rshift_into_avx2(right_avx2.as_mut_ptr(), source.as_ptr(), len, shift) };
+            // SAFETY: the identical span and shift proof applies; the feature
+            // guard above proves this host can execute AVX-512F.
+            let right_carry_avx512 = unsafe {
+                rshift_into_avx512(right_avx512.as_mut_ptr(), source.as_ptr(), len, shift)
+            };
+
+            assert_eq!(
+                (left_carry_avx512, left_avx512),
+                (left_carry_avx2, left_avx2)
+            );
+            assert_eq!(
+                (right_carry_avx512, right_avx512),
+                (right_carry_avx2, right_avx2)
+            );
+        }
     }
 }

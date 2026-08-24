@@ -18,8 +18,8 @@ impl Toom4 {
         part3: &[Limb],
         point_shift: u32,
     ) {
-        assert!(point_shift <= 1, "Toom-4 evaluates only at 1 or 2");
-        assert!(
+        debug_assert!(point_shift <= 1, "Toom-4 evaluates only at 1 or 2");
+        debug_assert!(
             [part0, part1, part2, part3]
                 .into_iter()
                 .all(|part| part.len() < dst.len()),
@@ -68,7 +68,7 @@ impl Toom4 {
         part2: &[Limb],
         part3: &[Limb],
     ) {
-        assert!(
+        debug_assert!(
             [part0, part1, part2, part3]
                 .into_iter()
                 .all(|part| part.len() < dst.len()),
@@ -139,9 +139,9 @@ impl Toom4 {
         part3: &[Limb],
         point_shift: u32,
     ) -> bool {
-        assert!(point_shift <= 1, "Toom-4 evaluates only at -1 or -2");
-        assert_eq!(dst.len(), odd.len(), "evaluation widths must match");
-        assert!(
+        debug_assert!(point_shift <= 1, "Toom-4 evaluates only at -1 or -2");
+        debug_assert_eq!(dst.len(), odd.len(), "evaluation widths must match");
+        debug_assert!(
             [part0, part1, part2, part3]
                 .into_iter()
                 .all(|part| part.len() < dst.len()),

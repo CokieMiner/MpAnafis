@@ -1,11 +1,13 @@
 //! Recursive cost model used to select an SSA transform geometry.
 
 use super::{
-    FftPlan, Geometry, LIMB_BITS, Limb, MAX_COST_RECURSION_DEPTH, NESTED_SEARCH_RADIUS,
-    SSA_BASE_MODULUS_BITS, SSA_BASECASE_COST_WEIGHT_16THS, SSA_BNM1_BASECASE_LIMBS,
-    SSA_COEFFICIENT_VISIT_OVERHEAD, SSA_NESTED_COST_PENALTY_16THS, SSA_SQRT2_TWIST_PASSES, SsaRing,
-    TOP_LEVEL_SEARCH_RADIUS,
+    Geometry, LIMB_BITS, Limb, MAX_COST_RECURSION_DEPTH, SSA_BASE_MODULUS_BITS,
+    SSA_BASECASE_COST_WEIGHT_16THS, SSA_BNM1_BASECASE_LIMBS, SSA_COEFFICIENT_VISIT_OVERHEAD,
+    SSA_NESTED_COST_PENALTY_16THS, SsaRing,
 };
+
+/// Exact arithmetic pass overhead for sqrt(2) shifts across forward and inverse transforms.
+const SSA_SQRT2_TWIST_PASSES: usize = 4;
 
 /// Global planning and sizing routines for SSA.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -38,7 +40,7 @@ impl SsaPlan {
     }
 
     /// Returns the cheapest geometry for a ring together with its modelled cost,
-    /// scanning the exponent window either side of the analytic centre.
+    /// scanning every representable transform exponent for the width.
     ///
     /// Geometries whose pointwise products nest another transform are priced
     /// against those that keep them in the multiplication tower, and the cheaper
@@ -50,17 +52,8 @@ impl SsaPlan {
     /// every RAM-resident width.
     pub fn best_exponent(modulus_bits: usize, depth: u32) -> Option<(usize, Geometry)> {
         let exponent_ceiling = modulus_bits.trailing_zeros();
-        let centre = Self::search_centre(modulus_bits);
-        let radius = if depth == 0 {
-            TOP_LEVEL_SEARCH_RADIUS
-        } else {
-            NESTED_SEARCH_RADIUS
-        };
-
-        let low = centre.saturating_sub(radius).max(1);
-        let high = centre
-            .saturating_add(radius)
-            .min(exponent_ceiling.saturating_sub(1));
+        let low = 1_u32;
+        let high = exponent_ceiling.saturating_sub(1);
 
         let mut winner: Option<(usize, Geometry)> = None;
         let mut probe = low;
@@ -82,10 +75,8 @@ impl SsaPlan {
     ///
     /// The classical Schönhage-Strassen split cuts `N` bits into `sqrt(N)` pieces
     /// of `sqrt(N)` bits, so the transform exponent tracks `log2(N) / 2`. The
-    /// measured optima follow that: against `log2/2` they deviate by at most three
-    /// exponents and the deviation does *not* grow with the ring, so
-    /// [`TOP_LEVEL_SEARCH_RADIUS`] keeps the
-    /// optimum inside the window at every width.
+    /// discrete cost model evaluates all candidate exponents around this analytic
+    /// minimum.
     ///
     /// The nested search used to anchor to the basecase width instead, at
     /// `log2(bits) - log2(SSA_BASE_MODULUS_BITS) + 2`. That deviates from the
@@ -180,19 +171,6 @@ impl SsaPlan {
             .saturating_mul(SSA_BASECASE_COST_WEIGHT_16THS)
             .div_euclid(16);
         three_halves.saturating_add(interpolation)
-    }
-
-    /// Scratch required for one `fft_mul_mod_slices` call at the given ring width
-    /// when the caller forces the transform.
-    ///
-    /// Forcing bypasses the basecase branch, so a ring inside `SSA_BASE_MODULUS_BITS`
-    /// still needs room for the full coefficient matrix. Sizing such a call with
-    /// [`FftPlan::required_mul_scratch`] under-reports and the matrix split then
-    /// overruns the buffer.
-    pub fn forced_scratch_len_for_ring(modulus_bits: usize) -> usize {
-        let plan = FftPlan::new(modulus_bits);
-        plan.transform_mul_scratch()
-            .max(plan.required_mul_scratch())
     }
 
     /// Smallest CRT half-width, in limbs, that can carry a `required_bits`-wide

@@ -89,9 +89,9 @@ impl Toom6 {
         shift: u32,
         kernel: AddMulKernel,
     ) -> bool {
-        assert_eq!(even.len(), odd.len(), "evaluation widths must match");
-        assert!(shift <= 2, "Toom-6 point shift exceeds four");
-        assert!(
+        debug_assert_eq!(even.len(), odd.len(), "evaluation widths must match");
+        debug_assert!(shift <= 2, "Toom-6 point shift exceeds four");
+        debug_assert!(
             [
                 parts.constant,
                 parts.linear,

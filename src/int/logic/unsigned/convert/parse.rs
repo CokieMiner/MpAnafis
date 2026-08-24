@@ -9,7 +9,9 @@ use alloc::vec::Vec;
 
 use crate::error::{ParseMpUintError, ParseMpUintErrorKind};
 
-use super::{ArchKernels, DoubleLimb, InternalMpUint, KARATSUBA_THRESHOLD, LIMB_BITS, Limb};
+use super::{
+    ArchKernels, DoubleLimb, INLINE_LIMBS, InternalMpUint, KARATSUBA_THRESHOLD, LIMB_BITS, Limb,
+};
 
 // --- Const lookup tables for radix conversion ---
 
@@ -287,7 +289,7 @@ impl InternalMpUint {
 
         // Precompute powers: powers[k] = max_power ^ (2^k)
         let mut powers = Vec::new();
-        powers.push(Self::from_limbs(alloc::vec![max_power]));
+        powers.push(Self::from_limb(max_power));
         for _ in 1..len_pow2.trailing_zeros() {
             // SAFETY: the initial push above means `powers` is never empty on
             // any iteration of this loop.
@@ -319,6 +321,10 @@ fn combine_chunks(chunks: &[InternalMpUint], powers: &[InternalMpUint]) -> Inter
         )
     };
 
+    if upper.is_zero() {
+        return lower;
+    }
+
     // `chunks.len()` is a power of two and `mid` is its exact half, so `mid` is
     // a power of two and `k` is its split level. `powers` holds one entry per
     // split level up to `len_pow2`, so `k < powers.len()`.
@@ -328,6 +334,10 @@ fn combine_chunks(chunks: &[InternalMpUint], powers: &[InternalMpUint]) -> Inter
     // SAFETY: `k` is the precomputed power index for `mid`'s split level and is
     // below `powers.len()`.
     let power = unsafe { powers.get_unchecked(k) };
+
+    if lower.is_zero() {
+        return upper.mul(power);
+    }
 
     let mut upper_shifted = upper.mul(power);
     upper_shifted.add_assign(&lower);
@@ -349,6 +359,43 @@ fn combine_chunks(chunks: &[InternalMpUint], powers: &[InternalMpUint]) -> Inter
 fn mul_small_add(value: &InternalMpUint, mul: Limb, add: Limb) -> InternalMpUint {
     let limbs = value.limbs();
     let len = limbs.len();
+    if len < INLINE_LIMBS {
+        let mut result_limbs = [0_usize; INLINE_LIMBS];
+        // SAFETY: result_limbs has INLINE_LIMBS elements, limbs has len elements, len < INLINE_LIMBS.
+        let kernel_carry = unsafe {
+            ArchKernels::add_mul_limbs_unchecked(
+                result_limbs.as_mut_ptr(),
+                limbs.as_ptr(),
+                len,
+                mul,
+            )
+        };
+        // SAFETY: len < INLINE_LIMBS, so index len is in bounds.
+        unsafe {
+            *result_limbs.get_unchecked_mut(len) = kernel_carry;
+        }
+        let mut carry: DoubleLimb = add as DoubleLimb;
+        for i in 0..=len {
+            // SAFETY: i <= len < INLINE_LIMBS.
+            let d = unsafe { *result_limbs.get_unchecked(i) };
+            carry = carry.wrapping_add(d as DoubleLimb);
+            // SAFETY: i <= len < INLINE_LIMBS.
+            unsafe {
+                *result_limbs.get_unchecked_mut(i) = carry as Limb;
+            }
+            carry >>= LIMB_BITS;
+            if carry == 0 {
+                break;
+            }
+        }
+        return InternalMpUint::from_limbs_4(
+            result_limbs[0],
+            result_limbs[1],
+            result_limbs[2],
+            result_limbs[3],
+        );
+    }
+
     // Allocate result with room for a possible carry limb
     let mut result_limbs: Vec<Limb> = alloc::vec![0; len.wrapping_add(1)];
 

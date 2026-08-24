@@ -81,6 +81,23 @@ is documented in `docs/int/kernel-matrix.md`.
 
 ## API & Feature Surface
 
+### Parallel execution & work-stealing
+
+The default feature set remains dependency-free and `no_std`; ordinary
+multiplication is sequential in that configuration. Enabling `rayon` makes
+large transform operations automatically use Rayon's work-stealing engine.
+
+Applications with a custom Rayon thread pool can execute operations within their
+pool using standard Rayon scoping (`pool.install(|| &a * &b)`). All public
+arithmetic entry points (`*`, `mul`, `square`, `assign_mul`, `assign_square`)
+automatically schedule onto the active execution context without requiring
+manual executor parameters.
+
+Applications can control the global pool with Rayon's standard configuration,
+including `RAYON_NUM_THREADS`, or use an application-owned `ThreadPool`. A
+one-thread pool provides deterministic sequential execution without a separate
+`MpAnafis` scheduling API. `MpAnafis` never creates a private worker pool.
+
 ### Native-Like Arithmetic & Bitwise Families
 - **Shared Arithmetic Families**: `checked_*`, `wrapping_*`, `saturating_*`, `overflowing_*`, `strict_*`, Euclidean division (`div_euclid`, `rem_euclid`), and rounding divisions (`div_trunc`, `div_floor`, `div_ceil`).
 - **Bitwise Inspection & Modification**: `leading_zeros`, `trailing_zeros`, `count_ones`, `get_bit`, `set_bit`, `toggle_bit`, `rotate_left`/`rotate_right`, bit range extraction (`bit_range`), and endian serialization (`to_le_bytes`, `from_be_bytes`, etc.).

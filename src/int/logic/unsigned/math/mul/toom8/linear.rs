@@ -62,8 +62,8 @@ impl Toom8 {
         temporary: &mut [Limb],
         add_mul_kernel: AddMulKernel,
     ) {
-        assert!(scalar > 0, "fused subtraction scalar must be positive");
-        assert!(divisor & 1 == 1, "fused exact divisor must be odd");
+        debug_assert!(scalar > 0, "fused subtraction scalar must be positive");
+        debug_assert!(divisor & 1 == 1, "fused exact divisor must be odd");
         if let (Ok(scalar_word), Ok(divisor_word)) =
             (Limb::try_from(scalar), Limb::try_from(divisor))
         {
@@ -96,9 +96,9 @@ impl Toom8 {
         let primary_scalar = primary.scalar;
         let secondary_src = secondary.value;
         let secondary_scalar = secondary.scalar;
-        assert!(primary_scalar > 0, "primary scalar must be positive");
-        assert!(secondary_scalar > 0, "secondary scalar must be positive");
-        assert!(divisor & 1 == 1, "exact divisor must be odd");
+        debug_assert!(primary_scalar > 0, "primary scalar must be positive");
+        debug_assert!(secondary_scalar > 0, "secondary scalar must be positive");
+        debug_assert!(divisor & 1 == 1, "exact divisor must be odd");
         if let (Ok(primary_word), Ok(secondary_word), Ok(divisor_word)) = (
             Limb::try_from(primary_scalar),
             Limb::try_from(secondary_scalar),
@@ -134,7 +134,7 @@ impl Toom8 {
     }
 
     pub fn exact_signed_div_u64(value: &mut [Limb], divisor: u64) {
-        assert!(divisor != 0, "exact Toom-8 divisor must be nonzero");
+        debug_assert!(divisor != 0, "exact Toom-8 divisor must be nonzero");
         if let Ok(word) = Limb::try_from(divisor) {
             exact_signed_div_limb(value, word);
             return;

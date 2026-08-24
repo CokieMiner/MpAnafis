@@ -114,17 +114,13 @@ The default tuner handles each constant according to the code path it controls:
 | `SQR_SSA_THRESHOLD` | Conventional square tower to SSA | Tune separately from multiplication after compiled SSA constants settle. |
 | `TRANSFORM_MIN_SMALLER_LIMBS` | Rejects transforms whose shorter operand is too small | Retain the architecture default. It needs a dedicated multi-width unbalanced-shape grid; balanced crossover timing cannot identify it. |
 | `TRANSFORM_MAX_OPERAND_RATIO` | Rejects transforms at excessive operand ratios | Retain the architecture default for the same reason; a ratio grid must compare forced SSA with production blocking. |
-| `SSA_GEOMETRY_EXPONENTS` | Sparse exact corrections to the recursive cost model | Tune only RAM-sized rings represented by exact score cells; zero keeps a ring model-driven. Other and arbitrary ring widths always use the cost model. |
 | `SSA_BASE_MODULUS_BITS` | Chooses tower versus nested-transform pointwise products | Tune by rebuild on the complete forced-SSA size ladder. |
 | `SSA_BNM1_BASECASE_LIMBS` | Chooses direct versus recursive Mersenne-ring multiplication | Tune by rebuild on forced SSA cells. |
 | `SSA_NEGACYCLIC_FACTOR3_THRESHOLD` | Enables factor-3 negacyclic decomposition | Tune by rebuild on forced SSA cells, including a practical disable candidate. |
 | `SSA_NEGACYCLIC_FACTOR5_THRESHOLD` | Enables factor-5 negacyclic decomposition | Tune by rebuild on forced SSA cells, including a practical disable candidate. |
-| `SSA_COEFFICIENT_VISIT_OVERHEAD` | Planner model coefficient | Retain the architecture value. End-to-end coordinate timing cannot isolate it from the other planner coefficients and pins. |
+| `SSA_COEFFICIENT_VISIT_OVERHEAD` | Planner model coefficient | Retain the architecture value. End-to-end coordinate timing cannot isolate it from the other planner coefficients. |
 | `SSA_BASECASE_COST_WEIGHT_16THS` | Planner interpolation coefficient | Retain until fitted against isolated lower-tower measurements. |
-| `SSA_NESTED_COST_PENALTY_16THS` | Planner correction for nested memory/cache cost | Retain until an isolated model-fit scores prediction error across rings; do not let it compensate for base modulus or pins. |
-| `SSA_SQRT2_TWIST_PASSES` | Planner cost estimate for half-step twists | Retain as model calibration; it is not a selectable runtime kernel boundary. |
-| `SSA_FOUR_STEP_MIN_LOG` | Recursive versus four-step transform layout | Tune by rebuild on forced SSA cells; the disable value is a normal candidate. |
-| `SSA_TRANSPOSE_TILE_LIMBS` | Four-step transpose working-set geometry | Tune only when four-step won; otherwise skip it completely. |
+| `SSA_NESTED_COST_PENALTY_16THS` | Planner correction for nested memory/cache cost | Retain until an isolated model-fit scores prediction error across rings; do not let it compensate for base modulus. |
 | `SSA_DIRECT_SHIFT_MAX_LIMBS` | Direct versus decomposed Fermat shift kernel | Tune by rebuild on forced SSA cells. |
 
 ## Profile resolution
@@ -133,7 +129,7 @@ The default tuner handles each constant according to the code path it controls:
 
 1. the path in `MP_TUNING_PROFILE`;
 2. the ignored local `src/int/tuned_thresholds.rs`;
-3. the conservative architecture profile in `build_support/tuning.rs`.
+3. the built-in default in `build_support/tuning.rs`.
 
 Partial profiles are rejected. This makes adding a new hardware-sensitive
 constant fail loudly until the schema, defaults, rendering, and tuner are
@@ -146,9 +142,10 @@ also useful for reproducible A/B builds:
 MP_TUNING_PROFILE=/absolute/path/profile.rs cargo build --release
 ```
 
-Do not commit a generated local profile as a portable default. Promote a value
-to an architecture profile only after repeatable measurements on multiple
-machines in that architecture family.
+Do not commit a generated local override as a portable default. The current
+built-in default is seeded from the documented Zen 5 measurements, but it is
+distinct from a tuner-generated machine profile. Add a target-specific default
+only after repeatable measurements on that target.
 
 ## Tuning in stages
 
@@ -173,10 +170,10 @@ division with the architecture-profile compiled constants. `--compiled-only` tun
 compile-time constants alone. `--toom-only` is the short rebuild pass for the
 compiled Toom-8.5 choices. `--division-only` tunes only division recursion
 geometry and the coupled production dispatch thresholds. All four modes skip
-the end-to-end validation gate
-and write their resulting complete profile as the local override; unchanged
-families retain their architecture-profile values. A complete run applies the
-production-dispatch validation gate before installation.
+the end-to-end validation gate, preserve their result as a rejected candidate
+for inspection, and do not replace the local profile. Unchanged families retain
+their architecture-profile values. Only a complete run can pass the
+production-dispatch validation gate and install a local override.
 
 The compiled-only phase builds and measures optimized binaries for each
 compile-time kernel or geometry candidate. Planner model coefficients retain

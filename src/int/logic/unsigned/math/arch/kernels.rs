@@ -1,35 +1,5 @@
 //! Architecture-selected limb-kernel namespace.
 
-#[cfg(any(
-    test,
-    not(all(
-        feature = "std",
-        not(miri),
-        target_arch = "x86_64",
-        target_pointer_width = "64",
-        not(all(target_feature = "adx", target_feature = "bmi2"))
-    ))
-))]
-use super::add_mul_2_limbs_unchecked::kernel as selected_add_mul_2_kernel;
-#[cfg(all(
-    feature = "std",
-    not(miri),
-    target_arch = "x86_64",
-    target_pointer_width = "64",
-    not(target_feature = "adx")
-))]
-use super::add_sub_limbs_unchecked::runtime_dispatch::fast_add_sub_limbs_available as selected_fast_add_sub_limbs_available;
-#[cfg(any(
-    test,
-    not(all(
-        feature = "std",
-        not(miri),
-        target_arch = "x86_64",
-        target_pointer_width = "64",
-        not(all(target_feature = "adx", target_feature = "bmi2"))
-    ))
-))]
-use super::mul_2_limbs_unchecked::kernel as selected_mul_2_kernel;
 use super::{
     DoubleLimb, LIMB_BITS, Limb,
     add_limbs_3_unchecked::add_limbs_3_unchecked,
@@ -40,6 +10,7 @@ use super::{
     add_two_limbs_unchecked::add_two_limbs_unchecked,
     divrem_1_unchecked::divrem_1_unchecked,
     lshift_into_unchecked::kernel as selected_lshift_into_kernel,
+    lshift_overlapping_unchecked::kernel as selected_lshift_overlapping_kernel,
     lshift_unchecked::kernel as selected_lshift_kernel,
     monty_redc_unchecked::kernel as selected_monty_redc_kernel,
     mul_basecase_unchecked::{
@@ -53,6 +24,10 @@ use super::{
     sub_limbs_unchecked::sub_limbs_unchecked,
     sub_mul_limbs_unchecked::{kernel as selected_sub_mul_kernel, sub_mul_limbs_unchecked},
 };
+with_direct_basecase_components! {
+    use super::add_mul_2_limbs_unchecked::kernel as selected_add_mul_2_kernel;
+    use super::mul_2_limbs_unchecked::kernel as selected_mul_2_kernel;
+}
 #[cfg(not(target_pointer_width = "16"))]
 use super::{
     add_sub_from_limbs_unchecked::kernel as selected_add_sub_from_kernel,
@@ -63,18 +38,10 @@ use super::{
 pub type AddMulKernel = unsafe fn(*mut Limb, *const Limb, usize, Limb) -> Limb;
 /// Single-limb multiply-subtract kernel.
 pub type SubMulKernel = unsafe fn(*mut Limb, *const Limb, usize, Limb) -> (Limb, Limb);
-/// Fused two-scalar multiply-add kernel.
-#[cfg(any(
-    test,
-    not(all(
-        feature = "std",
-        not(miri),
-        target_arch = "x86_64",
-        target_pointer_width = "64",
-        not(all(target_feature = "adx", target_feature = "bmi2"))
-    ))
-))]
-pub type AddMul2Kernel = unsafe fn(*mut Limb, *const Limb, usize, Limb, Limb) -> (Limb, Limb);
+with_direct_basecase_components! {
+    /// Fused two-scalar multiply-add kernel.
+    pub type AddMul2Kernel = unsafe fn(*mut Limb, *const Limb, usize, Limb, Limb) -> (Limb, Limb);
+}
 /// Shared-source simultaneous addition/subtraction kernel.
 #[cfg(not(target_pointer_width = "16"))]
 pub type AddSubFromKernel = unsafe fn(*mut Limb, *mut Limb, *const Limb, usize) -> (Limb, Limb);
@@ -84,22 +51,16 @@ pub type MontyKernel = unsafe fn(*mut Limb, *const Limb, *const Limb, usize, Lim
 pub type LshiftKernel = unsafe fn(*mut Limb, usize, u32) -> Limb;
 /// Out-of-place left-shift kernel from `src` into `dst`.
 pub type LshiftIntoKernel = unsafe fn(*mut Limb, *const Limb, usize, u32) -> Limb;
+/// Overlap-safe left shift from a prefix into the same or a higher suffix.
+pub type LshiftOverlappingKernel = unsafe fn(*mut Limb, usize, usize, u32) -> Limb;
 /// In-place right-shift kernel over one writable span.
 pub type RshiftKernel = unsafe fn(*mut Limb, usize, u32) -> Limb;
 /// Out-of-place right-shift kernel from `src` into `dst`.
 pub type RshiftIntoKernel = unsafe fn(*mut Limb, *const Limb, usize, u32) -> Limb;
-/// Write-only two-row multiplication kernel.
-#[cfg(any(
-    test,
-    not(all(
-        feature = "std",
-        not(miri),
-        target_arch = "x86_64",
-        target_pointer_width = "64",
-        not(all(target_feature = "adx", target_feature = "bmi2"))
-    ))
-))]
-pub type Mul2Kernel = unsafe fn(*mut Limb, *const Limb, usize, Limb, Limb);
+with_direct_basecase_components! {
+    /// Write-only two-row multiplication kernel.
+    pub type Mul2Kernel = unsafe fn(*mut Limb, *const Limb, usize, Limb, Limb);
+}
 /// Cross-limb shifted-high subtraction kernel.
 #[cfg(not(target_pointer_width = "16"))]
 pub type SubShiftedHighKernel = unsafe fn(*mut Limb, *const Limb, usize, u32, Limb) -> Limb;
@@ -114,7 +75,7 @@ pub struct ArchKernels;
 impl ArchKernels {
     /// Computes the full double-limb product of two limbs.
     #[must_use]
-    #[allow(
+    #[expect(
         clippy::as_conversions,
         clippy::cast_possible_truncation,
         reason = "Limb*Limb fits DoubleLimb; extracting its native halves is exact on every supported pointer width"
@@ -123,39 +84,6 @@ impl ArchKernels {
         let product = (left as DoubleLimb).wrapping_mul(right as DoubleLimb);
         let low = product as Limb;
         (low, (product >> LIMB_BITS) as Limb)
-    }
-
-    /// Returns whether the selected add/subtract backend has independent carry
-    /// chains.
-    #[cfg(all(
-        feature = "std",
-        not(miri),
-        target_arch = "x86_64",
-        target_pointer_width = "64",
-        not(target_feature = "adx")
-    ))]
-    #[inline]
-    pub fn fast_add_sub_limbs_available() -> bool {
-        selected_fast_add_sub_limbs_available()
-    }
-
-    /// Returns whether the selected add/subtract backend has independent carry
-    /// chains.
-    #[cfg(not(all(
-        feature = "std",
-        not(miri),
-        target_arch = "x86_64",
-        target_pointer_width = "64",
-        not(target_feature = "adx")
-    )))]
-    #[inline]
-    pub const fn fast_add_sub_limbs_available() -> bool {
-        cfg!(all(
-            not(miri),
-            target_arch = "x86_64",
-            target_pointer_width = "64",
-            target_feature = "adx"
-        ))
     }
 
     /// Returns the selected shared-source addition/subtraction kernel.
@@ -295,56 +223,34 @@ impl ArchKernels {
         unsafe { sub_mul_limbs_unchecked(dst, src, len, scalar) }
     }
 
-    /// Returns the selected fused two-scalar multiply-add kernel.
-    #[cfg(any(
-        test,
-        not(all(
-            feature = "std",
-            not(miri),
-            target_arch = "x86_64",
-            target_pointer_width = "64",
-            not(all(target_feature = "adx", target_feature = "bmi2"))
-        ))
-    ))]
-    #[inline]
-    pub fn selected_add_mul_2_limbs_unchecked()
-    -> unsafe fn(*mut Limb, *const Limb, usize, Limb, Limb) -> (Limb, Limb) {
-        selected_add_mul_2_kernel()
+    with_direct_basecase_components! {
+        /// Returns the selected fused two-scalar multiply-add kernel.
+        #[inline]
+        pub fn selected_add_mul_2_limbs_unchecked()
+        -> unsafe fn(*mut Limb, *const Limb, usize, Limb, Limb) -> (Limb, Limb) {
+            selected_add_mul_2_kernel()
+        }
+
+        /// Returns the selected write-only two-row multiplication kernel.
+        #[inline]
+        pub fn selected_mul_2_limbs_unchecked()
+        -> unsafe fn(*mut Limb, *const Limb, usize, Limb, Limb) {
+            selected_mul_2_kernel()
+        }
+
     }
 
-    /// Returns the selected write-only two-row multiplication kernel.
-    #[cfg(any(
-        test,
-        not(all(
-            feature = "std",
-            not(miri),
-            target_arch = "x86_64",
-            target_pointer_width = "64",
-            not(all(target_feature = "adx", target_feature = "bmi2"))
-        ))
-    ))]
-    #[inline]
-    pub fn selected_mul_2_limbs_unchecked() -> unsafe fn(*mut Limb, *const Limb, usize, Limb, Limb)
-    {
-        selected_mul_2_kernel()
-    }
-
-    /// Returns whether the selected basecase should accumulate two rows at once.
-    #[cfg(not(all(
-        feature = "std",
-        not(miri),
-        target_arch = "x86_64",
-        target_pointer_width = "64",
-        not(all(target_feature = "adx", target_feature = "bmi2"))
-    )))]
-    #[inline]
-    pub const fn prefer_add_mul_2_limbs() -> bool {
-        !cfg!(all(
-            target_arch = "x86_64",
-            target_pointer_width = "64",
-            target_feature = "adx",
-            target_feature = "bmi2"
-        ))
+    with_direct_basecase_composition! {
+        /// Returns whether the selected basecase should accumulate two rows at once.
+        #[inline]
+        pub const fn prefer_add_mul_2_limbs() -> bool {
+            !cfg!(all(
+                target_arch = "x86_64",
+                target_pointer_width = "64",
+                target_feature = "adx",
+                target_feature = "bmi2"
+            ))
+        }
     }
 
     /// Simultaneously add and subtract two disjoint limb spans.
@@ -449,6 +355,24 @@ impl ArchKernels {
         // bounds; the selected backend needs no extra CPU features beyond its
         // tier.
         unsafe { selected_lshift_into_kernel()(dst, src, len, shift) }
+    }
+
+    /// Shift a limb prefix into the same or an overlapping higher destination.
+    ///
+    /// # Safety
+    ///
+    /// `limbs` must cover `offset + len` initialized writable limbs, `offset +
+    /// len` must be representable, and `shift` must be in `1..Limb::BITS`.
+    #[inline]
+    pub unsafe fn lshift_overlapping_unchecked(
+        limbs: *mut Limb,
+        len: usize,
+        offset: usize,
+        shift: u32,
+    ) -> Limb {
+        // SAFETY: the caller establishes the complete span and shift bounds;
+        // the selected backend traverses high to low to preserve overlap.
+        unsafe { selected_lshift_overlapping_kernel()(limbs, len, offset, shift) }
     }
 
     /// Shift a nonempty limb span right in place.

@@ -1,19 +1,16 @@
 //! Production-tower comparisons for highly unbalanced multiplication.
 
-#![allow(
+#![expect(
     unsafe_code,
     reason = "the benchmark calls GMP's raw mpn_mul with disjoint, exactly sized vectors"
 )]
 
-use core::{hint::black_box, mem::size_of};
+use core::hint::black_box;
 
-use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
-use mp_anafis::tune_api::tier::{
-    Limb,
-    state::{MulBenchScratch, bench_lopsided_mul_scratch_len, bench_lopsided_mul_with_scratch},
-};
+use gmp_mpfr_sys::gmp::{self, limb_t};
+use mp_anafis::tune_api::tier::{Limb, Tuner, state::MultiplicationBenchState};
 
-use crate::shared::operands_pair;
+use crate::shared::{operands_pair, to_gmp_limbs, validated_gmp_counts};
 
 const LOPSIDED_SHAPES: [(usize, usize); 18] = [
     (24, 8),
@@ -121,15 +118,11 @@ fn mp_production(bencher: divan::Bencher, shape: (usize, usize)) {
         .checked_mul(ratio)
         .expect("configured lopsided benchmark width fits usize");
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
-    let mut scratch = MulBenchScratch::default();
+    let mut scratch = MultiplicationBenchState::default();
+    let mut prepared = scratch.prepare(&mut destination, &larger, &smaller);
 
     bencher.bench_local(|| {
-        scratch.run(
-            black_box(&mut destination),
-            black_box(&larger),
-            black_box(&smaller),
-        );
-        let _output = black_box(&destination);
+        black_box(&mut prepared).run();
     });
 }
 
@@ -143,11 +136,11 @@ fn mp_forced_geometry(bencher: divan::Bencher, shape: (usize, usize, usize, usiz
         .saturating_mul(block_numerator)
         .div_ceil(block_denominator);
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
-    let scratch_len = bench_lopsided_mul_scratch_len(larger_len, smaller_len, block_len);
+    let scratch_len = Tuner::bench_lopsided_mul_scratch_len(larger_len, smaller_len, block_len);
     let mut scratch = vec![Limb::MIN; scratch_len];
 
     bencher.bench_local(|| {
-        bench_lopsided_mul_with_scratch(
+        Tuner::bench_lopsided_mul_with_scratch(
             black_box(&mut destination),
             black_box(&larger),
             black_box(&smaller),
@@ -160,30 +153,16 @@ fn mp_forced_geometry(bencher: divan::Bencher, shape: (usize, usize, usize, usiz
 
 #[divan::bench(args = LOPSIDED_SHAPES)]
 fn gmp_production(bencher: divan::Bencher, shape: (usize, usize)) {
-    assert_eq!(
-        size_of::<Limb>(),
-        size_of::<limb_t>(),
-        "benchmark requires equal Mp and GMP limb widths"
-    );
     let (smaller_len, ratio) = shape;
     let larger_len = smaller_len
         .checked_mul(ratio)
         .expect("configured lopsided benchmark width fits usize");
-    let (mp_larger, mp_smaller, _) = operands_pair(larger_len, smaller_len);
-    let larger: Vec<limb_t> = mp_larger
-        .into_iter()
-        .map(|limb| limb_t::try_from(limb).expect("Mp limb fits GMP limb"))
-        .collect();
-    let smaller: Vec<limb_t> = mp_smaller
-        .into_iter()
-        .map(|limb| limb_t::try_from(limb).expect("Mp limb fits GMP limb"))
-        .collect();
-    let destination_len = larger_len
-        .checked_add(smaller_len)
-        .expect("configured lopsided product width fits usize");
+    let (mp_larger, mp_smaller, mp_destination) = operands_pair(larger_len, smaller_len);
+    let larger = to_gmp_limbs(mp_larger);
+    let smaller = to_gmp_limbs(mp_smaller);
+    let destination_len = mp_destination.len();
     let mut destination = vec![limb_t::MIN; destination_len];
-    let gmp_larger_len = size_t::try_from(larger_len).expect("larger width fits GMP mp_size_t");
-    let gmp_smaller_len = size_t::try_from(smaller_len).expect("smaller width fits GMP mp_size_t");
+    let (gmp_larger_len, gmp_smaller_len) = validated_gmp_counts(larger_len, smaller_len);
 
     bencher.bench_local(|| {
         // SAFETY: GMP requires the first operand to be at least as long as the

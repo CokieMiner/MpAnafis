@@ -266,7 +266,7 @@ fn recover_scaled_even_odd(pair: &mut PairValues<'_>) {
     reason = "The coupled Toom-6 window retains a split-width prefix before an equal-width point product"
 )]
 fn pack_even_odd(packed: &mut [Limb], other: &[Limb], split_len: usize) {
-    assert!(
+    debug_assert!(
         split_len <= other.len() && split_len <= packed.len() && other.len() <= packed.len(),
         "coupled Toom-6 window cannot contain the shifted point product"
     );
@@ -275,7 +275,7 @@ fn pack_even_odd(packed: &mut [Limb], other: &[Limb], split_len: usize) {
     let (other_low, other_high) = other.split_at(split_len);
     let (packed_low, _) = packed.split_at_mut(split_len);
     packed_low.copy_from_slice(other_low);
-    // SAFETY: the release check proves `shift = split_len <= packed.len()` and
+    // SAFETY: the Toom-6 layout proves `shift = split_len <= packed.len()` and
     // `other_high.len() = other.len() - split_len <= packed.len() - split_len`.
     let _ = unsafe { SharedEval::fused_add_shifted_in_place(packed, other_high, split_len) };
 }

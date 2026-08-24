@@ -115,6 +115,7 @@ pub unsafe fn sub_limbs_3_unchecked(
             src2_v0 = out(reg) _, src2_v1 = out(reg) _, src2_v2 = out(reg) _, src2_v3 = out(reg) _,
             out("ctr") _,
             out("xer") _,
+            out("cr0") _,
             options(nostack)
         );
         borrow

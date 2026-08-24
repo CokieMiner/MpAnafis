@@ -8,13 +8,22 @@
 //!   products and squares on owned big integers.
 //! - `impl Multiplication` — raw limb-slice products and squares for callers that
 //!   already hold [`Limb`] spans and their own scratch.
+//!
+//! The owned `a * b` path establishes the complete execution contract here:
+//! normalized nonzero operands, an exact `a.len() + b.len()` destination, and
+//! scratch derived from the selected plan. Valid Rust slice widths prove that
+//! sum cannot overflow on any supported limb width. SSA performs its remaining
+//! fallible geometry arithmetic while building an operand-bound plan; execution
+//! below that boundary contains only diagnostic assertions for proved invariants.
 
 #![allow(
     unsafe_code,
     reason = "Proven raw-pointer operations on validated buffers"
 )]
 
-use core::{mem::MaybeUninit, ptr::eq};
+use core::ptr::eq;
+
+use crate::parallel::{DefaultExecutor, ParallelExecutor};
 
 use super::{
     INLINE_LIMBS, InternalMpUint, KARATSUBA_THRESHOLD, Karatsuba, Limb, MulPlan, Multiplication,
@@ -44,18 +53,20 @@ impl Default for MulScratch {
 }
 
 impl MulScratch {
-    /// Grows the pool to `scratch_len` limbs and exposes all of them.
-    #[allow(
-        clippy::uninit_vec,
-        reason = "Tier algorithms initialize every requested scratch region before reading it"
-    )]
+    /// Exposes at least `scratch_len` limbs without rewriting reusable storage.
+    ///
+    /// Every multiplication plan writes or explicitly clears each scratch
+    /// region before reading it. Preserving an already exposed buffer avoids an
+    /// O(scratch) fill on every repeated product. Growth still initializes the
+    /// newly exposed limbs once, as required by [`ScratchBuffer`]'s `Vec`-like
+    /// element-validity contract.
     #[inline]
     pub fn prepare(&mut self, scratch_len: usize) {
-        self.buf.reset_with_capacity(scratch_len);
-        // SAFETY: every selected tier writes or clears each scratch region before reading it.
-        unsafe {
-            self.buf.set_len(scratch_len);
+        if self.buf.len() >= scratch_len {
+            return;
         }
+        self.buf.reset_with_capacity(scratch_len);
+        self.buf.resize(scratch_len, Limb::MIN);
     }
 }
 
@@ -144,10 +155,6 @@ impl InternalMpUint {
     }
 
     /// Computes `self = a * b` using a caller-owned scratch pool.
-    #[allow(
-        clippy::uninit_vec,
-        reason = "Scratch buffer written before read by Karatsuba/Toom-Cook"
-    )]
     pub fn assign_product_with_scratch(&mut self, a: &Self, b: &Self, scratch: &mut MulScratch) {
         let a_limbs = a.limbs();
         let b_limbs = b.limbs();
@@ -163,14 +170,10 @@ impl InternalMpUint {
         // SAFETY: the limb dispatcher fills the complete result slice before it is read.
         let result = unsafe { self.ensure_capacity_set_len_get_limbs(res_len) };
         Multiplication::mul_limbs_with_scratch(a_limbs, b_limbs, result, scratch);
-        self.normalize();
+        self.trim_product_guard(res_len);
     }
 
     /// Computes `self = a * a` using a caller-owned scratch pool.
-    #[allow(
-        clippy::uninit_vec,
-        reason = "Scratch buffer written before read by Karatsuba/Toom-Cook"
-    )]
     pub fn assign_square_with_scratch(&mut self, a: &Self, scratch: &mut MulScratch) {
         let a_limbs = a.limbs();
         if a_limbs.is_empty() {
@@ -185,14 +188,10 @@ impl InternalMpUint {
         // SAFETY: the limb dispatcher fills the complete result slice before it is read.
         let result = unsafe { self.ensure_capacity_set_len_get_limbs(res_len) };
         Multiplication::sqr_limbs_with_scratch(a_limbs, result, scratch);
-        self.normalize();
+        self.trim_product_guard(res_len);
     }
 
     /// Multiplies in place by `other`.
-    #[allow(
-        clippy::uninit_vec,
-        reason = "Scratch buffer written before read by Karatsuba/Toom-Cook"
-    )]
     #[inline]
     pub fn mul_assign(&mut self, other: &Self) {
         let a_len = self.limbs().len();
@@ -288,17 +287,10 @@ impl InternalMpUint {
         }
     }
 
-    /// Writes `a * b` into `self`, where both operands are nonzero and normalized
-    /// and neither aliases `self`.
+    /// Writes a nonzero product.
     ///
     /// Nonzero normalized `m`- and `n`-limb operands have a product of at least
-    /// `m + n - 1` limbs, so only the highest allocated limb can be zero. That is
-    /// the whole normalization argument, and it is identical for the allocating and
-    /// the destination-reusing entry points.
-    #[allow(
-        clippy::uninit_vec,
-        reason = "Scratch buffer written before read by Karatsuba/Toom-Cook"
-    )]
+    /// `m + n - 1` limbs, so only the highest allocated limb can be zero.
     fn write_nonzero_product(&mut self, a_limbs: &[Limb], b_limbs: &[Limb]) {
         let result_len = a_limbs.len().wrapping_add(b_limbs.len());
         // SAFETY: multiplication initializes every exposed result limb.
@@ -307,15 +299,10 @@ impl InternalMpUint {
         self.trim_product_guard(result_len);
     }
 
-    /// Writes `a * a` into `self`, where `a` is nonzero, normalized, and does not
-    /// alias `self`.
+    /// Writes a nonzero square.
     ///
-    /// A nonzero normalized `n`-limb value has a square of `2n` or `2n - 1` limbs,
-    /// the same one-limb slack [`Self::write_nonzero_product`] relies on.
-    #[allow(
-        clippy::uninit_vec,
-        reason = "Scratch buffer written before read by Karatsuba/Toom-Cook"
-    )]
+    /// A nonzero normalized `n`-limb value has a square of `2n` or `2n - 1`
+    /// limbs, so at most one high guard limb can be zero.
     fn write_nonzero_square(&mut self, a_limbs: &[Limb]) {
         let result_len = a_limbs.len().wrapping_add(a_limbs.len());
         // SAFETY: squaring initializes every exposed result limb.
@@ -345,16 +332,36 @@ impl Multiplication {
     /// operand widths.
     #[inline]
     pub fn required_scratch(a_len: usize, b_len: usize) -> usize {
+        DefaultExecutor::with_resolved(|executor| {
+            Self::required_scratch_for_parallelism(a_len, b_len, executor.parallelism().get())
+        })
+    }
+
+    /// Scratch required for these operand widths at one executor width.
+    #[inline]
+    pub fn required_scratch_for_parallelism(
+        a_len: usize,
+        b_len: usize,
+        parallelism: usize,
+    ) -> usize {
         let plan = Self::select_plan(a_len, b_len, TierCeiling::Full);
-        Self::scratch_len(plan, a_len, b_len)
+        Self::scratch_len_for_parallelism(plan, a_len, b_len, parallelism)
     }
 
     /// Scratch one [`Self::sqr_limbs_with_slice_scratch`] call needs for this
     /// operand width.
     #[inline]
     pub fn required_sqr_scratch(len: usize) -> usize {
+        DefaultExecutor::with_resolved(|executor| {
+            Self::required_sqr_scratch_for_parallelism(len, executor.parallelism().get())
+        })
+    }
+
+    /// Square scratch required for this operand width at one executor width.
+    #[inline]
+    pub fn required_sqr_scratch_for_parallelism(len: usize, parallelism: usize) -> usize {
         let plan = Self::select_square_plan(len, TierCeiling::Full);
-        Self::square_scratch_len(plan, len)
+        Self::square_scratch_len_for_parallelism(plan, len, parallelism)
     }
 
     /// Multiplies `a_limbs` by `b_limbs` into `result` using caller-sized scratch.
@@ -362,10 +369,7 @@ impl Multiplication {
     /// `result` must hold at least `a_limbs.len() + b_limbs.len()` limbs and
     /// `scratch` at least [`Self::required_scratch`] limbs; an empty operand
     /// zeroes `result`.
-    #[allow(
-        clippy::uninit_vec,
-        reason = "Scratch buffer written before read by Karatsuba/Toom-Cook"
-    )]
+    ///
     pub fn mul_limbs_with_slice_scratch(
         a_limbs: &[Limb],
         b_limbs: &[Limb],
@@ -376,6 +380,13 @@ impl Multiplication {
             result.fill(0);
             return;
         }
+        // Each valid slice spans at most `isize::MAX` bytes and a limb occupies
+        // at least two bytes on every supported target, so the sum of two limb
+        // counts is strictly below `usize::MAX`.
+        debug_assert!(
+            result.len() >= a_limbs.len().wrapping_add(b_limbs.len()),
+            "the caller-sized multiplication destination is exact or wider"
+        );
         if eq(a_limbs.as_ptr(), b_limbs.as_ptr()) && a_limbs.len() == b_limbs.len() {
             Self::sqr_limbs_with_slice_scratch(a_limbs, result, scratch);
             return;
@@ -390,7 +401,19 @@ impl Multiplication {
             return;
         }
         let plan = Self::select_plan(a_limbs.len(), b_limbs.len(), TierCeiling::Full);
-        Self::execute_plan(plan, result, a_limbs, b_limbs, scratch);
+        DefaultExecutor::with_resolved(|executor| {
+            debug_assert!(
+                scratch.len()
+                    >= Self::scratch_len_for_parallelism(
+                        plan,
+                        a_limbs.len(),
+                        b_limbs.len(),
+                        executor.parallelism().get(),
+                    ),
+                "the caller-sized multiplication scratch matches the active executor"
+            );
+            Self::execute_plan_with_executor(plan, result, a_limbs, b_limbs, scratch, executor);
+        });
     }
 
     /// Multiplies `a_limbs` by `b_limbs` into `result`, growing a caller-owned
@@ -430,21 +453,28 @@ impl Multiplication {
             MulPlan::Schoolbook,
             "the hoisted basecase rule must exclude a schoolbook plan"
         );
-        let scratch_len = Self::scratch_len(plan, a_len, b_len);
-        if scratch_len > 0 {
-            scratch.prepare(scratch_len);
-        }
-        Self::execute_plan(plan, result, a_limbs, b_limbs, &mut scratch.buf);
+        DefaultExecutor::with_resolved(|executor| {
+            let scratch_len =
+                Self::scratch_len_for_parallelism(plan, a_len, b_len, executor.parallelism().get());
+            if scratch_len > 0 {
+                scratch.prepare(scratch_len);
+            }
+            Self::execute_plan_with_executor(
+                plan,
+                result,
+                a_limbs,
+                b_limbs,
+                &mut scratch.buf,
+                executor,
+            );
+        });
     }
 
     /// Squares `a_limbs` into `result` using caller-sized scratch.
     ///
     /// `result` must hold at least `2 * a_limbs.len()` limbs and `scratch` at least
     /// [`Self::required_sqr_scratch`] limbs; an empty operand zeroes `result`.
-    #[allow(
-        clippy::uninit_vec,
-        reason = "Scratch buffer written before read by Karatsuba/Toom-Cook"
-    )]
+    ///
     pub fn sqr_limbs_with_slice_scratch(
         a_limbs: &[Limb],
         result: &mut [Limb],
@@ -454,9 +484,26 @@ impl Multiplication {
             result.fill(0);
             return;
         }
+        // A valid limb slice spans at most `isize::MAX` bytes and a limb occupies
+        // at least two bytes, so doubling its element count cannot overflow.
+        debug_assert!(
+            result.len() >= a_limbs.len().wrapping_mul(2),
+            "the caller-sized square destination is exact or wider"
+        );
 
         let plan = Self::select_square_plan(a_limbs.len(), TierCeiling::Full);
-        Self::execute_square_plan(plan, result, a_limbs, scratch);
+        DefaultExecutor::with_resolved(|executor| {
+            debug_assert!(
+                scratch.len()
+                    >= Self::square_scratch_len_for_parallelism(
+                        plan,
+                        a_limbs.len(),
+                        executor.parallelism().get(),
+                    ),
+                "the caller-sized square scratch matches the active executor"
+            );
+            Self::execute_square_plan_with_executor(plan, result, a_limbs, scratch, executor);
+        });
     }
 
     /// Squares `a_limbs` into `result`, reusing a caller-owned scratch pool.
@@ -471,23 +518,31 @@ impl Multiplication {
             return;
         }
         let plan = Self::select_square_plan(a_limbs.len(), TierCeiling::Full);
-        let scratch_len = Self::square_scratch_len(plan, a_limbs.len());
-        if scratch_len > 0 {
-            scratch.prepare(scratch_len);
-        }
-        Self::execute_square_plan(plan, result, a_limbs, &mut scratch.buf);
+        DefaultExecutor::with_resolved(|executor| {
+            let scratch_len = Self::square_scratch_len_for_parallelism(
+                plan,
+                a_limbs.len(),
+                executor.parallelism().get(),
+            );
+            if scratch_len > 0 {
+                scratch.prepare(scratch_len);
+            }
+            Self::execute_square_plan_with_executor(
+                plan,
+                result,
+                a_limbs,
+                &mut scratch.buf,
+                executor,
+            );
+        });
     }
 }
 
-/// Multiplies two nonzero operands into `result`, selecting and running the plan.
-///
-/// Extracted so the allocating and destination-reusing entry points share one
-/// copy of the scratch policy; the two differ only in where `result` comes from,
-/// and a second copy would drift the moment a tier's scratch rule moved.
+/// Runs a nonzero product.
 fn multiply_nonzero_owned(a_limbs: &[Limb], b_limbs: &[Limb], result: &mut [Limb]) {
     let a_len = a_limbs.len();
     let b_len = b_limbs.len();
-    let plan = Multiplication::select_owned_plan(a_len, b_len);
+    let plan = Multiplication::select_plan(a_len, b_len, TierCeiling::Full);
     if plan == MulPlan::Schoolbook {
         Multiplication::execute_plan(plan, result, a_limbs, b_limbs, &mut []);
         return;
@@ -519,26 +574,43 @@ fn multiply_nonzero_owned(a_limbs: &[Limb], b_limbs: &[Limb], result: &mut [Limb
         }
     }
 
-    let scratch_len = Multiplication::scratch_len(plan, a_len, b_len);
-    // A transform tier's scratch is far past any stack budget, and asking for it
-    // by value would reserve the frame whether or not the branch is taken.
-    let tries_transform = matches!(plan, MulPlan::Large(_));
-    if scratch_len <= STACK_SCRATCH_LIMBS && !tries_transform {
-        with_stack_scratch(scratch_len, |active_scratch| {
-            Multiplication::execute_plan(plan, result, a_limbs, b_limbs, active_scratch);
-        });
-    } else {
-        let mut scratch = MulScratch::default();
-        scratch.prepare(scratch_len);
-        Multiplication::execute_plan(plan, result, a_limbs, b_limbs, &mut scratch.buf);
-    }
+    DefaultExecutor::with_resolved(|executor| {
+        let scratch_len = Multiplication::scratch_len_for_parallelism(
+            plan,
+            a_len,
+            b_len,
+            executor.parallelism().get(),
+        );
+        // A transform tier's scratch is far past any stack budget, and asking for it
+        // by value would reserve the frame whether or not the branch is taken.
+        let uses_transform = plan.is_transform();
+        if scratch_len <= STACK_SCRATCH_LIMBS && !uses_transform {
+            with_stack_scratch(scratch_len, |active_scratch| {
+                Multiplication::execute_plan_with_executor(
+                    plan,
+                    result,
+                    a_limbs,
+                    b_limbs,
+                    active_scratch,
+                    executor,
+                );
+            });
+        } else {
+            let mut scratch = MulScratch::default();
+            scratch.prepare(scratch_len);
+            Multiplication::execute_plan_with_executor(
+                plan,
+                result,
+                a_limbs,
+                b_limbs,
+                &mut scratch.buf,
+                executor,
+            );
+        }
+    });
 }
 
 /// Squares a nonzero operand into `result`, selecting and running the plan.
-///
-/// The squaring counterpart of [`multiply_nonzero_owned`], and shared by its two
-/// entry points for the same reason.
-#[inline]
 fn square_nonzero_owned(a_limbs: &[Limb], result: &mut [Limb]) {
     let a_len = a_limbs.len();
     let plan = Multiplication::select_square_plan(a_len, TierCeiling::Full);
@@ -546,20 +618,38 @@ fn square_nonzero_owned(a_limbs: &[Limb], result: &mut [Limb]) {
         Multiplication::execute_square_plan(plan, result, a_limbs, &mut []);
         return;
     }
-    let scratch_len = Multiplication::square_scratch_len(plan, a_len);
-    let tries_transform = matches!(plan, SquarePlan::Large(_));
-    if scratch_len <= STACK_SCRATCH_LIMBS && !tries_transform {
-        with_stack_scratch(scratch_len, |active_scratch| {
-            Multiplication::execute_square_plan(plan, result, a_limbs, active_scratch);
-        });
-    } else {
-        let mut scratch = MulScratch::default();
-        scratch.prepare(scratch_len);
-        Multiplication::execute_square_plan(plan, result, a_limbs, &mut scratch.buf);
-    }
+    DefaultExecutor::with_resolved(|executor| {
+        let scratch_len = Multiplication::square_scratch_len_for_parallelism(
+            plan,
+            a_len,
+            executor.parallelism().get(),
+        );
+        let uses_transform = plan.is_transform();
+        if scratch_len <= STACK_SCRATCH_LIMBS && !uses_transform {
+            with_stack_scratch(scratch_len, |active_scratch| {
+                Multiplication::execute_square_plan_with_executor(
+                    plan,
+                    result,
+                    a_limbs,
+                    active_scratch,
+                    executor,
+                );
+            });
+        } else {
+            let mut scratch = MulScratch::default();
+            scratch.prepare(scratch_len);
+            Multiplication::execute_square_plan_with_executor(
+                plan,
+                result,
+                a_limbs,
+                &mut scratch.buf,
+                executor,
+            );
+        }
+    });
 }
 
-/// Runs `body` against `scratch_len` limbs of uninitialized stack scratch.
+/// Runs `body` against `scratch_len` limbs of initialized stack scratch.
 ///
 /// `scratch_len` must not exceed [`STACK_SCRATCH_LIMBS`], which both callers
 /// establish by comparison immediately before calling.
@@ -569,27 +659,17 @@ fn with_stack_scratch(scratch_len: usize, body: impl FnOnce(&mut [Limb])) {
         scratch_len <= STACK_SCRATCH_LIMBS,
         "stack scratch is bounded by STACK_SCRATCH_LIMBS"
     );
-    // SAFETY: the selected plan fully writes or clears every scratch region it
-    // requests before reading it, so the uninitialized bytes are never observed.
-    let mut stack_scratch: MaybeUninit<[Limb; STACK_SCRATCH_LIMBS]> = MaybeUninit::uninit();
-    // SAFETY: see above, and scratch_len <= STACK_SCRATCH_LIMBS is asserted.
-    let active_scratch = unsafe {
-        stack_scratch
-            .assume_init_mut()
-            .get_unchecked_mut(..scratch_len)
-    };
+    let mut stack_scratch = [Limb::MIN; STACK_SCRATCH_LIMBS];
+    // SAFETY: scratch_len <= STACK_SCRATCH_LIMBS is asserted above.
+    let active_scratch = unsafe { stack_scratch.get_unchecked_mut(..scratch_len) };
     body(active_scratch);
 }
 
 /// Runs balanced Karatsuba against a stack frame sized exactly for `N` limbs.
 #[inline]
 fn karatsuba_on_stack<const N: usize>(result: &mut [Limb], a_limbs: &[Limb], b_limbs: &[Limb]) {
-    // SAFETY: the Karatsuba tier fully writes or clears the scratch it requests
-    // before reading it, and `N` is that tier's own declared requirement.
-    let mut stack_scratch: MaybeUninit<[Limb; N]> = MaybeUninit::uninit();
-    // SAFETY: see above. The tier contract guarantees uninitialized bytes are not read.
-    let scratch = unsafe { stack_scratch.assume_init_mut() };
-    Karatsuba::mul(result, a_limbs, b_limbs, scratch);
+    let mut stack_scratch = [Limb::MIN; N];
+    Karatsuba::mul(result, a_limbs, b_limbs, &mut stack_scratch);
 }
 
 #[cfg(test)]

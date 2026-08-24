@@ -22,8 +22,8 @@ const MULLO_DC_THRESHOLD: usize = KARATSUBA_THRESHOLD.saturating_mul(4);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LowProduct;
 
-/// `max` usable in a const initializer.
-const fn max_of(left: usize, right: usize) -> usize {
+/// Stable const equivalent of [`max`].
+const fn const_max(left: usize, right: usize) -> usize {
     if left >= right { left } else { right }
 }
 
@@ -54,9 +54,9 @@ fn mullo_mulders_small_len(len: usize) -> usize {
     // Every crossover below is a build-time constant, so the tier gates and
     // their `max` chains fold at compile time and only the per-`len`
     // comparisons remain in the recursion.
-    const TOOM4_THRESHOLD: usize = max_of(TOOM_COOK_THRESHOLD, TOOM_COOK_4_THRESHOLD);
-    const TOOM6_THRESHOLD: usize = max_of(TOOM4_THRESHOLD, TOOM_COOK_6_THRESHOLD);
-    const TOOM8_THRESHOLD: usize = max_of(TOOM6_THRESHOLD, TOOM_COOK_85_THRESHOLD);
+    const TOOM4_THRESHOLD: usize = const_max(TOOM_COOK_THRESHOLD, TOOM_COOK_4_THRESHOLD);
+    const TOOM6_THRESHOLD: usize = const_max(TOOM4_THRESHOLD, TOOM_COOK_6_THRESHOLD);
+    const TOOM8_THRESHOLD: usize = const_max(TOOM6_THRESHOLD, TOOM_COOK_85_THRESHOLD);
     const TOOM4_ENABLED: bool = TOOM_COOK_4_THRESHOLD != 0;
     const TOOM6_ENABLED: bool = TOOM4_ENABLED && TOOM_COOK_6_THRESHOLD != 0;
     const TOOM8_ENABLED: bool = TOOM6_ENABLED && TOOM_COOK_85_THRESHOLD != 0;
@@ -112,16 +112,11 @@ fn mullo_mulders_split_scratch_len(len: usize, small_len: usize) -> usize {
         Multiplication::required_scratch(large_len, large_len),
         Multiplication::required_sqr_scratch(large_len),
     );
-    let full_phase = large_len
-        .checked_mul(2)
-        .and_then(|product_len| product_len.checked_add(full_inner))
-        .expect("Mulders full-product scratch length overflowed");
+    let full_phase = large_len.saturating_mul(2).saturating_add(full_inner);
     let cross_phase = if small_len < MULLO_DC_THRESHOLD {
         0
     } else {
-        small_len
-            .checked_add(mullo_mulders_scratch_len(small_len))
-            .expect("Mulders cross-product scratch length overflowed")
+        small_len.saturating_add(mullo_mulders_scratch_len(small_len))
     };
     max(full_phase, cross_phase)
 }
@@ -226,11 +221,9 @@ unsafe fn mullo_mulders_at_split(
     // SAFETY: the same invariant gives `b.len() >= len`.
     let (b0, b1) = unsafe { b.get_unchecked(..len) }.split_at(large_len);
 
-    // A valid non-ZST limb slice is at most `isize::MAX` bytes, but use checked
-    // arithmetic here as the explicit allocation-width boundary as well.
-    let full_product_len = large_len
-        .checked_mul(2)
-        .expect("Mulders full-product width overflowed");
+    // A valid non-ZST limb slice is at most `isize::MAX` bytes and `Limb`
+    // occupies at least two bytes, so doubling this derived subspan fits.
+    let full_product_len = large_len.wrapping_mul(2);
     let full_inner_len = max(
         Multiplication::required_scratch(large_len, large_len),
         Multiplication::required_sqr_scratch(large_len),
@@ -331,13 +324,7 @@ impl LowProduct {
         );
 
         let scratch_len = mullo_mulders_split_scratch_len(len, small_len);
-        scratch.buf.clear();
-        scratch.buf.reserve(scratch_len);
-        // SAFETY: the forced root and every automatic child initialize each
-        // active scratch region before reading it.
-        unsafe {
-            scratch.buf.set_len(scratch_len);
-        }
+        scratch.prepare(scratch_len);
         // SAFETY: the boundary assertion above proves `len <= a.len()`.
         let a_slice = unsafe { a.get_unchecked(..len) };
         // SAFETY: the same assertion proves `len <= b.len()`.
@@ -369,13 +356,7 @@ impl LowProduct {
             }
         } else {
             let scratch_len = mullo_mulders_scratch_len(len);
-            scratch.buf.clear();
-            scratch.buf.reserve(scratch_len);
-            // SAFETY: Mulders recursion initializes every active product region
-            // before reading it; tier children obey the same scratch contract.
-            unsafe {
-                scratch.buf.set_len(scratch_len);
-            }
+            scratch.prepare(scratch_len);
             // SAFETY: the root assertion proves `len <= a.len()`.
             let a_slice = unsafe { a.get_unchecked(..len) };
             // SAFETY: the root assertion proves `len <= b.len()`.

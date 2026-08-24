@@ -4,9 +4,10 @@ use logic::InternalPrecisionContext;
 #[cfg(feature = "_internal-tune")]
 use logic::{
     ArchKernels, DivScratch, Division, FormatCache, Karatsuba, Lopsided, LowProduct, MulScratch,
-    Multiplication, Ntt, Schoolbook, ScratchBuffer, Ssa, Toom3, Toom4, Toom6, Toom8, Toom32,
-    Toom43, TransformBench, TransformChoice,
+    Multiplication, Schoolbook, ScratchBuffer, Toom3, Toom4, Toom6, Toom8, Toom32, Toom43,
 };
+#[cfg(all(feature = "_internal-tune", not(target_pointer_width = "16")))]
+use logic::{Ssa, SsaMultiplicationPlan, SsaSquaringPlan, TransformBench, TransformChoice};
 use types::{DoubleLimb, INLINE_LIMBS, LIMB_BITS, LIMB_BYTES};
 
 mod api;

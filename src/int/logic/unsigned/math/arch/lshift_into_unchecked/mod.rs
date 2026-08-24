@@ -1,9 +1,9 @@
 //! Architecture-specific optimised shift kernels.
 //!
-//! x86-64 selects between a 256-bit AVX2 loop and the mandatory SSE2 baseline
-//! (`psllq`/`psrlq`/`por`), with the SSE2 tier also covering compile-time
-//! builds without AVX2. `AArch64` uses a hand-tuned `lsl`+`lsr`+`orr`
-//! sequence
+//! x86-64 selects between a 512-bit AVX-512 loop, a 256-bit AVX2 loop, and
+//! the mandatory SSE2 baseline (`psllq`/`psrlq`/`por`), with the SSE2 tier
+//! also covering compile-time builds without AVX2. `AArch64` uses a
+//! hand-tuned `lsl`+`lsr`+`orr` sequence
 //! (`extr` requires an immediate, but our shift counts are runtime values).
 //! All other platforms use the pure Rust fallback. The in-place kernels shift
 //! one writable span; the `into` variants write a separate destination in a
@@ -22,7 +22,7 @@ select_arch_kernel! {
     backends: [
         aarch64 => all(not(miri), target_arch = "aarch64", target_pointer_width = "64"),
     ];
-    x86_64: [sse2, avx2];
+    x86_64: [sse2, avx2, avx512];
     powerpc64: [];
     special_coverage: [
         all(target_arch = "x86_64", target_pointer_width = "64"),
@@ -31,5 +31,6 @@ select_arch_kernel! {
     test_backends: [
         lshift_into_sse2_test => x86_64,
         lshift_into_avx2_test => x86_64_avx2,
+        lshift_into_avx512_test => x86_64_avx512,
     ];
 }

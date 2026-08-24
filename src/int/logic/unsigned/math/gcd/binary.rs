@@ -1,160 +1,201 @@
-//! Binary GCD fallback for short operands.
+//! In-register binary GCD kernels for up to four limbs (256 bits).
 
-use core::{cmp::Ordering, mem::swap};
+use super::{Gcd, LIMB_BITS, Limb};
 
-use super::{ArchKernels, Gcd, InternalMpUint, LIMB_BITS, Limb};
-
-/// Fused trailing-zeros count + right-shift in a single pass over the limbs.
-///
-/// Equivalent to `n.shr_assign(n.trailing_zeros())` but scans the limbs once
-/// instead of twice (once for `trailing_zeros`, once for `shr_assign`).
-#[allow(
-    unsafe_code,
-    clippy::as_conversions,
-    clippy::cast_possible_truncation,
-    reason = "get_unchecked_mut avoids bounds checks; LIMB_BITS fits in u32 even on 16-bit targets (where LIMB_BITS is 16): avoids checked conversions and is branchless."
-)]
-#[inline(always)]
-#[allow(
-    clippy::inline_always,
-    reason = "Inlining this helper eliminates call overhead and exposes loop invariants to the optimizer."
-)]
-fn shr_trailing_zeros_assign(n: &mut InternalMpUint) {
-    let limbs = n.limbs();
-    let len = limbs.len();
-    if len == 0 {
-        return;
-    }
-
-    // Find the first non-zero limb and count trailing zeros within it
-    let mut word_shift: usize = 0;
-    let mut bit_shift: u32 = 0;
-    for i in 0..len {
-        // SAFETY: i < len
-        let limb = unsafe { *limbs.get_unchecked(i) };
-        if limb == 0 {
-            word_shift = word_shift.wrapping_add(1);
-        } else {
-            bit_shift = limb.trailing_zeros();
-            break;
-        }
-    }
-
-    if word_shift >= len {
-        // Value is zero
-        // SAFETY: setting len to 0 is safe
-        unsafe {
-            n.set_len(0);
-        }
-        n.normalize();
-        return;
-    }
-
-    let total_shift = word_shift
-        .wrapping_mul(LIMB_BITS)
-        .wrapping_add(bit_shift as usize);
-    if total_shift == 0 {
-        return;
-    }
-
-    // Perform the combined word+bit shift.
-    let new_len = len.wrapping_sub(word_shift);
-
-    if word_shift > 0 {
-        let mut_limbs = n.limbs_mut();
-        // Word shift: move limbs down
-        for i in 0..new_len {
-            // SAFETY: i + word_shift < len, i < new_len
-            unsafe {
-                *mut_limbs.get_unchecked_mut(i) =
-                    *mut_limbs.get_unchecked(i.wrapping_add(word_shift));
-            }
-        }
-    }
-
-    // SAFETY: new_len <= len
-    unsafe {
-        n.set_len(new_len);
-    }
-
-    if bit_shift > 0 {
-        // Use arch-optimized kernel for the bit-level right shift
-        let mut_limbs = n.limbs_mut();
-        // SAFETY: limbs pointer is valid for new_len elements; 0 < bit_shift < LIMB_BITS
-        unsafe {
-            let _ = ArchKernels::rshift_unchecked(mut_limbs.as_mut_ptr(), new_len, bit_shift);
-        }
-    }
-
-    n.normalize();
-}
-
-/// Completes binary GCD after the common power-of-two factor has been removed.
-///
-/// Leaves the odd-part GCD in `u` and zero in `v`.
-#[allow(
-    unsafe_code,
-    reason = "Bypassing vector length checks during final Stein GCD limb truncation to avoid branchy checks."
-)]
 impl Gcd {
-    pub fn binary_gcd_odd_part_assign(u: &mut InternalMpUint, v: &mut InternalMpUint) {
-        shr_trailing_zeros_assign(u);
-        shr_trailing_zeros_assign(v);
+    /// In-register binary GCD for integers up to four limbs (256 bits on 64-bit targets).
+    ///
+    /// Keeps all state in CPU registers, eliminating vector allocations, length checks,
+    /// and memory loads during binary reduction.
+    #[must_use]
+    pub const fn gcd_4(mut u: [Limb; 4], mut v: [Limb; 4]) -> [Limb; 4] {
+        if Self::is_zero_4(u) {
+            return v;
+        }
+        if Self::is_zero_4(v) {
+            return u;
+        }
+
+        let u_tz = Self::trailing_zeros_4(u);
+        let v_tz = Self::trailing_zeros_4(v);
+        let common_shift = if u_tz < v_tz { u_tz } else { v_tz };
+
+        Self::rshift_4(&mut u, u_tz);
 
         loop {
-            // Fallback to primitive 64-bit GCD when both fit in a single limb.
-            if u.limbs().len() <= 1 && v.limbs().len() <= 1 {
-                let ans = Self::gcd_limb(
-                    *u.limbs().first().unwrap_or(&0),
-                    *v.limbs().first().unwrap_or(&0),
-                );
-                if ans != 0 {
-                    u.clone_from_slice(&[ans]);
-                } else if u.is_zero() {
-                    #[allow(
-                        unsafe_code,
-                        reason = "Bypassing vector length checks during final Stein GCD limb truncation to avoid branchy checks."
-                    )]
-                    // SAFETY: setting length to 0 is always safe
-                    unsafe {
-                        u.set_len(0);
-                    }
-                    break;
-                }
-                #[allow(
-                    unsafe_code,
-                    reason = "Bypassing vector length checks during final Stein GCD limb truncation to avoid branchy checks."
-                )]
-                // SAFETY: setting length to 0 is always safe
-                unsafe {
-                    v.set_len(0);
-                }
-                u.normalize();
-                v.normalize();
-                break;
+            let v_shift = Self::trailing_zeros_4(v);
+            Self::rshift_4(&mut v, v_shift);
+
+            if Self::is_greater_4(u, v) {
+                let temp = u;
+                u = v;
+                v = temp;
             }
 
-            if (*u).cmp(&*v) == Ordering::Greater {
-                swap(u, v);
-            }
+            Self::sub_4(&mut v, &u);
 
-            v.sub_assign(u);
-            if v.is_zero() {
+            if Self::is_zero_4(v) {
                 break;
             }
-            shr_trailing_zeros_assign(v);
+        }
+
+        Self::lshift_4(&mut u, common_shift);
+        u
+    }
+
+    #[allow(
+        clippy::as_conversions,
+        clippy::cast_possible_truncation,
+        reason = "LIMB_BITS fits in u32"
+    )]
+    const fn trailing_zeros_4(u: [Limb; 4]) -> u32 {
+        let limb_bits = LIMB_BITS as u32;
+        if u[0] != 0 {
+            u[0].trailing_zeros()
+        } else if u[1] != 0 {
+            u[1].trailing_zeros().wrapping_add(limb_bits)
+        } else if u[2] != 0 {
+            u[2].trailing_zeros()
+                .wrapping_add(limb_bits.wrapping_mul(2))
+        } else if u[3] != 0 {
+            u[3].trailing_zeros()
+                .wrapping_add(limb_bits.wrapping_mul(3))
+        } else {
+            limb_bits.wrapping_mul(4)
         }
     }
 
-    pub const fn gcd_limb(mut a: Limb, mut b: Limb) -> Limb {
-        while b != 0 {
-            let next_a = b;
-            b = match a.checked_rem(b) {
-                Some(rem) => rem,
-                None => return a,
-            };
-            a = next_a;
+    const fn is_zero_4(u: [Limb; 4]) -> bool {
+        u[0] == 0 && u[1] == 0 && u[2] == 0 && u[3] == 0
+    }
+
+    const fn is_greater_4(u: [Limb; 4], v: [Limb; 4]) -> bool {
+        if u[3] != v[3] {
+            u[3] > v[3]
+        } else if u[2] != v[2] {
+            u[2] > v[2]
+        } else if u[1] != v[1] {
+            u[1] > v[1]
+        } else {
+            u[0] > v[0]
         }
-        a
+    }
+
+    const fn sub_4(v: &mut [Limb; 4], u: &[Limb; 4]) {
+        let (v0, b0) = v[0].overflowing_sub(u[0]);
+        let (s1, b1a) = v[1].overflowing_sub(u[1]);
+        let borrow0: Limb = if b0 { 1 } else { 0 };
+        let (v1, b1b) = s1.overflowing_sub(borrow0);
+        let b1 = b1a || b1b;
+
+        let (s2, b2a) = v[2].overflowing_sub(u[2]);
+        let borrow1: Limb = if b1 { 1 } else { 0 };
+        let (v2, b2b) = s2.overflowing_sub(borrow1);
+        let b2 = b2a || b2b;
+
+        let (s3, _) = v[3].overflowing_sub(u[3]);
+        let borrow2: Limb = if b2 { 1 } else { 0 };
+        let (v3, _) = s3.overflowing_sub(borrow2);
+
+        v[0] = v0;
+        v[1] = v1;
+        v[2] = v2;
+        v[3] = v3;
+    }
+
+    #[allow(
+        clippy::as_conversions,
+        clippy::cast_possible_truncation,
+        reason = "LIMB_BITS fits in u32"
+    )]
+    const fn rshift_4(u: &mut [Limb; 4], shift: u32) {
+        let limb_bits = LIMB_BITS as u32;
+        if shift == 0 {
+            return;
+        }
+        let word_shift = shift.wrapping_shr(LIMB_BITS.trailing_zeros()) as usize;
+        let bit_shift = shift & limb_bits.wrapping_sub(1);
+
+        match word_shift {
+            0 => {}
+            1 => {
+                u[0] = u[1];
+                u[1] = u[2];
+                u[2] = u[3];
+                u[3] = 0;
+            }
+            2 => {
+                u[0] = u[2];
+                u[1] = u[3];
+                u[2] = 0;
+                u[3] = 0;
+            }
+            3 => {
+                u[0] = u[3];
+                u[1] = 0;
+                u[2] = 0;
+                u[3] = 0;
+            }
+            _ => {
+                *u = [0, 0, 0, 0];
+                return;
+            }
+        }
+
+        if bit_shift > 0 {
+            let carry_shift = limb_bits.wrapping_sub(bit_shift);
+            u[0] = u[0].wrapping_shr(bit_shift) | u[1].wrapping_shl(carry_shift);
+            u[1] = u[1].wrapping_shr(bit_shift) | u[2].wrapping_shl(carry_shift);
+            u[2] = u[2].wrapping_shr(bit_shift) | u[3].wrapping_shl(carry_shift);
+            u[3] = u[3].wrapping_shr(bit_shift);
+        }
+    }
+
+    #[allow(
+        clippy::as_conversions,
+        clippy::cast_possible_truncation,
+        reason = "LIMB_BITS fits in u32"
+    )]
+    const fn lshift_4(u: &mut [Limb; 4], shift: u32) {
+        let limb_bits = LIMB_BITS as u32;
+        if shift == 0 {
+            return;
+        }
+        let word_shift = shift.wrapping_shr(LIMB_BITS.trailing_zeros()) as usize;
+        let bit_shift = shift & limb_bits.wrapping_sub(1);
+
+        match word_shift {
+            0 => {}
+            1 => {
+                u[3] = u[2];
+                u[2] = u[1];
+                u[1] = u[0];
+                u[0] = 0;
+            }
+            2 => {
+                u[3] = u[1];
+                u[2] = u[0];
+                u[1] = 0;
+                u[0] = 0;
+            }
+            3 => {
+                u[3] = u[0];
+                u[2] = 0;
+                u[1] = 0;
+                u[0] = 0;
+            }
+            _ => {
+                *u = [0, 0, 0, 0];
+                return;
+            }
+        }
+
+        if bit_shift > 0 {
+            let carry_shift = limb_bits.wrapping_sub(bit_shift);
+            u[3] = u[3].wrapping_shl(bit_shift) | u[2].wrapping_shr(carry_shift);
+            u[2] = u[2].wrapping_shl(bit_shift) | u[1].wrapping_shr(carry_shift);
+            u[1] = u[1].wrapping_shl(bit_shift) | u[0].wrapping_shr(carry_shift);
+            u[0] = u[0].wrapping_shl(bit_shift);
+        }
     }
 }

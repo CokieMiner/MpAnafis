@@ -14,7 +14,7 @@ use super::{DivScratch, Division, InternalMpUint, Limb};
 pub struct Gcd;
 
 impl Gcd {
-    pub const LEHMER_THRESHOLD: usize = 4;
+    pub const LEHMER_THRESHOLD: usize = 2;
     pub const WIDE_LEHMER_THRESHOLD: usize = 32;
 }
 
@@ -28,6 +28,10 @@ impl InternalMpUint {
     ///
     /// May panic when internal invariants are violated (should not happen for
     /// well-formed inputs).
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Top-level GCD orchestration with all in-register fast paths."
+    )]
     #[must_use]
     pub fn gcd(&self, other: &Self) -> Self {
         if self.is_zero() {
@@ -37,19 +41,33 @@ impl InternalMpUint {
             return self.clone();
         }
 
+        let u_limbs = self.limbs();
+        let v_limbs = other.limbs();
+        if u_limbs.len() <= 4 && v_limbs.len() <= 4 {
+            let g = Gcd::gcd_4(self.extract_4(), other.extract_4());
+            return Self::from_limbs_4(g[0], g[1], g[2], g[3]);
+        }
+
+        if v_limbs.len() <= 4 {
+            let mut rem = Self::zero();
+            let mut scratch = DivScratch::default();
+            Division::rem_into(self, other, &mut rem, &mut scratch);
+            let g = Gcd::gcd_4(other.extract_4(), rem.extract_4());
+            return Self::from_limbs_4(g[0], g[1], g[2], g[3]);
+        }
+        if u_limbs.len() <= 4 {
+            let mut rem = Self::zero();
+            let mut scratch = DivScratch::default();
+            Division::rem_into(other, self, &mut rem, &mut scratch);
+            let g = Gcd::gcd_4(self.extract_4(), rem.extract_4());
+            return Self::from_limbs_4(g[0], g[1], g[2], g[3]);
+        }
+
         let shift = min(self.trailing_zeros(), other.trailing_zeros());
         let mut u = self.clone();
         let mut v = other.clone();
         u.shr_assign(shift);
         v.shr_assign(shift);
-
-        if u.limbs().len() < Gcd::LEHMER_THRESHOLD && v.limbs().len() < Gcd::LEHMER_THRESHOLD {
-            Gcd::binary_gcd_odd_part_assign(&mut u, &mut v);
-            if shift > 0 {
-                u.shl_assign(shift);
-            }
-            return u;
-        }
 
         let mut rem = Self::zero();
         // DivScratch allocated lazily inside the branches that need it,
@@ -66,9 +84,24 @@ impl InternalMpUint {
                 break;
             }
 
-            if v.limbs().len() < Gcd::LEHMER_THRESHOLD {
-                Gcd::binary_gcd_odd_part_assign(&mut u, &mut v);
-                break;
+            if v.limbs().len() <= 4 {
+                let s = scratch.get_or_insert_with(DivScratch::default);
+                Division::rem_into(&u, &v, &mut rem, s);
+                let g = Gcd::gcd_4(v.extract_4(), rem.extract_4());
+                let mut res = Self::from_limbs_4(g[0], g[1], g[2], g[3]);
+                if shift > 0 {
+                    res.shl_assign(shift);
+                }
+                return res;
+            }
+
+            if u.limbs().len() >= Gcd::HGCD_THRESHOLD && v.limbs().len() >= Gcd::HGCD_THRESHOLD {
+                let prev_lens = (u.limbs().len(), v.limbs().len());
+                let s = scratch.get_or_insert_with(DivScratch::default);
+                Gcd::hgcd_reduce(&mut u, &mut v, s, &mut u_backup, &mut v_backup);
+                if u.limbs().len() < prev_lens.0 || v.limbs().len() < prev_lens.1 {
+                    continue;
+                }
             }
 
             let (u0, v0, u1, v1, even) = if u.limbs().len() == v.limbs().len()
@@ -153,10 +186,11 @@ impl InternalMpUint {
         if other.is_zero() {
             return self.is_one();
         }
-        if self.limbs().len() <= 1 && other.limbs().len() <= 1 {
-            let a = self.limbs().first().copied().unwrap_or(0);
-            let b = other.limbs().first().copied().unwrap_or(0);
-            return Gcd::gcd_limb(a, b) == 1;
+        let u_limbs = self.limbs();
+        let v_limbs = other.limbs();
+        if u_limbs.len() <= 4 && v_limbs.len() <= 4 {
+            let g = Gcd::gcd_4(self.extract_4(), other.extract_4());
+            return g[0] == 1 && g[1] == 0 && g[2] == 0 && g[3] == 0;
         }
         self.gcd(other).is_one()
     }

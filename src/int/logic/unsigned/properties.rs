@@ -81,35 +81,63 @@ impl InternalMpUint {
     )]
     pub fn power_of_two(bits: usize) -> Self {
         let limb_idx = bits.wrapping_div(LIMB_BITS);
+        #[allow(
+            clippy::as_conversions,
+            clippy::cast_possible_truncation,
+            reason = "modulo LIMB_BITS fits in u32"
+        )]
         let bit_in_limb = (bits.wrapping_rem(LIMB_BITS)) as u32;
-        let mut limbs = alloc::vec![0; limb_idx.wrapping_add(1)];
-        if let Some(limb) = limbs.get_mut(limb_idx) {
-            *limb = 1_usize.wrapping_shl(bit_in_limb);
+        let val = 1_usize.wrapping_shl(bit_in_limb);
+        if limb_idx == 0 {
+            Self::from_limb(val)
+        } else if limb_idx == 1 {
+            Self::from_limbs_2(0, val)
+        } else if limb_idx == 2 {
+            Self::from_limbs_4(0, 0, val, 0)
+        } else if limb_idx == 3 {
+            Self::from_limbs_4(0, 0, 0, val)
+        } else {
+            let mut limbs = alloc::vec![0; limb_idx.wrapping_add(1)];
+            if let Some(limb) = limbs.get_mut(limb_idx) {
+                *limb = val;
+            }
+            Self::from_limbs(limbs)
         }
-        Self::from_limbs(limbs)
     }
 
     /// Returns the maximum value representable with `bits` bits.
     #[must_use]
-    #[allow(
-        clippy::as_conversions,
-        clippy::cast_possible_truncation,
-        reason = "modulo Limb::BITS fits in u32"
-    )]
     pub fn max_for_bits(bits: usize) -> Self {
         if bits == 0 {
             return Self::zero();
         }
         let num_limbs = bits.div_ceil(LIMB_BITS);
-        let mut limbs = vec![Limb::MAX; num_limbs];
         let rem = bits.wrapping_rem(LIMB_BITS);
-        if rem != 0 {
-            let mask = (1_usize.wrapping_shl(rem as u32)).wrapping_sub(1);
+        #[allow(
+            clippy::as_conversions,
+            clippy::cast_possible_truncation,
+            reason = "modulo Limb::BITS fits in u32"
+        )]
+        let mask = if rem == 0 {
+            Limb::MAX
+        } else {
+            (1_usize.wrapping_shl(rem as u32)).wrapping_sub(1)
+        };
+        if num_limbs == 1 {
+            Self::from_limb(mask)
+        } else if num_limbs == 2 {
+            Self::from_limbs_2(Limb::MAX, mask)
+        } else if num_limbs == 3 {
+            Self::from_limbs_4(Limb::MAX, Limb::MAX, mask, 0)
+        } else if num_limbs == 4 {
+            Self::from_limbs_4(Limb::MAX, Limb::MAX, Limb::MAX, mask)
+        } else {
+            let mut limbs = vec![Limb::MAX; num_limbs];
             if let Some(last) = limbs.last_mut() {
                 *last = mask;
             }
+            Self::from_limbs(limbs)
         }
-        Self::from_limbs(limbs)
     }
 
     /// Converts the value to `f64`, returning `None` if the value is too large

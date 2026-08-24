@@ -1,10 +1,10 @@
 //! Process-stable `x86_64` backend selection shared by arithmetic kernels.
 //!
 //! Two independent feature levels are detected once and cached: the
-//! add/multiply backend (`adx`/`bmi2`) and the SIMD tier (`avx2` vs the
-//! mandatory `sse2` baseline) used by vector kernels such as limb shifts.
+//! add/multiply backend (`adx`/`bmi2`) and the SIMD tier (`avx512`/`avx2` vs
+//! the mandatory `sse2` baseline) used by vector kernels such as limb shifts.
 //!
-//! Debug builds accept `MP_ANAFIS_TEST_BACKEND=adx|bmi2|vanilla|avx2|sse2`. A
+//! Debug builds accept `MP_ANAFIS_TEST_BACKEND=adx|bmi2|vanilla|avx512|avx2|sse2`. A
 //! requested instruction set is selected only when the host supports it;
 //! unsupported or unknown values fall back to the baseline level.
 
@@ -29,6 +29,8 @@ pub enum X86Backend {
 #[cfg(not(target_feature = "avx2"))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum X86SimdTier {
+    /// AVX-512 512-bit vector operations are available.
+    Avx512,
     /// AVX2 256-bit vector operations are available.
     Avx2,
     /// SSE2 128-bit vector operations only; mandatory on all x86-64 CPUs.
@@ -86,17 +88,21 @@ fn detect_x86_backend() -> X86Backend {
 /// vector-kernel selection.
 #[cfg(not(target_feature = "avx2"))]
 fn detect_x86_simd_tier() -> X86SimdTier {
+    let has_avx512 = is_x86_feature_detected!("avx512f");
     let has_avx2 = is_x86_feature_detected!("avx2");
 
     #[cfg(debug_assertions)]
     if let Ok(requested) = var("MP_ANAFIS_TEST_BACKEND") {
         return match requested.as_str() {
+            "avx512" if has_avx512 => X86SimdTier::Avx512,
             "avx2" if has_avx2 => X86SimdTier::Avx2,
             _ => X86SimdTier::Sse2,
         };
     }
 
-    if has_avx2 {
+    if has_avx512 {
+        X86SimdTier::Avx512
+    } else if has_avx2 {
         X86SimdTier::Avx2
     } else {
         X86SimdTier::Sse2

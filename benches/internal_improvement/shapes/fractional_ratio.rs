@@ -17,14 +17,7 @@
 
 use core::hint::black_box;
 
-use mp_anafis::tune_api::tier::{
-    Limb,
-    algorithms::{
-        bench_toom_cook_32_mul_with_scratch, bench_toom_cook_32_scratch_len,
-        bench_toom_cook_43_mul_with_scratch, bench_toom_cook_43_scratch_len,
-    },
-    state::{bench_lopsided_mul_scratch_len, bench_lopsided_mul_with_scratch},
-};
+use mp_anafis::tune_api::tier::{Limb, Tuner};
 
 use crate::shared::operands_pair;
 
@@ -91,9 +84,10 @@ fn shared_blocked(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
 fn shared_toom32(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
     let (larger_len, smaller_len) = shape;
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
-    let mut scratch = vec![Limb::MIN; bench_toom_cook_32_scratch_len(larger_len, smaller_len)];
+    let mut scratch =
+        vec![Limb::MIN; Tuner::bench_toom_cook_32_scratch_len(larger_len, smaller_len)];
     bencher.bench_local(|| {
-        bench_toom_cook_32_mul_with_scratch(
+        Tuner::bench_toom_cook_32_mul_with_scratch(
             black_box(&mut destination),
             black_box(&larger),
             black_box(&smaller),
@@ -110,9 +104,10 @@ fn shared_toom43(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
 fn toom43_arm(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
     let (larger_len, smaller_len) = shape;
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
-    let mut scratch = vec![Limb::MIN; bench_toom_cook_43_scratch_len(larger_len, smaller_len)];
+    let mut scratch =
+        vec![Limb::MIN; Tuner::bench_toom_cook_43_scratch_len(larger_len, smaller_len)];
     bencher.bench_local(|| {
-        bench_toom_cook_43_mul_with_scratch(
+        Tuner::bench_toom_cook_43_mul_with_scratch(
             black_box(&mut destination),
             black_box(&larger),
             black_box(&smaller),
@@ -126,9 +121,9 @@ fn blocked_arm(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
     let block_len = smaller_len;
     let mut scratch =
-        vec![Limb::MIN; bench_lopsided_mul_scratch_len(larger_len, smaller_len, block_len)];
+        vec![Limb::MIN; Tuner::bench_lopsided_mul_scratch_len(larger_len, smaller_len, block_len)];
     bencher.bench_local(|| {
-        bench_lopsided_mul_with_scratch(
+        Tuner::bench_lopsided_mul_with_scratch(
             black_box(&mut destination),
             black_box(&larger),
             black_box(&smaller),

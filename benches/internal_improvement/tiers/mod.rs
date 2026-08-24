@@ -7,6 +7,5 @@
 //! own, a Toom-6 timing says nothing about whether Toom-6 is any good.
 
 pub mod algorithms;
-pub mod arch_kernels;
 pub mod gmp_reference;
 pub mod squares;

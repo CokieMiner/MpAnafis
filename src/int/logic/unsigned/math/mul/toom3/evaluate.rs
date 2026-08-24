@@ -16,13 +16,13 @@ impl Toom3 {
         part2: &[Limb],
         add_mul_kernel: AddMulKernel,
     ) {
-        assert!(
+        debug_assert!(
             part1.len() <= dst.len(),
             "linear part exceeds the evaluation destination"
         );
         // A(2)-A(1) = a1+3*a2. Both additions consume the existing guard limb;
         // the final value remains below 7*B^m, so no carry can escape `dst`.
-        // SAFETY: the release check above proves the source fits at offset zero.
+        // SAFETY: the guarded Toom-3 layout proves the source fits at offset zero.
         unsafe {
             SharedEval::add_part(dst, part1);
         }

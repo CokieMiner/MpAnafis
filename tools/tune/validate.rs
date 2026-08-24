@@ -8,8 +8,8 @@
 //! and nothing is installed.
 
 use crate::{
-    harness::{CandidateHarness, SCORE_SCALE, relative_score},
-    tuning_profile::TuningProfile,
+    harness::{SCORE_SCALE, ScoreDomain, relative_score},
+    session::TuneSession,
     worker::{
         PRODUCTION_DIV_CELLS, PRODUCTION_MUL_CELLS, PRODUCTION_SQR_CELLS, cell_weights,
         division_cell_weights,
@@ -19,21 +19,21 @@ use crate::{
 /// Score the tuned profile against the architecture defaults on the
 /// production dispatcher. Returns `true` when the tuned profile wins by the
 /// margin, and records the per-cell verdicts in `decisions`.
-pub fn end_to_end(
-    profile: &TuningProfile,
-    defaults: &TuningProfile,
-    margin_ppm: u32,
-    harness: &mut CandidateHarness,
-    decisions: &mut Vec<(String, String)>,
-) -> bool {
+pub fn end_to_end(session: &mut TuneSession) -> bool {
     println!("\nEnd-to-end validation (production dispatcher)");
     let mut weights = cell_weights(&PRODUCTION_MUL_CELLS, &PRODUCTION_SQR_CELLS);
     weights.extend(division_cell_weights());
-    let Some(tuned) = harness.score_production(profile) else {
+    let Some(tuned) = session
+        .harness
+        .score(&session.profile, ScoreDomain::Production)
+    else {
         println!("Validation failed: could not score the tuned profile");
         return false;
     };
-    let Some(baseline) = harness.score_production(defaults) else {
+    let Some(baseline) = session
+        .harness
+        .score(&session.defaults, ScoreDomain::Production)
+    else {
         println!("Validation failed: could not score the architecture defaults");
         return false;
     };
@@ -56,8 +56,9 @@ pub fn end_to_end(
     );
 
     let aggregate_wins = tuned_score.saturating_mul(1_000_000)
-        < baseline_score.saturating_mul(u128::from(1_000_000_u32.wrapping_sub(margin_ppm)));
-    let family_limit = SCORE_SCALE.saturating_add(u128::from(margin_ppm));
+        < baseline_score
+            .saturating_mul(u128::from(1_000_000_u32.saturating_sub(session.margin_ppm)));
+    let family_limit = SCORE_SCALE.saturating_add(u128::from(session.margin_ppm));
     let no_family_regresses = [mul_score, sqr_score, div_score]
         .into_iter()
         .all(|score| score <= family_limit);
@@ -67,20 +68,21 @@ pub fn end_to_end(
     let wins = aggregate_wins && no_family_regresses;
     if wins {
         println!("Validation passed: tuned profile {tuned_score} ppm vs defaults {baseline_score}");
-        decisions.push((
+        session.record(
             "END_TO_END_VALIDATION".to_owned(),
             format!("passed at {tuned_score} ppm"),
-        ));
+        );
     } else {
+        let margin_ppm = session.margin_ppm;
         println!(
             "Validation REJECTED: tuned profile {tuned_score} ppm vs defaults {baseline_score} \
              (needed {margin_ppm} ppm aggregate win and no family above {family_limit} ppm); \
              not installing the tuned profile"
         );
-        decisions.push((
+        session.record(
             "END_TO_END_VALIDATION".to_owned(),
             format!("rejected: {tuned_score} ppm, defaults {baseline_score}"),
-        ));
+        );
     }
     wins
 }
@@ -142,13 +144,13 @@ fn report_cells(
 
 const FORMAT_VALIDATION_ITERATIONS: u32 = 5_000;
 
-pub fn report_formatting_boundaries(profile: &TuningProfile, harness: &mut CandidateHarness) {
+pub fn report_formatting_boundaries(session: &mut TuneSession) {
     println!("\nFormatting boundary report");
     for &radix in &[3, 5, 9, 10, 11, 19, 36] {
         let threshold = match radix {
-            3..=9 => profile.radix_small_recursive,
-            10 => profile.radix_decimal_recursive,
-            _ => profile.radix_large_recursive,
+            3..=9 => session.profile.radix_small_recursive,
+            10 => session.profile.radix_decimal_recursive,
+            _ => session.profile.radix_large_recursive,
         };
         if threshold >= usize::MAX - 16 {
             println!("  Radix {radix:02}: recursive formatting disabled");
@@ -174,8 +176,9 @@ pub fn report_formatting_boundaries(profile: &TuningProfile, harness: &mut Candi
                 quality: crate::measure::ProbeQuality::Precise,
                 iterations: FORMAT_VALIDATION_ITERATIONS,
             };
-            if let Some((baseline_time, candidate_time)) =
-                harness.score_formatting_pair(profile, spec)
+            if let Some((baseline_time, candidate_time)) = session
+                .harness
+                .score_formatting_pair(&session.profile, spec)
             {
                 let winner = if candidate_time < baseline_time {
                     "recursive"

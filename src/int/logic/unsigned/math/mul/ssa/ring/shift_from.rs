@@ -15,7 +15,7 @@
     reason = "Unrolled hybrid shift-loops for the out-of-place path"
 )]
 
-use super::{Addition, ArchKernels, LIMB_BITS, Limb, SsaCarry, SsaRing, UNROLLED_SHIFT_MAX_LIMBS};
+use super::{Addition, ArchKernels, LIMB_BITS, Limb, SsaCarry, SsaRing};
 
 impl SsaRing {
     /// Computes `dst = src * 2^shift mod (2^n + 1)` without an intermediate
@@ -103,7 +103,6 @@ impl SsaRing {
                     ml,
                     whole_limbs,
                     bit_shift,
-                    right_shift,
                     low_len,
                     high_len,
                     high_start,
@@ -114,80 +113,85 @@ impl SsaRing {
         if guard != 0 {
             // SAFETY: dst and mod_bits are from the caller; indices are in-bounds.
             unsafe {
-                correct_guard_shift(dst, ml, cl, mod_bits, positive_shift, negate_result);
+                Self::correct_guard_shift(dst, ml, cl, mod_bits, positive_shift, negate_result);
             }
         }
     }
-}
 
-/// Corrects the shifted Fermat residue for a non-zero semi-normalized guard.
-///
-/// A semi-normalized source stores `low - guard * 2^n`. After shifting and
-/// modular reduction the guard is applied as a bit-level add or subtract at
-/// `positive_shift`, followed by one round of canonicalization.
-///
-/// # Safety
-/// Same preconditions as [`SsaRing::shift_from`], with `guard != 0`.
-#[allow(
-    clippy::as_conversions,
-    clippy::cast_possible_truncation,
-    reason = "positive_shift modulo LIMB_BITS is below 64 and therefore fits in u32"
-)]
-unsafe fn correct_guard_shift(
-    dst: &mut [Limb],
-    ml: usize,
-    cl: usize,
-    mod_bits: usize,
-    positive_shift: usize,
-    negate_result: bool,
-) {
-    let correction_bit = 1_usize.wrapping_shl(positive_shift.wrapping_rem(LIMB_BITS) as u32);
-    let correction_index = positive_shift.wrapping_div(LIMB_BITS);
-    if negate_result {
-        // A semi-normalized source represents `low - guard`. Negating the
-        // shifted low part therefore adds guard*2^positive_shift.
-        // SAFETY: correction_index < ml < cl <= dst.len().
-        let (corrected, carry) =
-            unsafe { *dst.get_unchecked(correction_index) }.overflowing_add(correction_bit);
-        // SAFETY: correction_index is in the data span.
-        unsafe {
-            *dst.get_unchecked_mut(correction_index) = corrected;
-        }
-        if carry {
+    /// Corrects the shifted Fermat residue for a non-zero semi-normalized guard.
+    ///
+    /// A semi-normalized source stores `low - guard * 2^n`. After shifting and
+    /// modular reduction the guard is applied as a bit-level add or subtract at
+    /// `positive_shift`, followed by one round of canonicalization. Shared by
+    /// this out-of-place shift and the in-place shift in
+    /// [`shift`](super::shift), which must apply its negation *before* this
+    /// correction so the correction's sign matches the negated path here.
+    ///
+    /// # Safety
+    /// `dst` holds a complete coefficient produced by shifting an ordinary
+    /// residue by `positive_shift` in a ring of `mod_bits` bits, with `ml` and
+    /// `cl` matching that ring.
+    #[allow(
+        clippy::as_conversions,
+        clippy::cast_possible_truncation,
+        reason = "positive_shift modulo LIMB_BITS is below 64 and therefore fits u32"
+    )]
+    pub unsafe fn correct_guard_shift(
+        dst: &mut [Limb],
+        ml: usize,
+        cl: usize,
+        mod_bits: usize,
+        positive_shift: usize,
+        negate_result: bool,
+    ) {
+        let correction_bit = 1_usize.wrapping_shl(positive_shift.wrapping_rem(LIMB_BITS) as u32);
+        let correction_index = positive_shift.wrapping_div(LIMB_BITS);
+        if negate_result {
+            // A semi-normalized source represents `low - guard`. Negating the
+            // shifted low part therefore adds guard*2^positive_shift.
+            // SAFETY: correction_index < ml < cl <= dst.len().
+            let (corrected, carry) =
+                unsafe { *dst.get_unchecked(correction_index) }.overflowing_add(correction_bit);
+            // SAFETY: correction_index is in the data span.
+            unsafe {
+                *dst.get_unchecked_mut(correction_index) = corrected;
+            }
+            if carry {
+                // SAFETY: the suffix remains inside the complete coefficient.
+                let _ = SsaCarry::propagate_carry(unsafe {
+                    dst.get_unchecked_mut(correction_index.wrapping_add(1)..cl)
+                });
+            }
+            // SAFETY: adding the one-bit guard correction produces a value
+            // below 2*(2^n+1), so one canonical reduction is sufficient.
+            unsafe {
+                Self::normalize(dst, mod_bits);
+            }
+        } else {
+            // The positive shifted value is low*2^s - guard*2^s. Subtract the
+            // guard bit through the full coefficient; if storage underflows,
+            // add 2^n+1 to recover the canonical ring representative.
+            // SAFETY: correction_index < ml < cl <= dst.len().
+            let (corrected, borrow) =
+                unsafe { *dst.get_unchecked(correction_index) }.overflowing_sub(correction_bit);
+            // SAFETY: correction_index is in the data span.
+            unsafe {
+                *dst.get_unchecked_mut(correction_index) = corrected;
+            }
             // SAFETY: the suffix remains inside the complete coefficient.
-            let _ = SsaCarry::propagate_carry(unsafe {
-                dst.get_unchecked_mut(correction_index.wrapping_add(1)..cl)
-            });
-        }
-        // SAFETY: adding the one-bit guard correction produces a value
-        // below 2*(2^n+1), so one canonical reduction is sufficient.
-        unsafe {
-            SsaRing::normalize(dst, mod_bits);
-        }
-    } else {
-        // The positive shifted value is low*2^s - guard*2^s. Subtract the
-        // guard bit through the full coefficient; if storage underflows,
-        // add 2^n+1 to recover the canonical ring representative.
-        // SAFETY: correction_index < ml < cl <= dst.len().
-        let (corrected, borrow) =
-            unsafe { *dst.get_unchecked(correction_index) }.overflowing_sub(correction_bit);
-        // SAFETY: correction_index is in the data span.
-        unsafe {
-            *dst.get_unchecked_mut(correction_index) = corrected;
-        }
-        // SAFETY: the suffix remains inside the complete coefficient.
-        let escaped = borrow
-            && SsaCarry::propagate_borrow(unsafe {
-                dst.get_unchecked_mut(correction_index.wrapping_add(1)..cl)
-            });
-        if escaped {
-            // The cl-limb wrap is corrected by adding both terms of
-            // 2^n+1: increment the complete slot, then its guard.
-            // SAFETY: caller guarantees dst contains cl limbs.
-            let _ = SsaCarry::propagate_carry(unsafe { dst.get_unchecked_mut(..cl) });
-            // SAFETY: ml < cl <= dst.len().
-            let guard_slot = unsafe { dst.get_unchecked_mut(ml) };
-            *guard_slot = guard_slot.wrapping_add(1);
+            let escaped = borrow
+                && SsaCarry::propagate_borrow(unsafe {
+                    dst.get_unchecked_mut(correction_index.wrapping_add(1)..cl)
+                });
+            if escaped {
+                // The cl-limb wrap is corrected by adding both terms of
+                // 2^n+1: increment the complete slot, then its guard.
+                // SAFETY: caller guarantees dst contains cl limbs.
+                let _ = SsaCarry::propagate_carry(unsafe { dst.get_unchecked_mut(..cl) });
+                // SAFETY: ml < cl <= dst.len().
+                let guard_slot = unsafe { dst.get_unchecked_mut(ml) };
+                *guard_slot = guard_slot.wrapping_add(1);
+            }
         }
     }
 }
@@ -211,7 +215,6 @@ unsafe fn shift_nonnegated(
     ml: usize,
     whole_limbs: usize,
     bit_shift: u32,
-    right_shift: u32,
     low_len: usize,
     high_len: usize,
     high_start: usize,
@@ -223,57 +226,25 @@ unsafe fn shift_nonnegated(
         // low_len limbs and the caller guarantees they do not overlap.
         unsafe { dst.get_unchecked_mut(whole_limbs..ml) }
             .copy_from_slice(unsafe { src.get_unchecked(..low_len) });
-    } else if low_len < UNROLLED_SHIFT_MAX_LIMBS {
-        let mut low_carry = 0;
-        // SAFETY: low_len <= ml <= src.len().
-        let (chunks, remainder) = unsafe { src.get_unchecked(..low_len) }.as_chunks::<4>();
-        let mut index = whole_limbs;
-        for chunk in chunks {
-            let [s0, s1, s2, s3] = *chunk;
-
-            let shifted0 = s0.wrapping_shl(bit_shift) | low_carry;
-            let shifted1 = s1.wrapping_shl(bit_shift) | s0.wrapping_shr(right_shift);
-            let shifted2 = s2.wrapping_shl(bit_shift) | s1.wrapping_shr(right_shift);
-            let shifted3 = s3.wrapping_shl(bit_shift) | s2.wrapping_shr(right_shift);
-
-            // SAFETY: index + 3 < whole_limbs + low_len = ml < cl <= dst.len().
-            unsafe {
-                *dst.get_unchecked_mut(index) = shifted0;
-                *dst.get_unchecked_mut(index.wrapping_add(1)) = shifted1;
-                *dst.get_unchecked_mut(index.wrapping_add(2)) = shifted2;
-                *dst.get_unchecked_mut(index.wrapping_add(3)) = shifted3;
-            }
-            low_carry = s3.wrapping_shr(right_shift);
-            index = index.wrapping_add(4);
-        }
-        for &source in remainder {
-            let shifted = source.wrapping_shl(bit_shift) | low_carry;
-            // SAFETY: index < whole_limbs + low_len = ml < cl <= dst.len().
-            unsafe {
-                *dst.get_unchecked_mut(index) = shifted;
-            }
-            low_carry = source.wrapping_shr(right_shift);
-            index = index.wrapping_add(1);
-        }
     } else {
-        let mut carry = 0;
-        for index in 0..low_len {
-            // SAFETY: index < low_len <= ml < cl <= src.len().
-            let source = unsafe { *src.get_unchecked(index) };
-            // SAFETY: whole_limbs + index < ml < cl <= dst.len().
-            unsafe {
-                *dst.get_unchecked_mut(whole_limbs.wrapping_add(index)) =
-                    source.wrapping_shl(bit_shift) | carry;
-            }
-            carry = source.wrapping_shr(right_shift);
-        }
+        // SAFETY: low_len <= ml, whole_limbs + low_len = ml, dst has cl > ml limbs,
+        // src has cl > ml limbs, 0 < bit_shift < LIMB_BITS, and spans are non-overlapping.
+        let _ = unsafe {
+            ArchKernels::lshift_into_unchecked(
+                dst.as_mut_ptr().add(whole_limbs),
+                src.as_ptr(),
+                low_len,
+                bit_shift,
+            )
+        };
     }
 
     let borrow = if bit_shift == 0 {
-        // SAFETY: both spans contain high_len limbs and are disjoint.
-        Addition::sub_slice_in_place(unsafe { dst.get_unchecked_mut(..high_len) }, unsafe {
-            src.get_unchecked(high_start..ml)
-        }) != 0
+        // SAFETY: dst contains the complete writable high_len-limb prefix.
+        let low = unsafe { dst.get_unchecked_mut(..high_len) };
+        // SAFETY: src[high_start..ml] contains exactly high_len initialized limbs.
+        let high = unsafe { src.get_unchecked(high_start..ml) };
+        Addition::sub_slice_in_place(low, high) != 0
     } else {
         let kernel = ArchKernels::selected_sub_shifted_high_limbs_unchecked();
         // SAFETY: dst and src are disjoint complete coefficients. The selected
@@ -307,6 +278,80 @@ unsafe fn shift_nonnegated(
     }
 }
 
+/// Fused shift-and-subtract chain for widths below two staged SIMD blocks.
+///
+/// # Safety
+///
+/// `src` must contain `low_len` readable limbs and `dst` must contain the
+/// writable range `whole_limbs..whole_limbs + low_len`. `bit_shift` and
+/// `right_shift` must be complementary nonzero limb shifts.
+unsafe fn shift_sub_scalar(
+    dst: &mut [Limb],
+    src: &[Limb],
+    whole_limbs: usize,
+    bit_shift: u32,
+    right_shift: u32,
+    low_len: usize,
+) -> bool {
+    let mut low_carry = 0;
+    let mut low_borrow = false;
+    // SAFETY: the caller guarantees this complete readable prefix.
+    let (chunks, remainder) = unsafe { src.get_unchecked(..low_len) }.as_chunks::<4>();
+    let mut target = whole_limbs;
+    for chunk in chunks {
+        let [s0, s1, s2, s3] = *chunk;
+
+        let ls0 = s0.wrapping_shl(bit_shift) | low_carry;
+        let c0 = s0.wrapping_shr(right_shift);
+        let ls1 = s1.wrapping_shl(bit_shift) | c0;
+        let c1 = s1.wrapping_shr(right_shift);
+        let ls2 = s2.wrapping_shl(bit_shift) | c1;
+        let c2 = s2.wrapping_shr(right_shift);
+        let ls3 = s3.wrapping_shl(bit_shift) | c2;
+        low_carry = s3.wrapping_shr(right_shift);
+
+        // SAFETY: target + 3 < whole_limbs + low_len <= dst.len().
+        unsafe {
+            let m0 = *dst.get_unchecked(target);
+            let (p0, u0a) = m0.overflowing_sub(ls0);
+            let (r0, u0b) = p0.overflowing_sub(Limb::from(low_borrow));
+            *dst.get_unchecked_mut(target) = r0;
+
+            let m1 = *dst.get_unchecked(target.wrapping_add(1));
+            let (p1, u1a) = m1.overflowing_sub(ls1);
+            let (r1, u1b) = p1.overflowing_sub(Limb::from(u0a | u0b));
+            *dst.get_unchecked_mut(target.wrapping_add(1)) = r1;
+
+            let m2 = *dst.get_unchecked(target.wrapping_add(2));
+            let (p2, u2a) = m2.overflowing_sub(ls2);
+            let (r2, u2b) = p2.overflowing_sub(Limb::from(u1a | u1b));
+            *dst.get_unchecked_mut(target.wrapping_add(2)) = r2;
+
+            let m3 = *dst.get_unchecked(target.wrapping_add(3));
+            let (p3, u3a) = m3.overflowing_sub(ls3);
+            let (r3, u3b) = p3.overflowing_sub(Limb::from(u2a | u2b));
+            *dst.get_unchecked_mut(target.wrapping_add(3)) = r3;
+            low_borrow = u3a | u3b;
+        }
+        target = target.wrapping_add(4);
+    }
+    for &source in remainder {
+        let low_shifted = source.wrapping_shl(bit_shift) | low_carry;
+        low_carry = source.wrapping_shr(right_shift);
+        // SAFETY: target < whole_limbs + low_len <= dst.len().
+        let minuend = unsafe { *dst.get_unchecked(target) };
+        let (partial, underflow_a) = minuend.overflowing_sub(low_shifted);
+        let (result, underflow_b) = partial.overflowing_sub(Limb::from(low_borrow));
+        // SAFETY: the identical target bound gives one writable limb.
+        unsafe {
+            *dst.get_unchecked_mut(target) = result;
+        }
+        low_borrow = underflow_a | underflow_b;
+        target = target.wrapping_add(1);
+    }
+    low_borrow
+}
+
 // ── Shifts in [n, 2n): the sign-flipped difference ──────────────────────────────
 
 /// Applies the negated shift path: `high * 2^positive_shift` (modulo sign flip)
@@ -336,155 +381,85 @@ unsafe fn shift_negated(
         // and the caller guarantees the source and destination disjoint.
         unsafe { dst.get_unchecked_mut(..high_len) }
             .copy_from_slice(unsafe { src.get_unchecked(high_start..ml) });
-    } else if high_len < UNROLLED_SHIFT_MAX_LIMBS {
-        // SAFETY: high_start..ml is within src.len() since ml <= src.len().
-        let (chunks, remainder) = unsafe { src.get_unchecked(high_start..ml) }.as_chunks::<4>();
-        let mut index = 0_usize;
-        for chunk in chunks {
-            let [s0, s1, s2, s3] = *chunk;
-
-            let l0 = s0.wrapping_shr(right_shift);
-            let h0 = s1.wrapping_shl(bit_shift);
-            let l1 = s1.wrapping_shr(right_shift);
-            let h1 = s2.wrapping_shl(bit_shift);
-            let l2 = s2.wrapping_shr(right_shift);
-            let h2 = s3.wrapping_shl(bit_shift);
-            let l3 = s3.wrapping_shr(right_shift);
-
-            let source_index3 = high_start.wrapping_add(index).wrapping_add(3);
-            let h3 = if source_index3.wrapping_add(1) < ml {
-                // SAFETY: branch verifies source_index3 + 1 < ml <= src.len().
-                unsafe { *src.get_unchecked(source_index3.wrapping_add(1)) }.wrapping_shl(bit_shift)
-            } else {
-                0
-            };
-
-            // SAFETY: index + 3 < high_len <= ml < cl <= dst.len().
-            unsafe {
-                *dst.get_unchecked_mut(index) = l0 | h0;
-                *dst.get_unchecked_mut(index.wrapping_add(1)) = l1 | h1;
-                *dst.get_unchecked_mut(index.wrapping_add(2)) = l2 | h2;
-                *dst.get_unchecked_mut(index.wrapping_add(3)) = l3 | h3;
-            }
-            index = index.wrapping_add(4);
-        }
-        for &s in remainder {
-            let source_index = high_start.wrapping_add(index);
-            let low = s.wrapping_shr(right_shift);
-            let high = if source_index.wrapping_add(1) < ml {
-                // SAFETY: branch verifies source_index + 1 < ml <= src.len().
-                unsafe { *src.get_unchecked(source_index.wrapping_add(1)) }.wrapping_shl(bit_shift)
-            } else {
-                0
-            };
-            // SAFETY: index < high_len <= ml < cl <= dst.len().
-            unsafe {
-                *dst.get_unchecked_mut(index) = low | high;
-            }
-            index = index.wrapping_add(1);
-        }
     } else {
-        for index in 0..high_len {
-            let source_index = high_start.wrapping_add(index);
-            // SAFETY: source_index < high_start + high_len = ml.
-            let low = unsafe { *src.get_unchecked(source_index) }.wrapping_shr(right_shift);
-            let high = if source_index.wrapping_add(1) < ml {
-                // SAFETY: the branch proves source_index + 1 < ml.
-                unsafe { *src.get_unchecked(source_index.wrapping_add(1)) }.wrapping_shl(bit_shift)
-            } else {
-                0
-            };
-            // SAFETY: index < high_len <= ml < cl <= dst.len().
-            unsafe {
-                *dst.get_unchecked_mut(index) = low | high;
-            }
-        }
+        // SAFETY: high_len <= ml, high_start + high_len = ml, dst has cl > ml limbs,
+        // src has cl > ml limbs, 0 < right_shift < LIMB_BITS, and spans are non-overlapping.
+        let _ = unsafe {
+            ArchKernels::rshift_into_unchecked(
+                dst.as_mut_ptr(),
+                src.as_ptr().add(high_start),
+                high_len,
+                right_shift,
+            )
+        };
     }
     // SAFETY: high_len <= ml < cl <= dst.len().
     unsafe { dst.get_unchecked_mut(high_len..ml) }.fill(0);
     let borrow = if bit_shift == 0 {
-        // SAFETY: both spans contain low_len limbs and are disjoint.
-        Addition::sub_slice_in_place(unsafe { dst.get_unchecked_mut(whole_limbs..ml) }, unsafe {
-            src.get_unchecked(..low_len)
-        }) != 0
-    } else if low_len < UNROLLED_SHIFT_MAX_LIMBS {
-        let mut low_carry = 0;
-        let mut low_borrow = false;
-        // SAFETY: low_len <= ml <= src.len().
-        let (chunks, remainder) = unsafe { src.get_unchecked(..low_len) }.as_chunks::<4>();
-        let mut target = whole_limbs;
-        for chunk in chunks {
-            let [s0, s1, s2, s3] = *chunk;
-
-            let ls0 = s0.wrapping_shl(bit_shift) | low_carry;
-            let c0 = s0.wrapping_shr(right_shift);
-            let ls1 = s1.wrapping_shl(bit_shift) | c0;
-            let c1 = s1.wrapping_shr(right_shift);
-            let ls2 = s2.wrapping_shl(bit_shift) | c1;
-            let c2 = s2.wrapping_shr(right_shift);
-            let ls3 = s3.wrapping_shl(bit_shift) | c2;
-            low_carry = s3.wrapping_shr(right_shift);
-
-            // SAFETY: target + 3 < whole_limbs + low_len = ml < cl <= dst.len().
-            unsafe {
-                let m0 = *dst.get_unchecked(target);
-                let (p0, u0a) = m0.overflowing_sub(ls0);
-                let (r0, u0b) = p0.overflowing_sub(Limb::from(low_borrow));
-                *dst.get_unchecked_mut(target) = r0;
-
-                let m1 = *dst.get_unchecked(target.wrapping_add(1));
-                let (p1, u1a) = m1.overflowing_sub(ls1);
-                let (r1, u1b) = p1.overflowing_sub(Limb::from(u0a | u0b));
-                *dst.get_unchecked_mut(target.wrapping_add(1)) = r1;
-
-                let m2 = *dst.get_unchecked(target.wrapping_add(2));
-                let (p2, u2a) = m2.overflowing_sub(ls2);
-                let (r2, u2b) = p2.overflowing_sub(Limb::from(u1a | u1b));
-                *dst.get_unchecked_mut(target.wrapping_add(2)) = r2;
-
-                let m3 = *dst.get_unchecked(target.wrapping_add(3));
-                let (p3, u3a) = m3.overflowing_sub(ls3);
-                let (r3, u3b) = p3.overflowing_sub(Limb::from(u2a | u2b));
-                *dst.get_unchecked_mut(target.wrapping_add(3)) = r3;
-                low_borrow = u3a | u3b;
-            }
-            target = target.wrapping_add(4);
-        }
-        for &source in remainder {
-            let low_shifted = source.wrapping_shl(bit_shift) | low_carry;
-            low_carry = source.wrapping_shr(right_shift);
-            // SAFETY: target < whole_limbs + low_len = ml < cl <= dst.len().
-            let minuend = unsafe { *dst.get_unchecked(target) };
-            let (partial, underflow_a) = minuend.overflowing_sub(low_shifted);
-            let (result, underflow_b) = partial.overflowing_sub(Limb::from(low_borrow));
-            // SAFETY: target < ml < cl <= dst.len().
-            unsafe {
-                *dst.get_unchecked_mut(target) = result;
-            }
-            low_borrow = underflow_a | underflow_b;
-            target = target.wrapping_add(1);
-        }
-        low_borrow
+        // SAFETY: dst[whole_limbs..ml] contains exactly low_len writable limbs.
+        let high = unsafe { dst.get_unchecked_mut(whole_limbs..ml) };
+        // SAFETY: src contains the matching initialized low_len-limb prefix.
+        let low = unsafe { src.get_unchecked(..low_len) };
+        Addition::sub_slice_in_place(high, low) != 0
+    } else if low_len < 128 {
+        // One 64-limb staged block plus a tiny tail loses to the fused scalar
+        // chain at this narrow boundary on the measured x86 host.
+        // SAFETY: the caller's complete source and destination proofs are
+        // forwarded with the exact derived active lengths.
+        unsafe { shift_sub_scalar(dst, src, whole_limbs, bit_shift, right_shift, low_len) }
     } else {
+        // Stage fixed-size blocks through the architecture shift and subtract
+        // kernels. Keeping the temporary bounded avoids adding a coefficient-
+        // sized scratch requirement to every butterfly while still routing
+        // wide negated twiddles through AVX2/AVX-512 and ADX.
+        let mut tmp = [0; 64];
+        let mut source_offset = 0;
         let mut low_carry = 0;
-        let mut low_borrow = false;
-        for index in 0..low_len {
-            // SAFETY: index < low_len <= ml < cl <= src.len().
-            let source = unsafe { *src.get_unchecked(index) };
-            let low_shifted = source.wrapping_shl(bit_shift) | low_carry;
-            low_carry = source.wrapping_shr(right_shift);
-            let target = whole_limbs.wrapping_add(index);
-            // SAFETY: target < whole_limbs + low_len = ml.
-            let minuend = unsafe { *dst.get_unchecked(target) };
-            let (partial, underflow_a) = minuend.overflowing_sub(low_shifted);
-            let (result, underflow_b) = partial.overflowing_sub(Limb::from(low_borrow));
-            // SAFETY: target < ml < cl <= dst.len().
-            unsafe {
-                *dst.get_unchecked_mut(target) = result;
-            }
-            low_borrow = underflow_a | underflow_b;
+        let mut low_borrow = 0;
+        while source_offset < low_len {
+            let block_len = low_len.wrapping_sub(source_offset).min(tmp.len());
+            // SAFETY: source_offset + block_len <= low_len <= src.len(); tmp
+            // contains 64 writable limbs, the spans are disjoint, and the
+            // caller proves 0 < bit_shift < Limb::BITS.
+            let next_carry = unsafe {
+                ArchKernels::lshift_into_unchecked(
+                    tmp.as_mut_ptr(),
+                    src.as_ptr().add(source_offset),
+                    block_len,
+                    bit_shift,
+                )
+            };
+            // Every shifted block starts with zero low bits. The carry from
+            // the preceding source block occupies only that cleared field.
+            // SAFETY: block_len is nonzero inside this loop.
+            *unsafe { tmp.get_unchecked_mut(0) } |= low_carry;
+
+            let target_offset = whole_limbs.wrapping_add(source_offset);
+            // SAFETY: target_offset + block_len <= whole_limbs + low_len = ml;
+            // tmp contains block_len initialized limbs and does not overlap dst.
+            let block_borrow = unsafe {
+                ArchKernels::sub_limbs_unchecked(
+                    dst.as_mut_ptr().add(target_offset),
+                    tmp.as_ptr(),
+                    block_len,
+                )
+            };
+            // Subtract the borrow entering this block after the vector-staged
+            // subtraction. If that subtraction already borrowed, its modular
+            // result is nonzero, so the two outgoing borrows cannot both be one.
+            // SAFETY: the same complete writable destination block is valid.
+            let incoming_borrow = unsafe {
+                ArchKernels::propagate_borrow_unchecked(
+                    dst.as_mut_ptr().add(target_offset),
+                    block_len,
+                    low_borrow,
+                )
+            };
+            low_borrow = block_borrow | incoming_borrow;
+            low_carry = next_carry;
+            source_offset = source_offset.wrapping_add(block_len);
         }
-        low_borrow
+        low_borrow != 0
     };
     // SAFETY: ml < cl <= dst.len().
     unsafe {

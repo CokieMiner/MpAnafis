@@ -1,6 +1,6 @@
 //! Raw GMP multiplication-tower baselines at Mp's exact limb widths.
 
-#![allow(
+#![expect(
     unsafe_code,
     reason = "the benchmark calls GMP's raw mpn routines with disjoint, exactly sized vectors"
 )]
@@ -12,7 +12,8 @@ use mp_anafis::tune_api::tier::Limb;
 
 use crate::shared::{
     HALF_SIZES, KARATSUBA_SIZES, SCHOOLBOOK_SIZES, SSA_SCORECARD_SIZES, TOOM3_SIZES, TOOM4_SIZES,
-    TOOM6_SIZES, TOOM8_SIZES, TOWER_SIZES, operand, operands, operands_pair,
+    TOOM6_SIZES, TOOM8_SIZES, TOWER_SIZES, operand, operands, operands_pair, to_gmp_limbs,
+    validated_gmp_count, validated_gmp_counts,
 };
 
 type GmpToomMul =
@@ -153,19 +154,12 @@ fn toom6h_half(bencher: divan::Bencher, lengths: (usize, usize)) {
         "GMP Toom-6.5 requires the longer operand first"
     );
     let (mp_left, mp_right, _) = operands_pair(left_len, right_len);
-    let left: Vec<limb_t> = mp_left
-        .into_iter()
-        .map(|value| limb_t::try_from(value).expect("Mp limb fits GMP limb"))
-        .collect();
-    let right: Vec<limb_t> = mp_right
-        .into_iter()
-        .map(|value| limb_t::try_from(value).expect("Mp limb fits GMP limb"))
-        .collect();
+    let left = to_gmp_limbs(mp_left);
+    let right = to_gmp_limbs(mp_right);
     let result_len = left_len.saturating_add(right_len);
     let mut destination = vec![limb_t::MIN; result_len];
     let mut expected = vec![limb_t::MIN; result_len];
-    let gmp_left_len = size_t::try_from(left_len).expect("benchmark length fits GMP mp_size_t");
-    let gmp_right_len = size_t::try_from(right_len).expect("benchmark length fits GMP mp_size_t");
+    let (gmp_left_len, gmp_right_len) = validated_gmp_counts(left_len, right_len);
     let scratch_len = left_len.saturating_mul(64).saturating_add(65_536);
     let mut scratch = vec![limb_t::MIN; scratch_len];
 
@@ -271,12 +265,9 @@ fn nussbaumer_scorecard(bencher: divan::Bencher, len: usize) {
 fn square_tower(bencher: divan::Bencher, len: usize) {
     assert_compatible_limb_width();
     let mp_value = operand(len, Limb::MAX.wrapping_sub(0x1234));
-    let value: Vec<limb_t> = mp_value
-        .into_iter()
-        .map(|limb| limb_t::try_from(limb).expect("Mp limb fits GMP limb"))
-        .collect();
+    let value = to_gmp_limbs(mp_value);
     let mut destination = vec![limb_t::MIN; len.saturating_mul(2)];
-    let gmp_len = size_t::try_from(len).expect("benchmark length fits GMP mp_size_t");
+    let gmp_len = validated_gmp_count(len);
 
     bencher.bench_local(|| {
         // SAFETY: value contains exactly gmp_len initialized GMP limbs,
@@ -344,16 +335,10 @@ fn bench_toom_mul(bencher: divan::Bencher, len: usize, multiply: GmpToomMul) {
 fn gmp_operands(len: usize) -> (Vec<limb_t>, Vec<limb_t>, Vec<limb_t>, size_t) {
     assert_compatible_limb_width();
     let (mp_left, mp_right, _) = operands(len);
-    let left = mp_left
-        .into_iter()
-        .map(|value| limb_t::try_from(value).expect("Mp limb fits GMP limb"))
-        .collect();
-    let right = mp_right
-        .into_iter()
-        .map(|value| limb_t::try_from(value).expect("Mp limb fits GMP limb"))
-        .collect();
+    let left = to_gmp_limbs(mp_left);
+    let right = to_gmp_limbs(mp_right);
     let destination = vec![limb_t::MIN; len.saturating_mul(2)];
-    let gmp_len = size_t::try_from(len).expect("benchmark length fits GMP mp_size_t");
+    let gmp_len = validated_gmp_count(len);
     (left, right, destination, gmp_len)
 }
 

@@ -8,6 +8,8 @@
     clippy::many_single_char_names,
     reason = "Standard mathematical notation (a, b, h, n, k)"
 )]
+use crate::parallel::ParallelExecutor;
+
 use super::{
     Addition, ArchKernels, FftPlan, LIMB_BITS, Limb, Multiplication, SSA_BNM1_BASECASE_LIMBS,
     SsaCarry, SsaTransform,
@@ -30,15 +32,23 @@ impl SsaCrt {
     /// not be a power of two — the planner's
     /// [`SsaPlan::crt_half_width`](super::plan::SsaPlan::crt_half_width) guarantees the weaker
     /// property that suffices, namely that the odd part of `n` already fits the
-    /// basecase.
+    /// basecase. The supplied executor is reused for each independent transform;
+    /// nested pointwise coefficient products deliberately select their sequential
+    /// child executor, so the outer worker budget is not multiplied recursively.
     #[allow(
         clippy::too_many_lines,
         reason = "CRT orchestration requires sequential multi-step inline processing"
     )]
-    pub fn mul_mod_bnm1(dst: &mut [Limb], a: &[Limb], b: &[Limb], scratch: &mut [Limb]) {
+    pub fn mul_mod_bnm1<E: ParallelExecutor>(
+        dst: &mut [Limb],
+        a: &[Limb],
+        b: &[Limb],
+        scratch: &mut [Limb],
+        executor: &E,
+    ) {
         let n = a.len();
-        assert_eq!(n, b.len(), "mul_mod_bnm1 widths must match");
-        assert_eq!(n, dst.len(), "mul_mod_bnm1 dst width must match");
+        debug_assert_eq!(n, b.len(), "mul_mod_bnm1 widths must match");
+        debug_assert_eq!(n, dst.len(), "mul_mod_bnm1 dst width must match");
 
         if n <= SSA_BNM1_BASECASE_LIMBS {
             // Basecase: perform exact multiplication and fold.
@@ -64,7 +74,7 @@ impl SsaCrt {
             return;
         }
 
-        assert!(
+        debug_assert!(
             n.is_multiple_of(2),
             "recursive mul_mod_bnm1 width must be even"
         );
@@ -121,7 +131,7 @@ impl SsaCrt {
             let modulus_bits = ring_modulus_bits(h);
             // SAFETY: Buffers exactly sized to bounds, sig bits not tracked.
             unsafe {
-                SsaTransform::fft_mul_mod_slices(
+                SsaTransform::fft_mul_mod_slices_with_executor(
                     xp,
                     left_padded,
                     right_padded,
@@ -129,6 +139,7 @@ impl SsaCrt {
                     None,
                     false,
                     None,
+                    executor,
                     ring_scratch,
                 );
             }
@@ -172,7 +183,7 @@ impl SsaCrt {
                 }
             }
 
-            Self::mul_mod_bnm1(xm, left_folded, right_folded, xm_scratch);
+            Self::mul_mod_bnm1(xm, left_folded, right_folded, xm_scratch, executor);
         }
 
         merge_crt_halves(dst, xp, xm, h, n);
@@ -193,9 +204,14 @@ impl SsaCrt {
     /// [`Multiplication::mul_limbs_with_slice_scratch`] detects the aliased
     /// operands. Every transform level above it would still run two forward
     /// transforms over identical data.
-    pub fn sqr_mod_bnm1(dst: &mut [Limb], a: &[Limb], scratch: &mut [Limb]) {
+    pub fn sqr_mod_bnm1<E: ParallelExecutor>(
+        dst: &mut [Limb],
+        a: &[Limb],
+        scratch: &mut [Limb],
+        executor: &E,
+    ) {
         let n = a.len();
-        assert_eq!(n, dst.len(), "sqr_mod_bnm1 dst width must match");
+        debug_assert_eq!(n, dst.len(), "sqr_mod_bnm1 dst width must match");
 
         if n <= SSA_BNM1_BASECASE_LIMBS {
             let prod_len = n.wrapping_mul(2);
@@ -218,7 +234,7 @@ impl SsaCrt {
             return;
         }
 
-        assert!(
+        debug_assert!(
             n.is_multiple_of(2),
             "recursive sqr_mod_bnm1 width must be even"
         );
@@ -255,7 +271,15 @@ impl SsaCrt {
             // SAFETY: the operand is one complete guarded coefficient, disjoint from
             // xp, and the ring scratch is sized for this exact modulus width.
             unsafe {
-                SsaTransform::fft_sqr_mod_slices(xp, padded, modulus_bits, false, ring_scratch);
+                SsaTransform::fft_sqr_mod_slices_with_executor(
+                    xp,
+                    padded,
+                    modulus_bits,
+                    false,
+                    None,
+                    executor,
+                    ring_scratch,
+                );
             }
         }
 
@@ -280,7 +304,7 @@ impl SsaCrt {
                 }
             }
 
-            Self::sqr_mod_bnm1(xm, folded, xm_scratch);
+            Self::sqr_mod_bnm1(xm, folded, xm_scratch, executor);
         }
 
         merge_crt_halves(dst, xp, xm, h, n);
@@ -301,11 +325,11 @@ impl SsaCrt {
     /// entry, so it becomes `k` in place rather than being copied to a third span.
     pub fn merge_exact_product(dst: &mut [Limb], xp: &[Limb], xm: &mut [Limb]) {
         let n = xm.len();
-        assert!(n > 0, "the CRT half-width must be nonzero");
+        debug_assert!(n > 0, "the CRT half-width must be nonzero");
         // n is the length of a live xm slice, so on every supported usize width
         // n + 1 fits: the slice itself occupies n * size_of::<Limb>() bytes.
         let expected_xp_len = n.wrapping_add(1);
-        assert_eq!(
+        debug_assert_eq!(
             xp.len(),
             expected_xp_len,
             "the Fermat residue carries one guard limb above the CRT half-width"
@@ -337,7 +361,7 @@ impl SsaCrt {
         }
 
         // The n limb count is the length of a caller-provided xm slice, and the
-        // xp width is capped by xp.len() == n + 1 in the assert above. A slice of
+        // the prepared plan fixes xp.len() at n + 1. A slice of
         // n limbs holds n * size_of::<Limb>() bytes, so on every supported usize
         // width n <= isize::MAX / size_of::<Limb>(); doubling that is far below
         // usize::MAX, and the recursion never drives n above its validated top.
@@ -367,17 +391,16 @@ impl SsaCrt {
             // SAFETY: copy_k == max_len - n <= n == k.len(), so k[..copy_k] is in range.
             let k_span = unsafe { k.get_unchecked(..copy_k) };
             dst_span.copy_from_slice(k_span);
-            // SAFETY: max_len <= dst.len(), so dst[n..max_len] is in range.
-            let mut c2 =
-                SsaCarry::add_full_in_place(unsafe { dst.get_unchecked_mut(n..max_len) }, &[carry]);
             // SAFETY: xp carries one guard limb above the n-limb residue.
             let xp_guard = unsafe { *xp.get_unchecked(n) };
-            // SAFETY: max_len <= dst.len(), so dst[n..max_len] is in range.
-            c2 = c2.wrapping_add(SsaCarry::add_full_in_place(
-                unsafe { dst.get_unchecked_mut(n..max_len) },
-                &[xp_guard],
-            ));
-            let _ = c2;
+            let total_carry = carry.wrapping_add(xp_guard);
+            if total_carry != 0 {
+                // SAFETY: max_len <= dst.len(), so dst[n..max_len] is in range.
+                let _ = SsaCarry::add_full_in_place(
+                    unsafe { dst.get_unchecked_mut(n..max_len) },
+                    &[total_carry],
+                );
+            }
         }
     }
 
@@ -388,11 +411,15 @@ impl SsaCrt {
             // constant, so 2n and the scratch for n*n operands at those widths
             // are each bounded by a constant; the sum is far below usize::MAX
             // on every supported width.
-            let prod = n.wrapping_mul(2);
-            return prod.wrapping_add(Multiplication::required_scratch(n, n));
+            let Some(prod) = n.checked_mul(2) else {
+                return usize::MAX;
+            };
+            return prod.saturating_add(Multiplication::required_scratch(n, n));
         }
         let h = n >> 1;
-        let ring_bits = ring_modulus_bits(h);
+        let Some(ring_bits) = h.checked_mul(LIMB_BITS) else {
+            return usize::MAX;
+        };
         Self::layout_len(h, FftPlan::new(ring_bits).required_mul_scratch())
     }
 
@@ -402,26 +429,20 @@ impl SsaCrt {
     /// two, because a square stages only `a_low - a_high` for the Fermat residue
     /// and only `a_low + a_high` for the Mersenne one.
     pub fn sqr_layout_len(half_width: usize, ring_scratch: usize) -> usize {
-        // Every call site bounds half_width first: the SSA entries reject
-        // half_width * LIMB_BITS overflow with checked arithmetic before this
-        // runs. On every supported usize width that bound keeps each
-        // intermediate below usize::MAX, so the sums wrap only if a future
-        // caller skips the validation; debug builds recompute each step.
-        let coefficient_width = half_width.wrapping_add(1);
-        let residues = coefficient_width.wrapping_add(half_width);
-        let fermat_half = coefficient_width.wrapping_add(ring_scratch);
-        let mersenne_half = half_width.wrapping_add(sqr_mod_bnm1_scratch_len(half_width));
-        let total = residues.wrapping_add(fermat_half.max(mersenne_half));
-        debug_assert!(
-            half_width.checked_add(1) == Some(coefficient_width)
-                && coefficient_width.checked_add(half_width) == Some(residues)
-                && coefficient_width.checked_add(ring_scratch) == Some(fermat_half)
-                && half_width.checked_add(sqr_mod_bnm1_scratch_len(half_width))
-                    == Some(mersenne_half)
-                && residues.checked_add(fermat_half.max(mersenne_half)) == Some(total),
-            "CRT square scratch layout overflowed"
-        );
-        total
+        let Some(coefficient_width) = half_width.checked_add(1) else {
+            return usize::MAX;
+        };
+        let Some(residues) = coefficient_width.checked_add(half_width) else {
+            return usize::MAX;
+        };
+        let Some(fermat_half) = coefficient_width.checked_add(ring_scratch) else {
+            return usize::MAX;
+        };
+        let mersenne_scratch = sqr_mod_bnm1_scratch_len(half_width);
+        let Some(mersenne_half) = half_width.checked_add(mersenne_scratch) else {
+            return usize::MAX;
+        };
+        residues.saturating_add(fermat_half.max(mersenne_half))
     }
 
     /// Total buffer a CRT split partitions, for a given half-width and a given cost
@@ -440,34 +461,26 @@ impl SsaCrt {
     /// The two callers differ only in `ring_scratch`, because the top level forces
     /// the transform where this one lets a narrow ring take the basecase.
     pub fn layout_len(half_width: usize, ring_scratch: usize) -> usize {
-        // Every call site bounds half_width first: the SSA entries reject
-        // half_width * LIMB_BITS overflow with checked arithmetic before this
-        // runs, and the forced-plan paths go through the same gate. On every
-        // supported usize width that bound keeps each intermediate below
-        // usize::MAX, so the sums wrap only if a future caller skips the
-        // validation; debug builds recompute each step to catch that caller.
-        let coefficient_width = half_width.wrapping_add(1);
-        let residues = coefficient_width.wrapping_add(half_width);
-        let fermat_half = coefficient_width.wrapping_mul(2).wrapping_add(ring_scratch);
-        let mersenne_half = half_width
-            .wrapping_mul(2)
-            .wrapping_add(Self::mul_mod_bnm1_scratch_len(half_width));
-        let total = residues.wrapping_add(fermat_half.max(mersenne_half));
-        debug_assert!(
-            half_width.checked_add(1) == Some(coefficient_width)
-                && coefficient_width.checked_add(half_width) == Some(residues)
-                && coefficient_width
-                    .checked_mul(2)
-                    .and_then(|w| w.checked_add(ring_scratch))
-                    == Some(fermat_half)
-                && half_width
-                    .checked_mul(2)
-                    .and_then(|w| w.checked_add(Self::mul_mod_bnm1_scratch_len(half_width)))
-                    == Some(mersenne_half)
-                && residues.checked_add(fermat_half.max(mersenne_half)) == Some(total),
-            "CRT product scratch layout overflowed"
-        );
-        total
+        let Some(coefficient_width) = half_width.checked_add(1) else {
+            return usize::MAX;
+        };
+        let Some(residues) = coefficient_width.checked_add(half_width) else {
+            return usize::MAX;
+        };
+        let Some(fermat_half) = coefficient_width
+            .checked_mul(2)
+            .and_then(|width| width.checked_add(ring_scratch))
+        else {
+            return usize::MAX;
+        };
+        let mersenne_scratch = Self::mul_mod_bnm1_scratch_len(half_width);
+        let Some(mersenne_half) = half_width
+            .checked_mul(2)
+            .and_then(|width| width.checked_add(mersenne_scratch))
+        else {
+            return usize::MAX;
+        };
+        residues.saturating_add(fermat_half.max(mersenne_half))
     }
 
     /// Halves `k` modulo `B^size - 1` using bitwise right-shift with wraparound.
@@ -476,22 +489,33 @@ impl SsaCrt {
     /// the modular inverse is a logical right shift that rotates the LSB into the
     /// top of the most significant limb.
     pub fn halve_mod_bnm1(k: &mut [Limb], size: usize) {
-        assert!(
+        debug_assert!(
             size > 0 && size <= k.len(),
             "halve_mod_bnm1 needs 1 <= size <= k.len()"
         );
-        // SAFETY: size >= 1 is checked above, so k[0] is in range.
+        // SAFETY: the planned CRT half has `1 <= size <= k.len()`.
         let lowest_bit = unsafe { k.get_unchecked(0) } & 1;
-        let mut carry_down = 0;
-        // SAFETY: size <= k.len() is checked above, so the size-limb span is in range.
-        for limb in unsafe { k.get_unchecked_mut(..size) }.iter_mut().rev() {
-            let next_carry_down = *limb & 1;
-            *limb = (*limb >> 1) | (carry_down << LIMB_BITS.wrapping_sub(1));
-            carry_down = next_carry_down;
+        // Each limb absorbs bit zero of the limb directly above it, and the
+        // modulus rotates the lowest bit into the top of the highest limb. No
+        // carry ripples across limbs, so the sweep runs forward without a
+        // carried bit and the adjacent-limb pattern vectorizes.
+        for index in 0..size.wrapping_sub(1) {
+            // SAFETY: index + 1 < size <= k.len(), so both limbs are in range.
+            let (limb, above) = unsafe {
+                (
+                    *k.get_unchecked(index),
+                    *k.get_unchecked(index.wrapping_add(1)),
+                )
+            };
+            // SAFETY: index < size - 1 < size <= k.len().
+            unsafe {
+                *k.get_unchecked_mut(index) =
+                    (limb >> 1) | ((above & 1) << LIMB_BITS.wrapping_sub(1));
+            }
         }
-        // SAFETY: size >= 1 is checked above, so k[size - 1] is in range.
-        *unsafe { k.get_unchecked_mut(size.wrapping_sub(1)) } |=
-            lowest_bit << LIMB_BITS.wrapping_sub(1);
+        // SAFETY: the planned CRT half has size >= 1, so size - 1 is in range.
+        let top = unsafe { k.get_unchecked_mut(size.wrapping_sub(1)) };
+        *top = (*top >> 1) | (lowest_bit << LIMB_BITS.wrapping_sub(1));
     }
 }
 
@@ -518,11 +542,15 @@ fn sqr_mod_bnm1_scratch_len(n: usize) -> usize {
         // constant, so 2n and the scratch for a basecase squaring at that width
         // are each bounded by a constant; the sum is far below usize::MAX on
         // every supported width.
-        let prod = n.wrapping_mul(2);
-        return prod.wrapping_add(Multiplication::required_sqr_scratch(n));
+        let Some(prod) = n.checked_mul(2) else {
+            return usize::MAX;
+        };
+        return prod.saturating_add(Multiplication::required_sqr_scratch(n));
     }
     let h = n >> 1;
-    let ring_bits = ring_modulus_bits(h);
+    let Some(ring_bits) = h.checked_mul(LIMB_BITS) else {
+        return usize::MAX;
+    };
     SsaCrt::sqr_layout_len(h, FftPlan::new(ring_bits).required_sqr_scratch())
 }
 
@@ -533,17 +561,17 @@ fn sqr_mod_bnm1_scratch_len(n: usize) -> usize {
 /// obtain `xp` and `xm`. `xm` is dead once `k` is derived, so it is transformed
 /// into `k` in place rather than copied into a third residue span.
 fn merge_crt_halves(dst: &mut [Limb], xp: &[Limb], xm: &mut [Limb], h: usize, n: usize) {
-    assert!(h > 0, "the recursive CRT half-width must be nonzero");
-    assert_eq!(
+    debug_assert!(h > 0, "the recursive CRT half-width must be nonzero");
+    debug_assert_eq!(
         h.checked_mul(2),
         Some(n),
         "the recursive CRT width must equal twice its half-width"
     );
-    assert_eq!(dst.len(), n, "the recursive CRT destination width differs");
-    assert_eq!(xm.len(), h, "the Mersenne CRT residue width differs");
+    debug_assert_eq!(dst.len(), n, "the recursive CRT destination width differs");
+    debug_assert_eq!(xm.len(), h, "the Mersenne CRT residue width differs");
     // h == xm.len() == k.len() is the length of a live slice below, so h + 1
     // cannot wrap: the slice itself occupies h * size_of::<Limb>() bytes.
-    assert_eq!(
+    debug_assert_eq!(
         xp.len(),
         h.wrapping_add(1),
         "the Fermat CRT residue width differs"

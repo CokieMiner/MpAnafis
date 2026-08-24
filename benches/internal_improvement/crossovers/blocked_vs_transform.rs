@@ -10,20 +10,17 @@
 //! Each shape runs the production dispatcher (which selects a transform at all
 //! of these widths), the blocked path forced on the same operands, and GMP.
 
-#![allow(
+#![expect(
     unsafe_code,
     reason = "the benchmark calls GMP's raw mpn_mul with disjoint, exactly sized vectors"
 )]
 
 use core::hint::black_box;
 
-use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
-use mp_anafis::tune_api::tier::{
-    Limb,
-    state::{MulBenchScratch, bench_lopsided_mul_scratch_len, bench_lopsided_mul_with_scratch},
-};
+use gmp_mpfr_sys::gmp::{self, limb_t};
+use mp_anafis::tune_api::tier::{Limb, Tuner, state::MultiplicationBenchState};
 
-use crate::shared::operands_pair;
+use crate::shared::{operands_pair, validated_gmp_counts};
 
 const SHAPES: [(usize, usize); 5] = [
     (6000, 4500),
@@ -37,13 +34,10 @@ const SHAPES: [(usize, usize); 5] = [
 fn dispatched(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
     let (larger_len, smaller_len) = shape;
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
-    let mut reusable = MulBenchScratch::default();
+    let mut reusable = MultiplicationBenchState::default();
+    let mut prepared = reusable.prepare(&mut destination, &larger, &smaller);
     bencher.bench_local(|| {
-        reusable.run(
-            black_box(&mut destination),
-            black_box(&larger),
-            black_box(&smaller),
-        );
+        black_box(&mut prepared).run();
     });
 }
 
@@ -65,9 +59,9 @@ fn blocked(bencher: divan::Bencher<'_, '_>, shape: (usize, usize), block_len: us
     let (larger_len, smaller_len) = shape;
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
     let mut scratch =
-        vec![Limb::MIN; bench_lopsided_mul_scratch_len(larger_len, smaller_len, block_len)];
+        vec![Limb::MIN; Tuner::bench_lopsided_mul_scratch_len(larger_len, smaller_len, block_len)];
     bencher.bench_local(|| {
-        bench_lopsided_mul_with_scratch(
+        Tuner::bench_lopsided_mul_with_scratch(
             black_box(&mut destination),
             black_box(&larger),
             black_box(&smaller),
@@ -81,8 +75,7 @@ fn blocked(bencher: divan::Bencher<'_, '_>, shape: (usize, usize), block_len: us
 fn gmp_reference(bencher: divan::Bencher<'_, '_>, shape: (usize, usize)) {
     let (larger_len, smaller_len) = shape;
     let (larger, smaller, mut destination) = operands_pair(larger_len, smaller_len);
-    let larger_count = size_t::try_from(larger_len).expect("width fits a GMP size");
-    let smaller_count = size_t::try_from(smaller_len).expect("width fits a GMP size");
+    let (larger_count, smaller_count) = validated_gmp_counts(larger_len, smaller_len);
     bencher.bench_local(|| {
         // SAFETY: three independently allocated, disjoint vectors of exactly the
         // stated limb counts, longer operand first as mpn_mul requires.

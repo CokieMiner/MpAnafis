@@ -2,18 +2,20 @@
 
 use core::cmp::{max, min};
 
+use crate::parallel::{DefaultExecutor, ParallelExecutor};
+
 use super::{
-    Karatsuba, LargePlan, Limb, Lopsided, MulPlan, Multiplication, Ntt, Schoolbook, SquarePlan,
-    Toom3, Toom4, Toom6, Toom8, Toom32, Toom43,
+    Karatsuba, Limb, Lopsided, MulPlan, Multiplication, Schoolbook, SquarePlan, Toom3, Toom4,
+    Toom6, Toom8, Toom32, Toom43,
 };
 #[cfg(not(target_pointer_width = "16"))]
-use super::{Ssa, TransformChoice};
+use super::{LargePlan, Ssa, TransformChoice};
 
-/// Execute exactly the strategy described by `plan`.
+/// Execute exactly the strategy described by `plan` with the default executor policy.
 ///
 /// Total: every variant names one algorithm and runs it. The transform arms
 /// carry no conventional fallback because `select_mul_plan` only names them
-/// after `ssa_admits_mul`/`ntt_admits_mul` established the construction exists
+/// after `ssa_admits_mul` established the construction exists
 /// for these widths. `dispatch::tests` sweeps those predicates against the
 /// entry points they guard.
 impl Multiplication {
@@ -25,9 +27,28 @@ impl Multiplication {
         b: &[Limb],
         scratch: &mut [Limb],
     ) {
+        DefaultExecutor::with_resolved(|executor| {
+            Self::execute_plan_with_executor(plan, dst, a, b, scratch, executor);
+        });
+    }
+
+    /// Execute a multiplication plan using a caller-selected executor.
+    ///
+    /// Non-transform tiers remain on their existing synchronous kernels. Large
+    /// SSA tiers receive `executor` all the way through their transform
+    /// orchestration, so applications can reuse an existing work-stealing pool.
+    #[inline]
+    pub fn execute_plan_with_executor<E: ParallelExecutor>(
+        plan: MulPlan,
+        dst: &mut [Limb],
+        a: &[Limb],
+        b: &[Limb],
+        scratch: &mut [Limb],
+        executor: &E,
+    ) {
         match plan {
             MulPlan::Schoolbook => Schoolbook::mul(dst, a, b),
-            MulPlan::Lopsided => Lopsided::mul(dst, a, b, scratch),
+            MulPlan::Lopsided => Lopsided::mul(dst, a, b, scratch, executor),
             MulPlan::Karatsuba => {
                 // Rectangular Karatsuba reconstructs into fixed-width output and
                 // therefore requires a zero base. Equal-width paths overwrite it.
@@ -58,20 +79,20 @@ impl Multiplication {
             MulPlan::Toom8 => Toom8::mul(dst, a, b, scratch),
             #[cfg(not(target_pointer_width = "16"))]
             MulPlan::Large(LargePlan::Ssa) => {
-                let computed = Ssa::try_mul(dst, a, b, TransformChoice::PLANNED, Some(scratch));
-                debug_assert!(computed, "the planner named SSA for operands it declines");
-            }
-            MulPlan::Large(LargePlan::Ntt) => {
-                let computed = Ntt::try_mul(dst, a, b);
-                debug_assert!(
-                    computed,
-                    "the planner named the NTT for operands it declines"
+                let computed = Ssa::try_mul_with_executor(
+                    dst,
+                    a,
+                    b,
+                    TransformChoice::PLANNED,
+                    Some(scratch),
+                    executor,
                 );
+                debug_assert!(computed, "the validated SSA plan and scratch must execute");
             }
         }
     }
 
-    /// Execute exactly the squaring strategy described by `plan`.
+    /// Execute exactly the squaring strategy described by `plan` with the default executor policy.
     #[inline]
     pub fn execute_square_plan(
         plan: SquarePlan,
@@ -79,6 +100,22 @@ impl Multiplication {
         a: &[Limb],
         scratch: &mut [Limb],
     ) {
+        DefaultExecutor::with_resolved(|executor| {
+            Self::execute_square_plan_with_executor(plan, dst, a, scratch, executor);
+        });
+    }
+
+    /// Execute a squaring plan using a caller-selected executor.
+    #[inline]
+    pub fn execute_square_plan_with_executor<E: ParallelExecutor>(
+        plan: SquarePlan,
+        dst: &mut [Limb],
+        a: &[Limb],
+        scratch: &mut [Limb],
+        executor: &E,
+    ) {
+        #[cfg(target_pointer_width = "16")]
+        let _ = executor;
         // Recursive Toom evaluators can provide fixed-width guard limbs above the
         // exact 2*n-limb square. Every tier overwrites the exact product; only the
         // disjoint guard suffix must be initialized here.
@@ -97,14 +134,16 @@ impl Multiplication {
             SquarePlan::Toom8 => Toom8::sqr(dst, a, scratch),
             #[cfg(not(target_pointer_width = "16"))]
             SquarePlan::Large(LargePlan::Ssa) => {
-                let computed = Ssa::try_sqr(dst, a, TransformChoice::PLANNED, Some(scratch));
-                debug_assert!(computed, "the planner named SSA for an operand it declines");
-            }
-            SquarePlan::Large(LargePlan::Ntt) => {
-                let computed = Ntt::try_mul(dst, a, a);
+                let computed = Ssa::try_sqr_with_executor(
+                    dst,
+                    a,
+                    TransformChoice::PLANNED,
+                    Some(scratch),
+                    executor,
+                );
                 debug_assert!(
                     computed,
-                    "the planner named the NTT for an operand it declines"
+                    "the validated SSA square plan and scratch must execute"
                 );
             }
         }

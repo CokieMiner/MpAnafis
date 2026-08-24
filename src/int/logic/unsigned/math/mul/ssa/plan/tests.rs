@@ -5,9 +5,76 @@
 //! the planner's own choice. A geometry regression here costs a factor of two
 //! or more end to end, so the selections are pinned.
 
-#[cfg(target_arch = "x86_64")]
+#![expect(
+    clippy::panic,
+    reason = "fixed planner cases fail explicitly when their geometry becomes invalid"
+)]
+
+#[cfg(any(feature = "std", target_arch = "x86_64"))]
 use super::SSA_BASE_MODULUS_BITS;
-use super::{FftPlan, LIMB_BITS, SsaPlan, TOP_LEVEL_SEARCH_RADIUS};
+use super::{FftPlan, LIMB_BITS, SsaPlan};
+#[cfg(feature = "std")]
+use super::{geometry_cache_contains, geometry_cache_location};
+
+use super::super::SsaCrt;
+
+#[cfg(feature = "std")]
+#[test]
+fn power_of_two_geometry_widths_have_collision_free_cache_slots() {
+    let first = geometry_cache_location(1 << 18);
+    let second = geometry_cache_location(1 << 19);
+    let third = geometry_cache_location(1 << 20);
+
+    assert!(first.0 && second.0 && third.0);
+    assert_ne!(first.1, second.1);
+    assert_ne!(second.1, third.1);
+    assert_ne!(first.1, third.1);
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn colliding_irregular_widths_remain_cached_together() {
+    let first_bits = 768 * LIMB_BITS;
+    let second_bits = 196_608 * LIMB_BITS;
+    let first = geometry_cache_location(first_bits);
+    let second = geometry_cache_location(second_bits);
+
+    assert!(!first.0 && !second.0);
+    assert_eq!(first.1, second.1, "the regression needs a real collision");
+
+    let _first_plan = FftPlan::new(first_bits);
+    let _second_plan = FftPlan::new(second_bits);
+    assert!(geometry_cache_contains(first_bits));
+    assert!(geometry_cache_contains(second_bits));
+}
+
+#[test]
+fn crt_layout_rejects_unrepresentable_scratch_sizes() {
+    assert_eq!(SsaCrt::layout_len(usize::MAX, 1), usize::MAX);
+    assert_eq!(SsaCrt::sqr_layout_len(usize::MAX, 1), usize::MAX);
+    assert_eq!(SsaCrt::mul_mod_bnm1_scratch_len(usize::MAX), usize::MAX);
+}
+
+#[test]
+fn non_power_of_two_executor_width_is_not_rounded_down() {
+    assert_eq!(FftPlan::pointwise_parallelism_budget(64, 1), 1);
+    assert_eq!(FftPlan::pointwise_parallelism_budget(64, 6), 6);
+    assert_eq!(FftPlan::pointwise_parallelism_budget(64, 12), 12);
+    assert_eq!(FftPlan::pointwise_parallelism_budget(64, 96), 64);
+
+    let plan = FftPlan::new(1 << 18);
+    assert_eq!(plan.parallel_slots(1), 2, "two slots are structural");
+    assert_eq!(
+        plan.parallel_slots(6),
+        8,
+        "six workers need eight tree slots"
+    );
+    assert_eq!(
+        plan.parallel_slots(12),
+        16,
+        "twelve workers need sixteen tree slots"
+    );
+}
 
 /// Ring widths reached by the top-level Fermat product for power-of-two operand
 /// widths, paired with the transform exponent the planner selects.
@@ -51,9 +118,9 @@ const MEASURED_OPTIMA: [(usize, usize); 7] = [
 #[cfg(target_arch = "x86_64")]
 const X86_RAM_OPTIMA: [(usize, usize); 4] = [
     (1 << 26, 11), // 1,048,576-limb operands
-    (1 << 27, 11), // 2,097,152-limb operands
+    (1 << 27, 12), // 2,097,152-limb operands
     (1 << 28, 12), // 4,194,304-limb operands
-    (1 << 29, 12), // 8,388,608-limb operands
+    (1 << 29, 13), // 8,388,608-limb operands
 ];
 
 /// Ring widths the `mul_mod_bnm1` recursion reaches below the pinned range.
@@ -146,9 +213,12 @@ fn forced_geometries_agree_with_the_selected_one() {
     // calculation use, so a divergence there mis-sizes buffers.
     for (modulus_bits, _) in MEASURED_OPTIMA {
         let selected = FftPlan::new(modulus_bits);
-        let exponent = u32::try_from(selected.transform_log).expect("exponent fits u32");
-        let forced = FftPlan::try_forced(modulus_bits, exponent)
-            .expect("the selected exponent is by construction a valid geometry");
+        let Ok(exponent) = u32::try_from(selected.transform_log) else {
+            panic!("selected transform exponent must fit u32");
+        };
+        let Some(forced) = FftPlan::try_forced(modulus_bits, exponent) else {
+            panic!("the selected exponent must produce a valid forced geometry");
+        };
         assert_eq!(forced.transform_len, selected.transform_len);
         assert_eq!(forced.inner_bits, selected.inner_bits);
         assert_eq!(forced.twist_step_half, selected.twist_step_half);
@@ -204,9 +274,11 @@ fn search_centre_keeps_measured_optima_inside_the_search_window() {
 
 fn assert_window_reaches(modulus_bits: usize, measured: usize) {
     let centre = SsaPlan::search_centre(modulus_bits);
-    let optimum = u32::try_from(measured).expect("a transform exponent fits u32");
+    let Ok(optimum) = u32::try_from(measured) else {
+        panic!("a measured transform exponent must fit u32");
+    };
     assert!(
-        centre.abs_diff(optimum) <= TOP_LEVEL_SEARCH_RADIUS,
+        centre.abs_diff(optimum) <= 4,
         "the search window around centre {centre} does not reach the measured \
          optimum {optimum} for a {modulus_bits}-bit ring"
     );
@@ -291,11 +363,11 @@ fn basecase_cost_is_monotone_and_subquadratic() {
 fn assert_plan_is_consistent(modulus_bits: usize) {
     let plan = FftPlan::new(modulus_bits);
 
+    let Some(chunk_product) = plan.transform_len.checked_mul(plan.chunk_bits) else {
+        panic!("transform chunk product must fit usize");
+    };
     assert_eq!(
-        plan.transform_len
-            .checked_mul(plan.chunk_bits)
-            .expect("chunk product fits"),
-        modulus_bits,
+        chunk_product, modulus_bits,
         "geometry does not partition the {modulus_bits}-bit ring exactly"
     );
     assert!(
@@ -307,21 +379,20 @@ fn assert_plan_is_consistent(modulus_bits: usize) {
     // the ring needs `transform_len | 2 * inner_bits` — half of what a
     // whole-bit pre-twist would demand, because the pre-twist may carry a
     // `sqrt(2)` factor.
-    let doubled = plan
-        .inner_bits
-        .checked_mul(2)
-        .expect("twice the ring width fits");
+    let Some(doubled) = plan.inner_bits.checked_mul(2) else {
+        panic!("twice the ring width must fit usize");
+    };
     assert!(
         doubled.is_multiple_of(plan.transform_len),
         "inner ring of {} bits has no exact {}-th root of unity",
         plan.inner_bits,
         plan.transform_len
     );
+    let Some(root_period) = plan.twist_step_half.checked_mul(plan.transform_len) else {
+        panic!("root period must fit usize");
+    };
     assert_eq!(
-        plan.twist_step_half
-            .checked_mul(plan.transform_len)
-            .expect("root period fits"),
-        doubled,
+        root_period, doubled,
         "half-bit twist step is not exact for a {modulus_bits}-bit ring"
     );
     assert!(

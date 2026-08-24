@@ -1,6 +1,6 @@
 //! Property tests for owned multiplication and limb-dispatch entry points.
 
-use alloc::vec;
+use alloc::{vec, vec::Vec};
 
 use proptest::prelude::*;
 
@@ -28,5 +28,28 @@ proptest! {
         let mut actual = a.clone();
         actual.mul_assign(&b);
         prop_assert_eq!(actual.limbs(), expected.limbs());
+    }
+}
+
+#[test]
+fn reusable_scratch_never_depends_on_previous_workspace_contents() {
+    let mut scratch = MulScratch::default();
+    for len in [64_usize, 288, 800, 2_048, 2_976, 512] {
+        let left: Vec<Limb> = (0..len)
+            .map(|index| index.wrapping_mul(0x9e37_79b9).wrapping_add(3) | 1)
+            .collect();
+        let right: Vec<Limb> = (0..len)
+            .map(|index| index.wrapping_mul(0x85eb_ca6b).wrapping_add(5) | 1)
+            .collect();
+        let mut expected = vec![Limb::MAX; len.wrapping_mul(2)];
+        Schoolbook::mul(&mut expected, &left, &right);
+
+        scratch.buf.fill(Limb::MAX);
+        let mut actual = vec![Limb::MIN; len.wrapping_mul(2)];
+        Multiplication::mul_limbs_with_scratch(&left, &right, &mut actual, &mut scratch);
+        assert_eq!(
+            actual, expected,
+            "dirty scratch changed the {len}-limb product"
+        );
     }
 }

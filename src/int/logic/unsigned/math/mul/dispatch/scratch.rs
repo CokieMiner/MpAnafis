@@ -13,13 +13,15 @@
 
 use core::cmp::{max, min};
 
-#[cfg(not(target_pointer_width = "16"))]
-use super::Ssa;
+use crate::parallel::{DefaultExecutor, ParallelExecutor};
+
 use super::{
-    KARATSUBA_THRESHOLD, Karatsuba, LargePlan, Lopsided, MulPlan, MulShape, Multiplication,
+    KARATSUBA_THRESHOLD, Karatsuba, Lopsided, MulPlan, MulShape, Multiplication,
     SQR_KARATSUBA_THRESHOLD, SQR_TOOM_COOK_THRESHOLD, SquarePlan, TOOM_COOK_THRESHOLD, TierCeiling,
     Toom3, Toom4, Toom6, Toom8, Toom32, Toom43, Widths,
 };
+#[cfg(not(target_pointer_width = "16"))]
+use super::{LargePlan, Ssa};
 
 // ---------------------------------------------------------------------------
 // Plan-to-scratch-size dispatch
@@ -33,6 +35,21 @@ use super::{
 impl Multiplication {
     #[inline]
     pub fn scratch_len(plan: MulPlan, len_a: usize, len_b: usize) -> usize {
+        DefaultExecutor::with_resolved(|executor| {
+            Self::scratch_len_for_parallelism(plan, len_a, len_b, executor.parallelism().get())
+        })
+    }
+
+    /// Return the caller-owned workspace required by `plan` at one executor width.
+    #[inline]
+    pub fn scratch_len_for_parallelism(
+        plan: MulPlan,
+        len_a: usize,
+        len_b: usize,
+        parallelism: usize,
+    ) -> usize {
+        #[cfg(target_pointer_width = "16")]
+        let _ = parallelism;
         match plan {
             MulPlan::Schoolbook => 0,
             MulPlan::Lopsided => {
@@ -41,6 +58,7 @@ impl Multiplication {
                     len_a,
                     len_b,
                     Lopsided::block_len(widths.larger, widths.smaller),
+                    parallelism,
                 )
             }
             MulPlan::Karatsuba => Self::karatsuba_mul_scratch_len(len_a, len_b),
@@ -51,15 +69,29 @@ impl Multiplication {
             MulPlan::Toom6 => Self::toom6_mul_scratch_len(len_a, len_b),
             MulPlan::Toom8 => Self::toom8_mul_scratch_len(len_a, len_b),
             #[cfg(not(target_pointer_width = "16"))]
-            MulPlan::Large(LargePlan::Ssa) => Ssa::mul_scratch_len(len_a, len_b),
-            // The NTT allocates its own transform buffers.
-            MulPlan::Large(LargePlan::Ntt) => 0,
+            MulPlan::Large(LargePlan::Ssa) => {
+                Ssa::mul_scratch_len_for_parallelism(len_a, len_b, parallelism)
+            }
         }
     }
 
     /// Return the caller-owned workspace required by `plan`.
     #[inline]
     pub fn square_scratch_len(plan: SquarePlan, len: usize) -> usize {
+        DefaultExecutor::with_resolved(|executor| {
+            Self::square_scratch_len_for_parallelism(plan, len, executor.parallelism().get())
+        })
+    }
+
+    /// Return the caller-owned square workspace required at one executor width.
+    #[inline]
+    pub fn square_scratch_len_for_parallelism(
+        plan: SquarePlan,
+        len: usize,
+        parallelism: usize,
+    ) -> usize {
+        #[cfg(target_pointer_width = "16")]
+        let _ = parallelism;
         match plan {
             SquarePlan::Schoolbook => 0,
             SquarePlan::Karatsuba => Self::karatsuba_sqr_scratch_len(len),
@@ -68,8 +100,9 @@ impl Multiplication {
             SquarePlan::Toom6 => Self::toom6_sqr_scratch_len(len),
             SquarePlan::Toom8 => Self::toom8_sqr_scratch_len(len),
             #[cfg(not(target_pointer_width = "16"))]
-            SquarePlan::Large(LargePlan::Ssa) => Ssa::sqr_scratch_len(len),
-            SquarePlan::Large(LargePlan::Ntt) => 0,
+            SquarePlan::Large(LargePlan::Ssa) => {
+                Ssa::sqr_scratch_len_for_parallelism(len, parallelism)
+            }
         }
     }
 }

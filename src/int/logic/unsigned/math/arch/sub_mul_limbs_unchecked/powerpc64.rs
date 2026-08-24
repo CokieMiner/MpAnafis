@@ -149,8 +149,8 @@ pub unsafe fn sub_mul_limbs_unchecked(
             borrow_reg = inout(reg) borrow_reg,
             chunks = inout(reg) chunks => _,
             rem = inout(reg) rem => _,
-            src = inout(reg) src => _,
-            dst = inout(reg) dst => _,
+            src = inout(reg_nonzero) src => _,
+            dst = inout(reg_nonzero) dst => _,
             scalar = in(reg) scalar,
             src_v0 = out(reg) _,
             src_v1 = out(reg) _,
@@ -169,6 +169,9 @@ pub unsafe fn sub_mul_limbs_unchecked(
             p_lo3 = out(reg) _,
             p_hi3 = out(reg) _,
             temp = out(reg) _,
+            out("ctr") _,
+            out("xer") _,
+            out("cr0") _,
             options(nostack)
         );
     }

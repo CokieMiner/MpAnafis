@@ -1,6 +1,7 @@
 //! Coefficient-matrix reconstruction into a destination product.
 //!
-//! `SsaCoefficients::split` cuts an operand into radix-`2^chunk_bits` coefficients;
+//! `SsaCoefficients::split_twisted` cuts an operand into radix-`2^chunk_bits`
+//! coefficients;
 //! `SsaCoefficients::reconstruct` accumulates the inverse-transformed coefficients
 //! back into a product. They are exact inverses either side of the transform,
 //! so the chunk geometry that one assumes is the one the other undoes.
@@ -22,6 +23,8 @@
     unsafe_code,
     reason = "Direct limb-level accumulation for zero-allocation FFT reconstruct"
 )]
+
+use crate::parallel::ParallelExecutor;
 
 // Re-exported for the submodules below so they reach the rest of the tier
 // through `super::` rather than through a deep relative path.
@@ -71,60 +74,22 @@ impl InverseTwist {
     }
 }
 
-/// Applies the inverse twiddle to one coefficient in place.
-///
-/// The coefficient is staged through `scratch` because a slot leaving the
-/// inverse transform is only semi-normalized, which is what `fermat_shift_from`
-/// accepts and the canonical in-place shift rejects.
-///
-/// # Safety
-/// - `matrix` holds `transform_len` complete `SsaRing::coeff_limbs(inner_bits)` slots and
-///   `index` is one of them.
-/// - `scratch` is disjoint from `matrix` and holds at least two coefficients.
-unsafe fn untwist_coefficient(
-    matrix: &mut [Limb],
-    index: usize,
-    twist: &InverseTwist,
-    scratch: &mut [Limb],
-) {
-    let inner_cl = SsaRing::coeff_limbs(twist.inner_bits);
-    let total_shift = twist.shift_for(index);
-    // SAFETY: the caller guarantees `index` addresses a complete slot.
-    let slot = unsafe { SsaTransform::coeff_mut(matrix, index, inner_cl) };
-    if total_shift != 0 {
-        // SAFETY: the staging span is a disjoint complete coefficient.
-        let stage = unsafe { scratch.get_unchecked_mut(..inner_cl) };
-        stage.copy_from_slice(slot);
-        // SAFETY: slot and stage are disjoint complete coefficients.
-        unsafe {
-            SsaRing::shift_from(slot, stage, total_shift.wrapping_shr(1), twist.inner_bits);
-            if !total_shift.is_multiple_of(2) {
-                // SAFETY: the staged copy is dead once the shift has read it, so
-                // the whole two-coefficient buffer is free again here.
-                SsaRing::mul_sqrt2(slot, twist.inner_bits, scratch);
-            }
-        }
-    }
-    // A zero shift still leaves the inverse transform semi-normalized.
-    // SAFETY: slot is a complete coefficient and inner_bits matches.
-    unsafe {
-        SsaRing::normalize(slot, twist.inner_bits);
-    }
-}
-
 impl SsaCoefficients {
     /// Accumulates inverse-transformed coefficients from `matrix` into the
     /// destination product buffer `dst`.
     ///
-    /// After the inverse FFT and twiddle/scaling corrections, each coefficient
-    /// `c[i]` contributes `c[i] * B^(i * chunk_bits)` to the product, where
-    /// `B = 2` and the contribution is reduced modulo `2^mod_bits + 1`.
+    /// After the inverse FFT, each coefficient `c[i]` contributes
+    /// `c[i] * B^(i * chunk_bits)` to the product, where `B = 2` and the
+    /// contribution is reduced modulo `2^mod_bits + 1`. The inverse twiddle and
+    /// scaling use a separate parallel sweep when there is enough work and
+    /// staging scratch to fork. Otherwise each correction is fused into the
+    /// serial accumulation so the coefficient stays hot in cache.
     ///
     /// Coefficients that exceed the correction threshold are treated as negative
     /// residues (subtracted instead of added).
     ///
     /// # Arguments
-    /// - `matrix`: flat coefficient buffer (post-IFFT, post-scaling)
+    /// - `matrix`: flat coefficient buffer (post-IFFT)
     /// - `transform_len`: number of coefficient slots
     /// - `chunk_bits`: radix chunk width
     /// - `inner_bits`: Fermat ring modulus bit width
@@ -132,11 +97,14 @@ impl SsaCoefficients {
     /// - `dst`: destination product buffer
     /// - `scratch`: temporary buffer; must be large enough for both accumulator
     ///   (see internal computation) and work area (>= max shifted coeff width)
+    /// - `twist`: the inverse correction and its staging arena
+    /// - `executor`: forks the untwist sweep
     #[allow(
         clippy::too_many_arguments,
-        reason = "the fused sweep needs the chunk geometry, both output buffers, and the inverse twist"
+        clippy::too_many_lines,
+        reason = "the sweep carries the twist, accumulator, work area, and executor through whole-product reconstruction"
     )]
-    pub fn reconstruct(
+    pub fn reconstruct<E: ParallelExecutor>(
         matrix: &mut [Limb],
         transform_len: usize,
         chunk_bits: usize,
@@ -145,6 +113,7 @@ impl SsaCoefficients {
         dst: &mut [Limb],
         scratch: &mut [Limb],
         twist: Option<(InverseTwist, &mut [Limb])>,
+        executor: &E,
     ) {
         let cl = SsaRing::coeff_limbs(inner_bits);
         let ml_inner = SsaRing::mod_limbs(inner_bits);
@@ -190,82 +159,83 @@ impl SsaCoefficients {
             "the centered coefficient bound must leave a sign-separation bit"
         );
 
-        let mut twist_stage = twist;
-        for negative_pass in [false, true] {
-            for idx in 0..transform_len {
-                // The inverse twiddle is applied on first touch instead of in a
-                // separate sweep, so the coefficient matrix is read once rather than
-                // read, rewritten, and read again. The second pass therefore sees
-                // slots that the first pass already corrected.
-                if !negative_pass
-                    && let Some((ref stage_twist, ref mut stage_scratch)) = twist_stage
-                {
-                    // SAFETY: idx < transform_len and the caller guarantees the
-                    // staging buffer holds two disjoint complete coefficients.
-                    unsafe {
-                        untwist_coefficient(matrix, idx, stage_twist, stage_scratch);
-                    }
+        let mut fused_twist = None;
+        if let Some((stage_twist, stage_scratch)) = twist {
+            let parallel_scratch = cl.checked_mul(4).is_some_and(|needed| {
+                SsaTransform::has_parallel_work(transform_len, needed, executor)
+                    && stage_scratch.len() >= needed
+            });
+            if parallel_scratch {
+                // SAFETY: the matrix holds transform_len complete coefficients
+                // and the staging arena holds the disjoint coefficients every
+                // untwist fork needs.
+                unsafe {
+                    untwist_all(matrix, transform_len, &stage_twist, stage_scratch, executor);
                 }
-                // SAFETY: idx < transform_len, matrix has transform_len * cl limbs.
-                let coeff_slice = unsafe { SsaTransform::coeff(matrix, idx, cl) };
+            } else {
+                // A sweep that cannot fork only loses the accumulator's temporal
+                // locality. Retain the original first-touch fusion instead.
+                fused_twist = Some((stage_twist, stage_scratch));
+            }
+        }
+        for idx in 0..transform_len {
+            if let Some((stage_twist, stage_scratch)) = fused_twist.as_mut() {
+                // SAFETY: idx addresses one complete coefficient and the staging
+                // arena is disjoint with at least two coefficient slots.
+                unsafe {
+                    untwist_coefficient(matrix, idx, idx, stage_twist, stage_scratch);
+                }
+            }
+            // SAFETY: idx < transform_len, matrix has transform_len * cl limbs.
+            let coeff_slice = unsafe { SsaTransform::coeff(matrix, idx, cl) };
 
-                // Exact convolution coefficients have magnitude below
-                // 2^coefficient_bound_bits, which is below 2^(inner_bits-1).
-                // Therefore canonical residues with the top data bit set are
-                // precisely negative coefficients; the guard-only value is -1.
-                // SAFETY: 0 < ml_inner < cl <= coeff_slice.len().
-                let top_data = unsafe { *coeff_slice.get_unchecked(ml_inner.wrapping_sub(1)) };
-                // SAFETY: ml_inner < cl <= coeff_slice.len().
-                let guard = unsafe { *coeff_slice.get_unchecked(ml_inner) };
-                let is_negative = guard != 0 || top_data.leading_zeros() == 0;
-                if is_negative != negative_pass {
+            // Exact convolution coefficients have magnitude below
+            // 2^coefficient_bound_bits, which is below 2^(inner_bits-1).
+            // Therefore canonical residues with the top data bit set are
+            // precisely negative coefficients; the guard-only value is -1.
+            // SAFETY: 0 < ml_inner < cl <= coeff_slice.len().
+            let top_data = unsafe { *coeff_slice.get_unchecked(ml_inner.wrapping_sub(1)) };
+            // SAFETY: ml_inner < cl <= coeff_slice.len().
+            let guard = unsafe { *coeff_slice.get_unchecked(ml_inner) };
+            let is_negative = guard != 0 || top_data.leading_zeros() == 0;
+
+            let shift_bits = idx.wrapping_mul(chunk_bits);
+            let shift_limbs = shift_bits.wrapping_div(LIMB_BITS);
+            #[allow(
+                clippy::as_conversions,
+                clippy::cast_possible_truncation,
+                reason = "shift_bits % LIMB_BITS < LIMB_BITS; fits u32"
+            )]
+            let shift_sub_bits = shift_bits.wrapping_rem(LIMB_BITS) as u32;
+
+            if is_negative {
+                // SAFETY: work.len() >= cl (guaranteed by caller), acc.len() >= needed.
+                unsafe {
+                    process_negative_coeff(
+                        coeff_slice,
+                        shift_limbs,
+                        shift_sub_bits,
+                        cl,
+                        ml_inner,
+                        acc,
+                        work,
+                    );
+                }
+            } else {
+                let active = SharedEval::active_len(coeff_slice);
+                if active == 0 {
                     continue;
                 }
-
-                let shift_bits = idx.wrapping_mul(chunk_bits);
-                let shift_limbs = shift_bits.wrapping_div(LIMB_BITS);
-                #[allow(
-                    clippy::as_conversions,
-                    clippy::cast_possible_truncation,
-                    reason = "shift_bits % LIMB_BITS < LIMB_BITS; fits u32"
-                )]
-                let shift_sub_bits = shift_bits.wrapping_rem(LIMB_BITS) as u32;
-
-                if is_negative {
-                    // SAFETY: work.len() >= cl (guaranteed by caller), acc.len() >= needed.
-                    unsafe {
-                        process_negative_coeff(
-                            coeff_slice,
-                            shift_limbs,
-                            shift_sub_bits,
-                            cl,
-                            ml_inner,
-                            acc,
-                            work,
-                        );
-                    }
-                } else {
-                    // Only the positive branch consumes an active length, and only
-                    // it can see an all-zero coefficient: a negative classification
-                    // requires a nonzero guard or a set top data bit. Scanning here
-                    // rather than before the branch keeps the backward sweep off
-                    // the negative pass entirely, which is one full pass over the
-                    // coefficient matrix per multiplication.
-                    let active = SharedEval::active_len(coeff_slice);
-                    if active == 0 {
-                        continue;
-                    }
-                    // SAFETY: work.len() >= needed, acc.len() >= needed.
-                    unsafe {
-                        process_positive_coeff(
-                            coeff_slice,
-                            active,
-                            shift_limbs,
-                            shift_sub_bits,
-                            acc,
-                            work,
-                        );
-                    }
+                // SAFETY: work.len() >= needed, acc.len() >= needed.
+                unsafe {
+                    process_positive_coeff(
+                        coeff_slice,
+                        active,
+                        shift_limbs,
+                        shift_sub_bits,
+                        acc,
+                        work,
+                    );
                 }
             }
         }
@@ -284,6 +254,141 @@ impl SsaCoefficients {
                 .copy_from_slice(acc.get_unchecked(..copy_count));
         }
     }
+}
+
+// ── Inverse twist ──────────────────────────────────────────────────────────────
+
+/// Applies the inverse twiddle to one coefficient in place.
+///
+/// A slot leaving the inverse transform is only semi-normalized, which the
+/// in-place shift accepts directly; the staging buffer serves only its
+/// discarded-high pass and the `sqrt(2)` factor.
+///
+/// # Safety
+/// - `matrix` holds complete `SsaRing::coeff_limbs(inner_bits)` slots and
+///   `slot` addresses one of them.
+/// - `index` is the coefficient's absolute transform position, from which the
+///   twist derives its shift.
+/// - `scratch` is disjoint from `matrix` and holds at least two coefficients.
+unsafe fn untwist_coefficient(
+    matrix: &mut [Limb],
+    slot: usize,
+    index: usize,
+    twist: &InverseTwist,
+    scratch: &mut [Limb],
+) {
+    let inner_cl = SsaRing::coeff_limbs(twist.inner_bits);
+    let total_shift = twist.shift_for(index);
+    // SAFETY: the caller guarantees `slot` addresses a complete slot.
+    let coefficient = unsafe { SsaTransform::coeff_mut(matrix, slot, inner_cl) };
+    if total_shift != 0 {
+        // SAFETY: the staging span is disjoint from the matrix slot and holds
+        // the coefficient-width arena the shift and sqrt(2) factor need.
+        unsafe {
+            SsaRing::shift_in_place(
+                coefficient,
+                total_shift.wrapping_shr(1),
+                twist.inner_bits,
+                scratch,
+            );
+            if !total_shift.is_multiple_of(2) {
+                // SAFETY: the whole two-coefficient buffer is free again here.
+                SsaRing::mul_sqrt2(coefficient, twist.inner_bits, scratch);
+            }
+        }
+    }
+    // A zero shift still leaves the inverse transform semi-normalized.
+    // SAFETY: coefficient is a complete slot and inner_bits matches.
+    unsafe {
+        SsaRing::normalize(coefficient, twist.inner_bits);
+    }
+}
+
+/// Applies the inverse twist and scaling to every coefficient, forking over
+/// coefficient ranges when the executor and the staging arena allow it.
+///
+/// The untwist normally rides on the accumulation sweep's first touch to retain
+/// coefficient locality. This separate sweep is selected only when it can
+/// actually fork: every coefficient's shift is independent, and the existing
+/// transform-sized twiddle arena feeds one staging pair per child range.
+///
+/// # Safety
+/// `matrix` holds `transform_len` complete coefficients for `twist.inner_bits`,
+/// and `scratch` is disjoint from it with at least two complete coefficients.
+unsafe fn untwist_all<E: ParallelExecutor>(
+    matrix: &mut [Limb],
+    transform_len: usize,
+    twist: &InverseTwist,
+    scratch: &mut [Limb],
+    executor: &E,
+) {
+    if transform_len == 0 {
+        return;
+    }
+    // SAFETY: transform_len is nonzero and the arena satisfies the two
+    // coefficients every leaf needs.
+    unsafe {
+        untwist_range(matrix, 0, transform_len, twist, scratch, executor);
+    }
+}
+
+/// Recursive coefficient-range fork of [`untwist_all`].
+///
+/// # Safety
+/// `matrix` holds `count` complete coefficients starting at absolute position
+/// `base`, and `scratch` holds at least two complete coefficients.
+unsafe fn untwist_range<E: ParallelExecutor>(
+    matrix: &mut [Limb],
+    base: usize,
+    count: usize,
+    twist: &InverseTwist,
+    scratch: &mut [Limb],
+    executor: &E,
+) {
+    debug_assert!(count > 0, "an untwist range is never empty");
+    let inner_cl = SsaRing::coeff_limbs(twist.inner_bits);
+    // One fork needs the in-place shift's staging coefficient plus the sqrt(2)
+    // factor's two-coefficient arena, so four coefficients are the smallest
+    // arena two forks can share.
+    if !SsaTransform::has_parallel_work(count, inner_cl.wrapping_mul(4), executor)
+        || scratch.len() < inner_cl.wrapping_mul(4)
+    {
+        for slot in 0..count {
+            // SAFETY: slot addresses a complete coefficient of this range and
+            // the staging span holds the two disjoint coefficients the shift
+            // and sqrt(2) factor need.
+            unsafe {
+                untwist_coefficient(matrix, slot, base.wrapping_add(slot), twist, scratch);
+            }
+        }
+        return;
+    }
+
+    let half = count.div_euclid(2);
+    // SAFETY: count exceeds the grain, so both halves are non-empty whole
+    // numbers of complete coefficients.
+    let (left_matrix, right_matrix) =
+        unsafe { matrix.split_at_mut_unchecked(half.wrapping_mul(inner_cl)) };
+    // SAFETY: the arena covers at least four coefficients, so each half retains
+    // the two every leaf needs.
+    let (left_scratch, right_scratch) = scratch.split_at_mut(scratch.len().div_euclid(2));
+    let ((), ()) = executor.join(
+        // SAFETY: left_matrix and left_scratch are disjoint complete spans.
+        || unsafe {
+            untwist_range(left_matrix, base, half, twist, left_scratch, executor);
+        },
+        // SAFETY: right_matrix and right_scratch are disjoint complete spans.
+        || unsafe {
+            untwist_range(
+                right_matrix,
+                base.wrapping_add(half),
+                count.wrapping_sub(half),
+                twist,
+                right_scratch,
+                executor,
+            );
+        },
+    );
 }
 
 // ── Positive coefficients ─────────────────────────────────────────────────────
@@ -359,16 +464,8 @@ unsafe fn process_positive_coeff(
         unsafe { work.get_unchecked(..apply_len) },
     );
     if carry != 0 {
-        let mut idx = apply_end;
-        let mut pending = carry;
-        while pending != 0 && idx < dst.len() {
-            // SAFETY: idx < dst.len(), guaranteed by the loop condition.
-            let limb = unsafe { dst.get_unchecked_mut(idx) };
-            let (sum, overflow) = limb.overflowing_add(pending);
-            pending = Limb::from(overflow);
-            *limb = sum;
-            idx = idx.wrapping_add(1);
-        }
+        // SAFETY: apply_end <= destination_end <= dst.len().
+        let _ = SsaCarry::propagate_carry(unsafe { dst.get_unchecked_mut(apply_end..) });
     }
 }
 
@@ -396,29 +493,39 @@ unsafe fn process_negative_coeff(
 ) {
     // SAFETY: caller guarantees scratch.len() >= cl.
     let mag_slice = unsafe { scratch.get_unchecked_mut(..cl) };
-    mag_slice.fill(0);
-
+    // The magnitude is `(2^inner_bits + 1) - coefficient`. A canonical
+    // coefficient with a set guard is exactly `2^n`, whose magnitude is one;
+    // every other negative residue has its top data bit set, so the bitwise
+    // complement plus two reproduces the modulus difference in one fused pass
+    // with no prebuilt modulus buffer. The same pass tracks the top nonzero
+    // limb, so no separate active-length scan re-reads the magnitude.
     // SAFETY: 0 < cl and ml_inner < cl.
-    unsafe {
-        *mag_slice.get_unchecked_mut(0) = 1;
-        *mag_slice.get_unchecked_mut(ml_inner) = 1;
-    }
-
-    // SAFETY: caller guarantees both slices have at least cl limbs.
-    let mag_borrow =
-        Addition::sub_slice_in_place(unsafe { mag_slice.get_unchecked_mut(..cl) }, unsafe {
-            coeff_slice.get_unchecked(..cl)
-        });
-    debug_assert_eq!(mag_borrow, 0, "modulus >= canonical residue");
-
-    let mag_active = mag_slice
-        .iter()
-        .rposition(|l| *l != 0)
-        .map_or(0, |pos| pos.wrapping_add(1));
-
-    if mag_active == 0 {
-        return;
-    }
+    let mag_active = unsafe {
+        if *coeff_slice.get_unchecked(ml_inner) != 0 {
+            mag_slice.fill(0);
+            *mag_slice.get_unchecked_mut(0) = 1;
+            1
+        } else {
+            let mut carry = Limb::from(2_usize);
+            let mut active = 0_usize;
+            for index in 0..ml_inner {
+                // SAFETY: index < ml_inner < cl <= coeff_slice.len() and the
+                // matching mag_slice index is in range.
+                let complement = !*coeff_slice.get_unchecked(index);
+                let (sum, escaped) = complement.overflowing_add(carry);
+                *mag_slice.get_unchecked_mut(index) = sum;
+                if sum != 0 {
+                    active = index.wrapping_add(1);
+                }
+                carry = Limb::from(escaped);
+            }
+            debug_assert_eq!(carry, 0, "the magnitude stays below 2^inner_bits");
+            // SAFETY: ml_inner < cl <= mag_slice.len().
+            *mag_slice.get_unchecked_mut(ml_inner) = 0;
+            active
+        }
+    };
+    debug_assert!(mag_active > 0, "a negative residue has a nonzero magnitude");
 
     if shift_sub_bits == 0 {
         let end = shift_limbs.wrapping_add(mag_active);
@@ -473,18 +580,7 @@ unsafe fn process_negative_coeff(
         unsafe { mag_work.get_unchecked(..sub_len) },
     );
     if sub_borrow != 0 {
-        let mut idx = sub_end;
-        let mut pending = sub_borrow;
-        while pending != 0 && idx < dst.len() {
-            // SAFETY: idx < dst.len(), guaranteed by the loop condition.
-            let (difference, underflow) =
-                unsafe { dst.get_unchecked_mut(idx) }.overflowing_sub(pending);
-            pending = Limb::from(underflow);
-            // SAFETY: idx < dst.len().
-            unsafe {
-                *dst.get_unchecked_mut(idx) = difference;
-            }
-            idx = idx.wrapping_add(1);
-        }
+        // SAFETY: sub_end <= destination_end <= dst.len().
+        let _ = SsaCarry::propagate_borrow(unsafe { dst.get_unchecked_mut(sub_end..) });
     }
 }

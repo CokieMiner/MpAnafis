@@ -24,7 +24,9 @@ static KERNEL: OnceLock<LshiftKernel> = OnceLock::new();
 
 fn select_kernel() -> LshiftKernel {
     match selected_x86_simd_tier() {
-        X86SimdTier::Avx2 => lshift_unchecked_avx2,
+        // The in-place shift has no 512-bit backend; an AVX-512 host runs the
+        // 256-bit one, which its CPUID implies.
+        X86SimdTier::Avx512 | X86SimdTier::Avx2 => lshift_unchecked_avx2,
         X86SimdTier::Sse2 => lshift_unchecked_sse2,
     }
 }

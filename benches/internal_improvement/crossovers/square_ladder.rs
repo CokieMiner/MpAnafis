@@ -18,26 +18,17 @@
 //! because the question is which tier *should* own each width, and a dispatcher
 //! that already answers it cannot be asked.
 
-#![allow(
+#![expect(
     unsafe_code,
     reason = "the benchmark calls GMP's raw mpn_sqr with disjoint, exactly sized vectors"
 )]
 
 use core::hint::black_box;
 
-use gmp_mpfr_sys::gmp::{self, limb_t, size_t};
-use mp_anafis::tune_api::tier::{
-    Limb,
-    algorithms::{
-        bench_karatsuba_sqr_scratch_len, bench_karatsuba_sqr_with_scratch,
-        bench_toom_cook_3_sqr_forced_scratch_len, bench_toom_cook_3_sqr_forced_with_scratch,
-        bench_toom_cook_4_sqr_scratch_len, bench_toom_cook_4_sqr_with_scratch,
-        bench_toom_cook_6_sqr_scratch_len, bench_toom_cook_6_sqr_with_scratch,
-    },
-    state::SquareBenchScratch,
-};
+use gmp_mpfr_sys::gmp::{self, limb_t};
+use mp_anafis::tune_api::tier::{Limb, Tuner, state::SquaringBenchState};
 
-use crate::shared::operand;
+use crate::shared::{operand, validated_gmp_count};
 
 const WIDTHS: [usize; 12] = [128, 160, 192, 224, 256, 288, 320, 384, 448, 512, 640, 800];
 
@@ -51,18 +42,19 @@ fn setup(len: usize) -> (Vec<Limb>, Vec<Limb>) {
 #[divan::bench(args = WIDTHS)]
 fn dispatched(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (value, mut destination) = setup(len);
-    let mut reusable = SquareBenchScratch::default();
+    let mut reusable = SquaringBenchState::default();
+    let mut prepared = reusable.prepare(&mut destination, &value);
     bencher.bench_local(|| {
-        reusable.run(black_box(&mut destination), black_box(&value));
+        black_box(&mut prepared).run();
     });
 }
 
 #[divan::bench(args = WIDTHS)]
 fn karatsuba(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (value, mut destination) = setup(len);
-    let mut scratch = vec![Limb::MIN; bench_karatsuba_sqr_scratch_len(len)];
+    let mut scratch = vec![Limb::MIN; Tuner::bench_karatsuba_sqr_scratch_len(len)];
     bencher.bench_local(|| {
-        bench_karatsuba_sqr_with_scratch(
+        Tuner::bench_karatsuba_sqr_with_scratch(
             black_box(&mut destination),
             black_box(&value),
             black_box(&mut scratch),
@@ -73,9 +65,9 @@ fn karatsuba(bencher: divan::Bencher<'_, '_>, len: usize) {
 #[divan::bench(args = WIDTHS)]
 fn toom3(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (value, mut destination) = setup(len);
-    let mut scratch = vec![Limb::MIN; bench_toom_cook_3_sqr_forced_scratch_len(len)];
+    let mut scratch = vec![Limb::MIN; Tuner::bench_toom_cook_3_sqr_forced_scratch_len(len)];
     bencher.bench_local(|| {
-        bench_toom_cook_3_sqr_forced_with_scratch(
+        Tuner::bench_toom_cook_3_sqr_forced_with_scratch(
             black_box(&mut destination),
             black_box(&value),
             black_box(&mut scratch),
@@ -86,9 +78,9 @@ fn toom3(bencher: divan::Bencher<'_, '_>, len: usize) {
 #[divan::bench(args = WIDTHS)]
 fn toom4(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (value, mut destination) = setup(len);
-    let mut scratch = vec![Limb::MIN; bench_toom_cook_4_sqr_scratch_len(len)];
+    let mut scratch = vec![Limb::MIN; Tuner::bench_toom_cook_4_sqr_scratch_len(len)];
     bencher.bench_local(|| {
-        bench_toom_cook_4_sqr_with_scratch(
+        Tuner::bench_toom_cook_4_sqr_with_scratch(
             black_box(&mut destination),
             black_box(&value),
             black_box(&mut scratch),
@@ -99,9 +91,9 @@ fn toom4(bencher: divan::Bencher<'_, '_>, len: usize) {
 #[divan::bench(args = WIDTHS)]
 fn toom6(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (value, mut destination) = setup(len);
-    let mut scratch = vec![Limb::MIN; bench_toom_cook_6_sqr_scratch_len(len)];
+    let mut scratch = vec![Limb::MIN; Tuner::bench_toom_cook_6_sqr_scratch_len(len)];
     bencher.bench_local(|| {
-        bench_toom_cook_6_sqr_with_scratch(
+        Tuner::bench_toom_cook_6_sqr_with_scratch(
             black_box(&mut destination),
             black_box(&value),
             black_box(&mut scratch),
@@ -112,7 +104,7 @@ fn toom6(bencher: divan::Bencher<'_, '_>, len: usize) {
 #[divan::bench(args = WIDTHS)]
 fn gmp_reference(bencher: divan::Bencher<'_, '_>, len: usize) {
     let (value, mut destination) = setup(len);
-    let count = size_t::try_from(len).expect("width fits a GMP size");
+    let count = validated_gmp_count(len);
     bencher.bench_local(|| {
         // SAFETY: two independently allocated, disjoint vectors; the destination
         // holds exactly the 2n limbs mpn_sqr writes for an n-limb operand.

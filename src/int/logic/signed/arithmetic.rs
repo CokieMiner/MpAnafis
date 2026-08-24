@@ -74,6 +74,22 @@ impl InternalMpInt {
         }
     }
 
+    /// Direct shift-multiplication by `2^n`: computes `self * 2^n`.
+    #[inline]
+    #[must_use]
+    #[track_caller]
+    pub fn mul_2exp(&self, shift: usize) -> Self {
+        if self.abs.is_zero() {
+            Self::zero()
+        } else {
+            Self {
+                abs: self.abs.shl(shift),
+                is_positive: self.is_positive,
+            }
+            .normalized()
+        }
+    }
+
     /// Multiplies two signed values.
     #[inline]
     #[must_use]

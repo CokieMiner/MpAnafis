@@ -13,13 +13,13 @@ extern crate alloc;
 
 mod error;
 mod int;
+mod parallel;
 
 pub use error::{MpError, ParseMpIntError, ParseMpUintError};
-
-pub use int::{
-    AmbientPrecision, BoundedPrecision, DebugVerbose, MpInt, MpUint, Precision, PrecisionContext,
-};
 
 #[cfg(feature = "_internal-tune")]
 #[doc(hidden)]
 pub use int::tune_api;
+pub use int::{
+    AmbientPrecision, BoundedPrecision, DebugVerbose, MpInt, MpUint, Precision, PrecisionContext,
+};

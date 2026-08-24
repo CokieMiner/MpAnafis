@@ -1,6 +1,11 @@
 //! Shape selection and scratch layout for Toom-8 and Toom-8.5.
 
 use core::cmp::{max, min};
+#[cfg(feature = "std")]
+use std::sync::RwLock;
+
+#[cfg(feature = "std")]
+use alloc::vec::Vec;
 
 use super::{
     BALANCED_PARTS, EVALUATION_GUARD_BITS, HALF_LARGE_PARTS, HALF_SMALL_PARTS,
@@ -24,6 +29,7 @@ use super::{
 /// resulting bound against a full scan.
 const EXHAUSTIVE_CHILD_SCAN: usize = const_max(2048, 4 * max_tuned_threshold());
 
+/// Stable const equivalent of [`max`].
 const fn const_max(left: usize, right: usize) -> usize {
     if left > right { left } else { right }
 }
@@ -89,6 +95,40 @@ pub struct DestinationPoints<'buffer> {
     pub four: &'buffer mut [Limb],
     pub infinity: &'buffer [Limb],
 }
+
+/// Snapshot table of one child-demand family's prefix maxima.
+///
+/// The probes behind these tables are pure functions of the generated
+/// thresholds, so a computed maximum never changes. The table grows in fixed
+/// chunks: a product at a new width pays only for the prefix it needs, and every
+/// later product at any smaller width is one read-locked indexed lookup. One
+/// lock owns both the values and their published length, so concurrent growth
+/// cannot expose a mismatched pointer/length pair.
+#[cfg(feature = "std")]
+struct PrefixTable {
+    values: RwLock<Vec<usize>>,
+}
+
+#[cfg(feature = "std")]
+static MUL_PREFIX: PrefixTable = PrefixTable::empty();
+#[cfg(feature = "std")]
+static SQR_PREFIX: PrefixTable = PrefixTable::empty();
+
+/// Discriminant for the two demand families without `std`, where
+/// [`child_scratch_prefix`] recomputes the scan instead.
+#[cfg(not(feature = "std"))]
+struct PrefixFamily;
+
+#[cfg(not(feature = "std"))]
+const MUL_PREFIX: PrefixFamily = PrefixFamily;
+#[cfg(not(feature = "std"))]
+const SQR_PREFIX: PrefixFamily = PrefixFamily;
+
+/// Table-or-family selector resolved by target capability.
+#[cfg(feature = "std")]
+type PrefixTableOrFamily = PrefixTable;
+#[cfg(not(feature = "std"))]
+type PrefixTableOrFamily = PrefixFamily;
 
 impl Toom8 {
     pub const fn split_mul_scratch(
@@ -426,6 +466,48 @@ impl Toom8 {
     }
 }
 
+/// Snapshot-table access for one child-demand family.
+#[cfg(feature = "std")]
+impl PrefixTable {
+    const fn empty() -> Self {
+        Self {
+            values: RwLock::new(Vec::new()),
+        }
+    }
+
+    /// Returns the prefix maximum over lengths `1..=limit`.
+    fn max_through(&self, limit: usize, probe: &dyn Fn(usize) -> usize) -> usize {
+        /// Growth granularity balancing first-product latency against rebuilds.
+        const CHUNK: usize = 512;
+
+        {
+            let values = match self.values.read() {
+                Ok(values) => values,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            if let Some(value) = values.get(limit.wrapping_sub(1)) {
+                return *value;
+            }
+        }
+
+        let mut values = match self.values.write() {
+            Ok(values) => values,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if values.len() < limit {
+            let target = limit.next_multiple_of(CHUNK);
+            let additional = target.wrapping_sub(values.len());
+            values.reserve(additional);
+            let mut running = values.last().copied().unwrap_or(0);
+            for len in values.len().wrapping_add(1)..=target {
+                running = max(running, probe(len));
+                values.push(running);
+            }
+        }
+        values.get(limit.wrapping_sub(1)).copied().unwrap_or(0)
+    }
+}
+
 fn clear_range(dst: &mut [Limb], start: usize, end: usize) {
     debug_assert!(
         start <= end && end <= dst.len(),
@@ -457,7 +539,7 @@ fn max_sqr_scratch_up_to(limit: usize) -> usize {
         Multiplication::square_scratch_len(plan, len)
     };
     let scanned = min(limit, EXHAUSTIVE_CHILD_SCAN);
-    let mut inner = (1..=scanned).map(probe).max().unwrap_or(0);
+    let mut inner = child_scratch_prefix(&SQR_PREFIX, scanned, &probe);
     if limit > scanned {
         inner = max(inner, probe(limit));
     }
@@ -481,7 +563,7 @@ fn max_balanced_mul_scratch_below(limit: usize) -> usize {
         Multiplication::scratch_len(plan, len, len)
     };
     let scanned = min(limit, EXHAUSTIVE_CHILD_SCAN);
-    let mut inner = (1..scanned).map(probe).max().unwrap_or(0);
+    let mut inner = child_scratch_prefix(&MUL_PREFIX, scanned.wrapping_sub(1), &probe);
     if limit > scanned {
         inner = max(inner, probe(limit.wrapping_sub(1)));
     }
@@ -493,4 +575,28 @@ fn max_balanced_mul_scratch_below(limit: usize) -> usize {
         "prefix-plus-top bound missed a child scratch maximum below {limit}"
     );
     inner
+}
+
+/// Prefix maximum of one child-demand family over lengths `1..=limit`.
+///
+/// Both families share the shape: `[max over 1..=limit]`. With pointer-width
+/// `std` that value is one synchronized indexed read after the first product at
+/// a new width; without it the scan is recomputed, where the cost is immaterial.
+fn child_scratch_prefix(
+    family: &PrefixTableOrFamily,
+    limit_inclusive: usize,
+    probe: &dyn Fn(usize) -> usize,
+) -> usize {
+    if limit_inclusive == 0 {
+        return 0;
+    }
+    #[cfg(feature = "std")]
+    {
+        family.max_through(limit_inclusive, probe)
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        let _ = family;
+        (1..=limit_inclusive).map(probe).max().unwrap_or(0)
+    }
 }

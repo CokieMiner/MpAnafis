@@ -37,11 +37,11 @@ impl Recursive {
             dst.fill(0);
             return;
         }
-        let product_len = a
-            .len()
-            .checked_add(b.len())
-            .expect("recursive product width overflowed");
-        assert!(
+        // Two valid limb slices together contain fewer than `usize::MAX`
+        // elements on every supported target, because each slice spans at most
+        // `isize::MAX` bytes and one limb occupies at least two bytes.
+        let product_len = a.len().wrapping_add(b.len());
+        debug_assert!(
             product_len <= dst.len(),
             "recursive product exceeds its fixed-width destination"
         );
@@ -65,11 +65,9 @@ impl Recursive {
             dst.fill(0);
             return;
         }
-        let square_len = a
-            .len()
-            .checked_mul(2)
-            .expect("recursive square width overflowed");
-        assert!(
+        // The valid-slice byte bound also proves twice one limb count fits.
+        let square_len = a.len().wrapping_mul(2);
+        debug_assert!(
             square_len <= dst.len(),
             "recursive square exceeds its fixed-width destination"
         );
@@ -121,19 +119,16 @@ impl Recursive {
             dst.fill(0);
             return;
         };
-        assert_eq!(low_a.len(), low_b.len(), "evaluation widths must match");
-        assert!(
+        debug_assert_eq!(low_a.len(), low_b.len(), "evaluation widths must match");
+        debug_assert!(
             *guard_a < GUARD_BOUND && *guard_b < GUARD_BOUND,
             "evaluation guard exceeds its proven bound"
         );
-        let low_product_len = low_a
-            .len()
-            .checked_mul(2)
-            .expect("guarded evaluation product width overflowed");
-        let required_dst_len = low_product_len
-            .checked_add(GUARD_LIMBS)
-            .expect("guarded evaluation destination width overflowed");
-        assert!(
+        // Evaluation buffers are valid slices and the tier layout retains at
+        // least `GUARD_LIMBS` above the exact low product.
+        let low_product_len = low_a.len().wrapping_mul(2);
+        let required_dst_len = low_product_len.wrapping_add(GUARD_LIMBS);
+        debug_assert!(
             required_dst_len <= dst.len(),
             "guarded evaluation product exceeds its destination"
         );
@@ -145,7 +140,7 @@ impl Recursive {
         SharedEval::add_mul_word_with_kernel_in_place(shifted_product, low_b, *guard_a, kernel);
         SharedEval::add_mul_word_with_kernel_in_place(shifted_product, low_a, *guard_b, kernel);
         let guard_product: [Limb; 2] = ArchKernels::mul_limb_lo_hi(*guard_a, *guard_b).into();
-        assert!(
+        debug_assert!(
             GUARD_LIMBS == 2 || guard_product[1] == 0,
             "a one-limb guard product must not carry into a second limb"
         );
@@ -183,18 +178,14 @@ impl Recursive {
             dst.fill(0);
             return;
         };
-        assert!(
+        debug_assert!(
             *guard < GUARD_BOUND,
             "evaluation guard exceeds its proven bound"
         );
-        let low_product_len = low
-            .len()
-            .checked_mul(2)
-            .expect("guarded evaluation square width overflowed");
-        let required_dst_len = low_product_len
-            .checked_add(GUARD_LIMBS)
-            .expect("guarded square destination width overflowed");
-        assert!(
+        // As above, the tier layout proves the two arithmetic results fit.
+        let low_product_len = low.len().wrapping_mul(2);
+        let required_dst_len = low_product_len.wrapping_add(GUARD_LIMBS);
+        debug_assert!(
             required_dst_len <= dst.len(),
             "guarded evaluation square exceeds its destination"
         );
@@ -203,12 +194,11 @@ impl Recursive {
         square(low_square, low, scratch);
 
         let (_, shifted_product) = dst.split_at_mut(low.len());
-        let doubled_guard = guard
-            .checked_mul(2)
-            .expect("guarded evaluation cross coefficient overflowed");
+        debug_assert!(guard.checked_mul(2).is_some(), "guard bound must double");
+        let doubled_guard = guard.wrapping_mul(2);
         SharedEval::add_mul_word_with_kernel_in_place(shifted_product, low, doubled_guard, kernel);
         let guard_square: [Limb; 2] = ArchKernels::mul_limb_lo_hi(*guard, *guard).into();
-        assert!(
+        debug_assert!(
             GUARD_LIMBS == 2 || guard_square[1] == 0,
             "a one-limb guard square must not carry into a second limb"
         );

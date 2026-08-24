@@ -32,7 +32,15 @@ const FACTOR_FIVE: NonZeroUsize = NonZeroUsize::new(5).unwrap();
 pub struct NegacyclicPlan {
     factor: NonZeroUsize,
     block_len: usize,
+    modulus_limbs: usize,
+    modulus_bits: usize,
+    small_bits: usize,
     quotient_len: usize,
+    small_coeff_len: usize,
+    quotient_coeff_len: usize,
+    quotient_product_len: usize,
+    small_product_len: usize,
+    scratch_len: usize,
     quotient_plan: MulPlan,
     small_plan: MulPlan,
 }
@@ -41,7 +49,7 @@ impl NegacyclicPlan {
     /// Selects a decomposition only where its two smaller products are expected
     /// to repay the folding and CRT passes.
     pub fn new(modulus_limbs: usize) -> Option<Self> {
-        let _modulus_bits = modulus_limbs.checked_mul(LIMB_BITS)?;
+        let modulus_bits = modulus_limbs.checked_mul(LIMB_BITS)?;
         let factor = if modulus_limbs >= SSA_NEGACYCLIC_FACTOR5_THRESHOLD
             && modulus_limbs.is_multiple_of(5)
         {
@@ -57,11 +65,32 @@ impl NegacyclicPlan {
         if block_len == 0 {
             return None;
         }
+        let small_bits = block_len.checked_mul(LIMB_BITS)?;
         let quotient_len = modulus_limbs.checked_sub(block_len)?;
+        let small_coeff_len = block_len.checked_add(1)?;
+        let quotient_coeff_len = quotient_len.checked_add(1)?;
+        let quotient_product_len = quotient_len.checked_mul(2)?;
+        let small_product_len = block_len.checked_mul(2)?;
+        let quotient_work = Multiplication::required_scratch(quotient_len, quotient_len);
+        let small_work = small_product_len
+            .checked_add(Multiplication::required_scratch(block_len, block_len))?;
+        let scratch_len = small_coeff_len
+            .checked_mul(4)?
+            .checked_add(quotient_coeff_len.checked_mul(2)?)?
+            .checked_add(quotient_product_len)?
+            .checked_add(quotient_work.max(small_work))?;
         Some(Self {
             factor,
             block_len,
+            modulus_limbs,
+            modulus_bits,
+            small_bits,
             quotient_len,
+            small_coeff_len,
+            quotient_coeff_len,
+            quotient_product_len,
+            small_product_len,
+            scratch_len,
             quotient_plan: Multiplication::select_plan(
                 quotient_len,
                 quotient_len,
@@ -72,41 +101,8 @@ impl NegacyclicPlan {
     }
 
     /// Scratch required by [`Self::mul_assign_left`].
-    pub fn scratch_len(self) -> usize {
-        let small_coeff_len = self
-            .block_len
-            .checked_add(1)
-            .expect("small negacyclic coefficient width overflowed");
-        let quotient_coeff_len = self
-            .quotient_len
-            .checked_add(1)
-            .expect("quotient coefficient width overflowed");
-        let quotient_work = Multiplication::required_scratch(self.quotient_len, self.quotient_len);
-        let small_work = self
-            .block_len
-            .checked_mul(2)
-            .and_then(|product_len| {
-                product_len.checked_add(Multiplication::required_scratch(
-                    self.block_len,
-                    self.block_len,
-                ))
-            })
-            .expect("small negacyclic product scratch overflowed");
-
-        small_coeff_len
-            .checked_mul(4)
-            .and_then(|total| {
-                quotient_coeff_len
-                    .checked_mul(2)
-                    .and_then(|quotients| total.checked_add(quotients))
-            })
-            .and_then(|total| {
-                self.quotient_len
-                    .checked_mul(2)
-                    .and_then(|product| total.checked_add(product))
-            })
-            .and_then(|total| total.checked_add(quotient_work.max(small_work)))
-            .expect("negacyclic scratch layout overflowed")
+    pub const fn scratch_len(self) -> usize {
+        self.scratch_len
     }
 
     /// Multiplies two canonical residues, overwriting `left`.
@@ -122,28 +118,7 @@ impl NegacyclicPlan {
         scratch: &mut [Limb],
     ) {
         let factor = self.factor.get();
-        let modulus_limbs = self
-            .block_len
-            .checked_mul(factor)
-            .expect("planned negacyclic modulus width overflowed");
-        let modulus_bits = modulus_limbs
-            .checked_mul(LIMB_BITS)
-            .expect("planned negacyclic modulus bit width overflowed");
-        let small_bits = self
-            .block_len
-            .checked_mul(LIMB_BITS)
-            .expect("planned small modulus bit width overflowed");
-        let modulus_coeff_len = modulus_limbs
-            .checked_add(1)
-            .expect("planned negacyclic coefficient width overflowed");
-        let small_coeff_len = self
-            .block_len
-            .checked_add(1)
-            .expect("planned small coefficient width overflowed");
-        let quotient_coeff_len = self
-            .quotient_len
-            .checked_add(1)
-            .expect("planned quotient coefficient width overflowed");
+        let modulus_coeff_len = self.modulus_limbs.wrapping_add(1);
         debug_assert_eq!(
             left.len(),
             modulus_coeff_len,
@@ -159,19 +134,15 @@ impl NegacyclicPlan {
             "negacyclic scratch is undersized"
         );
 
-        let (left_small, after_left_small) = scratch.split_at_mut(small_coeff_len);
-        let (right_small, after_right_small) = after_left_small.split_at_mut(small_coeff_len);
-        let (fold_scratch, after_fold) = after_right_small.split_at_mut(small_coeff_len);
-        let (small_product, after_small_product) = after_fold.split_at_mut(small_coeff_len);
+        let (left_small, after_left_small) = scratch.split_at_mut(self.small_coeff_len);
+        let (right_small, after_right_small) = after_left_small.split_at_mut(self.small_coeff_len);
+        let (fold_scratch, after_fold) = after_right_small.split_at_mut(self.small_coeff_len);
+        let (small_product, after_small_product) = after_fold.split_at_mut(self.small_coeff_len);
         let (left_quotient, after_left_quotient) =
-            after_small_product.split_at_mut(quotient_coeff_len);
+            after_small_product.split_at_mut(self.quotient_coeff_len);
         let (right_quotient, after_right_quotient) =
-            after_left_quotient.split_at_mut(quotient_coeff_len);
-        let quotient_product_len = self
-            .quotient_len
-            .checked_mul(2)
-            .expect("planned quotient product width overflowed");
-        let (quotient_product, work) = after_right_quotient.split_at_mut(quotient_product_len);
+            after_left_quotient.split_at_mut(self.quotient_coeff_len);
+        let (quotient_product, work) = after_right_quotient.split_at_mut(self.quotient_product_len);
 
         fold_mod_x_plus_one(left_small, fold_scratch, left, self.block_len, factor);
         fold_mod_x_plus_one(right_small, fold_scratch, right, self.block_len, factor);
@@ -183,33 +154,35 @@ impl NegacyclicPlan {
         // initialized limbs, so these prefixes contain the complete data
         // widths. The two coefficients and the product buffer are disjoint
         // partitions of `scratch`.
+        let left_quotient_input = unsafe { left_quotient.get_unchecked(..self.quotient_len) };
+        // SAFETY: the right coefficient has the same complete initialized prefix.
+        let right_quotient_input = unsafe { right_quotient.get_unchecked(..self.quotient_len) };
         Multiplication::execute_plan(
             self.quotient_plan,
             quotient_product,
-            unsafe { left_quotient.get_unchecked(..self.quotient_len) },
-            unsafe { right_quotient.get_unchecked(..self.quotient_len) },
+            left_quotient_input,
+            right_quotient_input,
             work,
         );
         // SAFETY: the quotient product has `2 * quotient_len` limbs and `left`
         // is a complete, disjoint coefficient modulo `B^modulus_limbs + 1`.
         unsafe {
-            reduce_product_mod_fermat(left, quotient_product, modulus_limbs);
+            reduce_product_mod_fermat(left, quotient_product, self.modulus_limbs);
         }
 
-        let small_product_len = self
-            .block_len
-            .checked_mul(2)
-            .expect("planned small product width overflowed");
-        let (small_full_product, small_tower_scratch) = work.split_at_mut(small_product_len);
+        let (small_full_product, small_tower_scratch) = work.split_at_mut(self.small_product_len);
         // SAFETY: each small coefficient has exactly `block_len + 1`
         // initialized limbs, so these prefixes contain the complete data
         // widths. Both prefixes and the product buffer are disjoint scratch
         // partitions.
+        let left_small_input = unsafe { left_small.get_unchecked(..self.block_len) };
+        // SAFETY: the right coefficient has the same complete initialized prefix.
+        let right_small_input = unsafe { right_small.get_unchecked(..self.block_len) };
         Multiplication::execute_plan(
             self.small_plan,
             small_full_product,
-            unsafe { left_small.get_unchecked(..self.block_len) },
-            unsafe { right_small.get_unchecked(..self.block_len) },
+            left_small_input,
+            right_small_input,
             small_tower_scratch,
         );
         // SAFETY: `small_product` is one complete coefficient and the exact
@@ -223,8 +196,8 @@ impl NegacyclicPlan {
         fold_mod_x_plus_one(left_small, fold_scratch, left, self.block_len, factor);
         // SAFETY: both buffers are complete canonical X+1 residues.
         unsafe {
-            SsaRing::sub_in_place(small_product, left_small, small_bits);
-            SsaRing::normalize(small_product, small_bits);
+            SsaRing::sub_in_place(small_product, left_small, self.small_bits);
+            SsaRing::normalize(small_product, self.small_bits);
         }
 
         make_exactly_divisible_by_factor(small_product, self.factor);
@@ -239,35 +212,28 @@ impl NegacyclicPlan {
         );
         // SAFETY: left is a complete coefficient for this Fermat ring.
         unsafe {
-            SsaRing::normalize(left, modulus_bits);
+            SsaRing::normalize(left, self.modulus_bits);
         }
     }
 }
 
 /// Reduces one operand modulo `Q`.
 fn quotient_residue(dst: &mut [Limb], src: &[Limb], block_len: usize, factor: usize) {
-    assert!(block_len > 0, "quotient blocks must be nonempty");
-    assert!(factor == 3 || factor == 5, "unsupported negacyclic factor");
+    debug_assert!(block_len > 0, "quotient blocks must be nonempty");
+    debug_assert!(factor == 3 || factor == 5, "unsupported negacyclic factor");
     // The accepted factors are three or five, so this subtraction is exact.
     let factor_minus_one = factor.wrapping_sub(1);
-    let quotient_len = block_len
-        .checked_mul(factor_minus_one)
-        .expect("quotient residue width overflowed");
-    let modulus_len = quotient_len
-        .checked_add(block_len)
-        .expect("negacyclic modulus width overflowed");
-    let quotient_coeff_len = quotient_len
-        .checked_add(1)
-        .expect("quotient coefficient width overflowed");
-    let modulus_coeff_len = modulus_len
-        .checked_add(1)
-        .expect("negacyclic coefficient width overflowed");
-    assert_eq!(
+    // `NegacyclicPlan::new` checked this complete geometry before execution.
+    let quotient_len = block_len.wrapping_mul(factor_minus_one);
+    let modulus_len = quotient_len.wrapping_add(block_len);
+    let quotient_coeff_len = quotient_len.wrapping_add(1);
+    let modulus_coeff_len = modulus_len.wrapping_add(1);
+    debug_assert_eq!(
         dst.len(),
         quotient_coeff_len,
         "quotient residue destination width differs"
     );
-    assert_eq!(
+    debug_assert_eq!(
         src.len(),
         modulus_coeff_len,
         "negacyclic source coefficient width differs"
@@ -320,24 +286,19 @@ fn fold_mod_x_plus_one(
     block_len: usize,
     factor: usize,
 ) {
-    assert!(block_len > 0, "fold blocks must be nonempty");
-    assert!(factor == 3 || factor == 5, "unsupported negacyclic factor");
-    let coefficient_len = block_len
-        .checked_add(1)
-        .expect("small coefficient width overflowed");
-    let modulus_len = block_len
-        .checked_mul(factor)
-        .expect("negacyclic modulus width overflowed");
-    let modulus_coeff_len = modulus_len
-        .checked_add(1)
-        .expect("negacyclic coefficient width overflowed");
-    assert_eq!(dst.len(), coefficient_len, "fold destination width differs");
-    assert_eq!(
+    debug_assert!(block_len > 0, "fold blocks must be nonempty");
+    debug_assert!(factor == 3 || factor == 5, "unsupported negacyclic factor");
+    // These values are the checked dimensions retained by the owning plan.
+    let coefficient_len = block_len.wrapping_add(1);
+    let modulus_len = block_len.wrapping_mul(factor);
+    let modulus_coeff_len = modulus_len.wrapping_add(1);
+    debug_assert_eq!(dst.len(), coefficient_len, "fold destination width differs");
+    debug_assert_eq!(
         negative.len(),
         coefficient_len,
         "fold scratch width differs"
     );
-    assert_eq!(
+    debug_assert_eq!(
         src.len(),
         modulus_coeff_len,
         "fold source coefficient width differs"
@@ -370,9 +331,7 @@ fn fold_mod_x_plus_one(
     let guard_escape = SsaCarry::add_full_in_place(negative, &[source_guard]);
     debug_assert_eq!(guard_escape, 0, "single source guard fits the fold");
 
-    let small_bits = block_len
-        .checked_mul(LIMB_BITS)
-        .expect("small negacyclic modulus bit width overflowed");
+    let small_bits = block_len.wrapping_mul(LIMB_BITS);
     // SAFETY: both buffers contain one complete coefficient modulo X+1.
     unsafe {
         SsaRing::normalize(dst, small_bits);
@@ -384,18 +343,17 @@ fn fold_mod_x_plus_one(
 
 /// Adds the unique small multiple of `X+1` that makes `value` divisible by k.
 fn make_exactly_divisible_by_factor(value: &mut [Limb], factor: NonZeroUsize) {
-    assert!(!value.is_empty(), "the X+1 coefficient must retain a guard");
-    assert!(
+    debug_assert!(!value.is_empty(), "the X+1 coefficient must retain a guard");
+    debug_assert!(
         factor == FACTOR_THREE || factor == FACTOR_FIVE,
         "unsupported negacyclic factor"
     );
-    let remainder = value
-        .iter()
-        // Both addends are below `factor <= 5`, so this wrapping sum is exact.
-        .fold(0_usize, |acc, limb| {
-            acc.wrapping_add(*limb % factor) % factor
-        })
-        % factor;
+    // The modulus is monomorphized per accepted factor, so the per-limb
+    // remainder lowers to multiply-shift instead of a hardware division.
+    let remainder = match factor.get() {
+        3 => limb_sum_mod::<3>(value),
+        _ => limb_sum_mod::<5>(value),
+    };
     let mut multiple = 0_usize;
     // An odd factor makes two invertible, so the loop finds a solution before
     // `multiple == factor`; all wrapping arithmetic below is therefore exact.
@@ -406,30 +364,38 @@ fn make_exactly_divisible_by_factor(value: &mut [Limb], factor: NonZeroUsize) {
     let escaped = SsaCarry::add_full_in_place(value, &[multiple]);
     debug_assert_eq!(escaped, 0, "low X+1 adjustment retains its carry");
     let guard_index = value.len().wrapping_sub(1);
-    // SAFETY: the release check above proves `value` is nonempty.
+    // SAFETY: the planned X+1 coefficient always retains one guard limb.
     let guard = unsafe { value.get_unchecked_mut(guard_index) };
     *guard = guard.wrapping_add(multiple);
 }
 
+/// Sums `value` modulo a compile-time odd factor, folding limb residues.
+fn limb_sum_mod<const FACTOR: usize>(value: &[Limb]) -> usize {
+    const { assert!(FACTOR == 3 || FACTOR == 5, "unsupported negacyclic factor") }
+    // The compile-time assertion proves `new` returns `Some`; the fallback
+    // keeps the release expression total without introducing a panic path.
+    let factor = NonZeroUsize::new(FACTOR).unwrap_or(NonZeroUsize::MIN);
+    // Both addends stay below FACTOR <= 5, so the folding sum is exact; the
+    // compile-time factor makes every remainder total.
+    value.iter().fold(0_usize, |acc, limb| {
+        let limb_residue = *limb % factor;
+        acc.wrapping_add(limb_residue) % factor
+    })
+}
+
 /// Builds `value * Q` exactly in a full `X^k+1` coefficient.
 fn build_times_quotient(dst: &mut [Limb], value: &[Limb], block_len: usize, factor: usize) {
-    assert!(block_len > 0, "quotient blocks must be nonempty");
-    assert!(factor == 3 || factor == 5, "unsupported negacyclic factor");
-    let modulus_len = block_len
-        .checked_mul(factor)
-        .expect("negacyclic modulus width overflowed");
-    let modulus_coeff_len = modulus_len
-        .checked_add(1)
-        .expect("negacyclic coefficient width overflowed");
-    let small_coeff_len = block_len
-        .checked_add(1)
-        .expect("small coefficient width overflowed");
-    assert_eq!(
+    debug_assert!(block_len > 0, "quotient blocks must be nonempty");
+    debug_assert!(factor == 3 || factor == 5, "unsupported negacyclic factor");
+    let modulus_len = block_len.wrapping_mul(factor);
+    let modulus_coeff_len = modulus_len.wrapping_add(1);
+    let small_coeff_len = block_len.wrapping_add(1);
+    debug_assert_eq!(
         dst.len(),
         modulus_coeff_len,
         "CRT destination width differs"
     );
-    assert_eq!(
+    debug_assert_eq!(
         value.len(),
         small_coeff_len,
         "small CRT value width differs"
@@ -454,17 +420,13 @@ fn build_times_quotient(dst: &mut [Limb], value: &[Limb], block_len: usize, fact
 }
 
 fn subtract_quotient_modulus(dst: &mut [Limb], block_len: usize, factor: usize) {
-    assert!(block_len > 0, "quotient blocks must be nonempty");
-    assert!(factor == 3 || factor == 5, "unsupported negacyclic factor");
+    debug_assert!(block_len > 0, "quotient blocks must be nonempty");
+    debug_assert!(factor == 3 || factor == 5, "unsupported negacyclic factor");
     // The accepted factors are three or five, so this subtraction is exact.
     let factor_minus_one = factor.wrapping_sub(1);
-    let quotient_len = block_len
-        .checked_mul(factor_minus_one)
-        .expect("quotient modulus width overflowed");
-    let quotient_coeff_len = quotient_len
-        .checked_add(1)
-        .expect("quotient coefficient width overflowed");
-    assert_eq!(
+    let quotient_len = block_len.wrapping_mul(factor_minus_one);
+    let quotient_coeff_len = quotient_len.wrapping_add(1);
+    debug_assert_eq!(
         dst.len(),
         quotient_coeff_len,
         "quotient modulus destination width differs"
@@ -488,24 +450,30 @@ fn subtract_quotient_modulus(dst: &mut [Limb], block_len: usize, factor: usize) 
 }
 
 fn compare_with_quotient_modulus(value: &[Limb], block_len: usize, factor: usize) -> Ordering {
-    assert!(block_len > 0, "quotient blocks must be nonempty");
-    assert!(factor == 3 || factor == 5, "unsupported negacyclic factor");
-    for index in (0..value.len()).rev() {
-        let block = index.div_euclid(block_len);
-        // Euclidean division gives `block * block_len <= index`, so neither
-        // this product nor the following subtraction can overflow.
-        let within_block = index.wrapping_sub(block.wrapping_mul(block_len));
-        let modulus_limb = if block >= factor.wrapping_sub(1) || block.is_multiple_of(2) {
-            Limb::from(index == 0)
-        } else {
-            Limb::MAX
-        };
-        debug_assert!(within_block < block_len, "index belongs to one exact block");
-        // SAFETY: the reverse range yields exactly the valid indices of `value`.
-        match unsafe { value.get_unchecked(index) }.cmp(&modulus_limb) {
-            Ordering::Equal => {}
-            ordering @ (Ordering::Less | Ordering::Greater) => return ordering,
+    debug_assert!(block_len > 0, "quotient blocks must be nonempty");
+    debug_assert!(factor == 3 || factor == 5, "unsupported negacyclic factor");
+    // Every limb of one block shares the same modulus image, so comparing
+    // block by block needs one division per block rather than one per limb.
+    let mut end = value.len();
+    while end > 0 {
+        // `end` is exclusive. Selecting the block containing `end - 1` makes
+        // `start < end`, including when `end` is exactly block-aligned, so the
+        // loop strictly decreases on every equal block.
+        let block = end.wrapping_sub(1).div_euclid(block_len);
+        let start = block.wrapping_mul(block_len);
+        for index in (start..end).rev() {
+            let modulus_limb = if block >= factor.wrapping_sub(1) || block.is_multiple_of(2) {
+                Limb::from(index == 0)
+            } else {
+                Limb::MAX
+            };
+            // SAFETY: start <= index < end <= value.len().
+            match unsafe { value.get_unchecked(index) }.cmp(&modulus_limb) {
+                Ordering::Equal => {}
+                ordering @ (Ordering::Less | Ordering::Greater) => return ordering,
+            }
         }
+        end = start;
     }
     Ordering::Equal
 }

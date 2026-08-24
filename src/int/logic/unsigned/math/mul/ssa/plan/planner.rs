@@ -7,35 +7,18 @@
 //! would produce, so a geometry that hides an expensive nested FFT behind a
 //! cheap-looking butterfly count is rejected on its true cost.
 
-#[cfg(target_has_atomic = "8")]
-use core::sync::atomic::{AtomicU8, Ordering};
+#[cfg(feature = "std")]
+use core::mem::size_of;
+#[cfg(feature = "std")]
+use core::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(feature = "std")]
+use std::sync::{OnceLock, RwLock};
 
-use super::{
-    InverseTwist, LIMB_BITS, SSA_BASE_MODULUS_BITS, SSA_FOUR_STEP_MIN_LOG, SSA_GEOMETRY_EXPONENTS,
-    SsaPlan, SsaPointwise, SsaRing,
-};
+use super::{InverseTwist, LIMB_BITS, SSA_BASE_MODULUS_BITS, SsaPlan, SsaPointwise, SsaRing};
 
 // `SSA_COEFFICIENT_VISIT_OVERHEAD` prices the fixed setup in every
 // coefficient visit relative to one limb multiplication. The model would
 // otherwise over-reward long transforms with artificially narrow coefficients.
-//
-// `SSA_SQRT2_TWIST_PASSES` adds the two shifts and subtraction carried by an
-// odd half-step across the forward twist and inverse untwist. Without that
-// penalty the model picks a narrower ring even where its extra passes lose.
-
-/// Half-width of the exponent search around the analytic centre for the ring
-/// the caller actually asked about.
-///
-/// **Portable.** It bounds which geometries are considered, not which one wins.
-/// Four is wide enough to contain the measured optimum at every benchmarked
-/// width; widening it costs planning time and finds nothing new.
-pub const TOP_LEVEL_SEARCH_RADIUS: u32 = 4;
-
-/// Half-width of the exponent search for rings reached through the recursive
-/// pointwise term. Narrower than the top level to bound total planning work.
-///
-/// **Portable**, for the same reason as [`TOP_LEVEL_SEARCH_RADIUS`].
-pub const NESTED_SEARCH_RADIUS: u32 = 2;
 
 /// Depth at which the cost model stops expanding nested rings and prices the
 /// remaining product with the basecase estimate.
@@ -45,19 +28,149 @@ pub const NESTED_SEARCH_RADIUS: u32 = 2;
 /// halves and no representable operand reaches this depth.
 pub const MAX_COST_RECURSION_DEPTH: u32 = 6;
 
-/// Cached geometry code for power-of-two ring widths, indexed by `log2(bits)`.
+/// Set-associative irregular geometry buckets, selected by a folded ring width.
 ///
-/// The cost model is deterministic for a build, so a benign race can only
-/// store the same exponent and alignment choice. Zero means uninitialized.
-#[cfg(target_has_atomic = "8")]
-static POWER_OF_TWO_GEOMETRIES: [AtomicU8; LIMB_BITS] = [const { AtomicU8::new(0) }; LIMB_BITS];
+/// The cost model is deterministic for a build, so an entry can only ever hold
+/// the geometry its own width selects. Powers of two use the collision-free
+/// exponent cache below; this table serves alignment-derived widths such as
+/// 4224 or 12288 bits. Four ways retain the dense benchmark ladder's known
+/// collisions; a round-robin replacement keeps no width permanently excluded
+/// when an application exercises more than four colliding shapes.
+#[cfg(feature = "std")]
+const IRREGULAR_GEOMETRY_CACHE_LEN: usize = 256;
+#[cfg(feature = "std")]
+const IRREGULAR_GEOMETRY_CACHE_WAYS: usize = 4;
+
+/// One collision-free slot for every representable power-of-two ring width.
+#[cfg(feature = "std")]
+const POWER_OF_TWO_GEOMETRY_CACHE_LEN: usize = size_of::<usize>().wrapping_mul(8);
+
+#[cfg(feature = "std")]
+#[derive(Clone, Copy)]
+struct CachedGeometry {
+    modulus_bits: usize,
+    geometry: Geometry,
+}
+
+#[cfg(feature = "std")]
+static POWER_OF_TWO_GEOMETRY_CACHE: [OnceLock<CachedGeometry>; POWER_OF_TWO_GEOMETRY_CACHE_LEN] =
+    [const { OnceLock::new() }; POWER_OF_TWO_GEOMETRY_CACHE_LEN];
+
+#[cfg(feature = "std")]
+struct IrregularGeometryCacheSet {
+    entries: RwLock<[Option<CachedGeometry>; IRREGULAR_GEOMETRY_CACHE_WAYS]>,
+    next_victim: AtomicUsize,
+}
+
+#[cfg(feature = "std")]
+impl IrregularGeometryCacheSet {
+    const fn new() -> Self {
+        Self {
+            entries: RwLock::new([None; IRREGULAR_GEOMETRY_CACHE_WAYS]),
+            next_victim: AtomicUsize::new(0),
+        }
+    }
+
+    fn get(&self, modulus_bits: usize) -> Option<Geometry> {
+        let entries = match self.entries.read() {
+            Ok(entries) => entries,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        entries
+            .iter()
+            .flatten()
+            .find(|entry| entry.modulus_bits == modulus_bits)
+            .map(|entry| entry.geometry)
+    }
+
+    fn insert(&self, entry: CachedGeometry) {
+        let mut entries = match self.entries.write() {
+            Ok(entries) => entries,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if entries
+            .iter()
+            .flatten()
+            .any(|cached| cached.modulus_bits == entry.modulus_bits)
+        {
+            return;
+        }
+        if let Some(empty) = entries.iter_mut().find(|cached| cached.is_none()) {
+            *empty = Some(entry);
+            return;
+        }
+        let victim =
+            self.next_victim.fetch_add(1, Ordering::Relaxed) % IRREGULAR_GEOMETRY_CACHE_WAYS;
+        // The modulo above proves `victim` is one of the four cache ways. Keep
+        // the cache miss path total even if that relationship is changed later.
+        if let Some(slot) = entries.get_mut(victim) {
+            *slot = Some(entry);
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+static IRREGULAR_GEOMETRY_CACHE: [IrregularGeometryCacheSet; IRREGULAR_GEOMETRY_CACHE_LEN] =
+    [const { IrregularGeometryCacheSet::new() }; IRREGULAR_GEOMETRY_CACHE_LEN];
+
+/// Maps a non-power-of-two ring width to its set-associative cache bucket.
+///
+/// Folding every byte of the limb count prevents aligned widths that differ
+/// only above the low eight bits from all contending for one slot.
+#[cfg(feature = "std")]
+const fn irregular_geometry_slot(modulus_bits: usize) -> usize {
+    let mut remaining = modulus_bits.wrapping_div(LIMB_BITS);
+    let mut folded = 0;
+    while remaining != 0 {
+        folded ^= remaining & 0xff;
+        remaining = remaining.wrapping_shr(8);
+    }
+    folded % IRREGULAR_GEOMETRY_CACHE_LEN
+}
+
+/// Returns the collision-free exponent slot for a power-of-two ring width.
+#[cfg(feature = "std")]
+fn power_of_two_geometry_slot(modulus_bits: usize) -> Option<usize> {
+    if !modulus_bits.is_power_of_two() {
+        return None;
+    }
+    usize::try_from(modulus_bits.trailing_zeros()).ok()
+}
+
+/// Returns the collision-free power-of-two cache entry for one ring width.
+#[cfg(feature = "std")]
+fn power_of_two_geometry_entry(modulus_bits: usize) -> Option<&'static OnceLock<CachedGeometry>> {
+    POWER_OF_TWO_GEOMETRY_CACHE.get(power_of_two_geometry_slot(modulus_bits)?)
+}
+
+/// Returns the set-associative cache bucket for a non-power-of-two width.
+#[cfg(feature = "std")]
+fn irregular_geometry_cache_set(modulus_bits: usize) -> Option<&'static IrregularGeometryCacheSet> {
+    (!modulus_bits.is_power_of_two())
+        .then(|| IRREGULAR_GEOMETRY_CACHE.get(irregular_geometry_slot(modulus_bits)))?
+}
+
+#[cfg(all(test, feature = "std"))]
+/// Exposes the cache family and slot to the planner regression tests.
+pub fn geometry_cache_location(modulus_bits: usize) -> (bool, usize) {
+    power_of_two_geometry_slot(modulus_bits).map_or_else(
+        || (false, irregular_geometry_slot(modulus_bits)),
+        |slot| (true, slot),
+    )
+}
+
+#[cfg(all(test, feature = "std"))]
+/// Reports whether the exact width currently has a cached geometry.
+pub fn geometry_cache_contains(modulus_bits: usize) -> bool {
+    Geometry::cached(modulus_bits).is_some()
+}
 
 /// A parameter set for the recursive Fermat-ring FFT algorithm.
 ///
 /// Plain arithmetic data, so it is `Copy`: the transform takes its geometry by
 /// value rather than borrowing it, which keeps a caller-forced plan and a
 /// planner-derived one interchangeable at the call site.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct FftPlan {
     pub modulus_bits: usize,
     pub transform_len: usize,
@@ -66,13 +179,10 @@ pub struct FftPlan {
     pub inner_bits: usize,
     pub inner_cl: usize,
     /// Pre-twist step in *half-bit* units: `2 * inner_bits / transform_len`.
-    /// Odd values carry a `sqrt(2)` factor; see `ring::fermat_shift_half`.
+    /// Odd values carry a `sqrt(2)` factor; see `SsaRing::mul_sqrt2`.
     pub twist_step_half: usize,
     pub omega_shift: usize,
     pub mat_limbs: usize,
-    pub trans_len: usize,
-    pub sqr_scratch_size: usize,
-    pub prod_scratch_size: usize,
     pub recon_len: usize,
 }
 
@@ -106,8 +216,8 @@ impl FftPlan {
         Some(Self::from_geometry(modulus_bits, &geometry))
     }
 
-    /// Scratch for the path an unforced `fft_mul_mod_slices` call would take at
-    /// this ring width.
+    /// Scratch for the path an unforced executor-aware FFT multiplication call
+    /// would take at this ring width.
     pub fn required_mul_scratch(&self) -> usize {
         if self.modulus_bits <= SSA_BASE_MODULUS_BITS {
             SsaPointwise::fermat_basecase_scratch_len(self.modulus_bits)
@@ -121,15 +231,92 @@ impl FftPlan {
     /// A ring narrow enough for the basecase still runs the transform when the
     /// caller forces it, and the transform layout is not bounded by the
     /// basecase product buffer, so the two must be asked for separately.
-    pub const fn transform_mul_scratch(&self) -> usize {
-        self.mat_limbs
-            .wrapping_mul(2)
-            .wrapping_add(self.trans_len)
-            // Two coefficients: a half-bit twist stages one `sqrt(2)` factor
-            // alongside the shift's own temporary.
-            .wrapping_add(self.inner_cl.wrapping_mul(2))
-            .wrapping_add(self.prod_scratch_size)
-            .wrapping_add(self.recon_len)
+    pub fn transform_mul_scratch(&self) -> usize {
+        self.transform_mul_scratch_for_slots(2)
+    }
+
+    /// Scratch for a product transform with `slots` twiddle slots per operand.
+    ///
+    /// Two slots are the structural minimum: the radix-4 recursion can only fork
+    /// when each child owns one private staging coefficient. Larger executor
+    /// policies reserve a balanced contiguous arena for additional child ranges.
+    pub fn transform_mul_scratch_for_slots(&self, slots: usize) -> usize {
+        let slot_count = slots.max(1);
+        let Some(matrix) = self.mat_limbs.checked_mul(2) else {
+            return usize::MAX;
+        };
+        let Some(twiddle) = self
+            .inner_cl
+            .checked_mul(slot_count)
+            .and_then(|n| n.checked_mul(2))
+        else {
+            return usize::MAX;
+        };
+        matrix
+            .checked_add(twiddle)
+            .and_then(|n| n.checked_add(self.pointwise_scratch_for_parallelism(slot_count)))
+            .and_then(|n| n.checked_add(self.recon_len))
+            .unwrap_or(usize::MAX)
+    }
+
+    /// Scratch for all pointwise leaves at this transform's scheduling width.
+    /// Each leaf owns a complete product arena; nested coefficient products run
+    /// sequentially so they cannot oversubscribe the outer executor.
+    pub fn pointwise_scratch_for_parallelism(&self, parallelism: usize) -> usize {
+        let workers = Self::pointwise_parallelism_budget(self.transform_len, parallelism);
+        let leaf_len = self.transform_len.div_ceil(workers).max(1);
+        let leaves = Self::pointwise_leaf_count(self.transform_len, leaf_len);
+        // `usize::MAX` is the planner's overflow sentinel. Each leaf owns one
+        // coefficient plus the sequential nested-product arena.
+        self.inner_cl
+            .saturating_add(self.nested_transform_scratch())
+            .saturating_mul(leaves)
+    }
+
+    /// Bounds an executor hint by the number of independent coefficients.
+    pub const fn pointwise_parallelism_budget(transform_len: usize, requested: usize) -> usize {
+        let request = if requested == 0 { 1 } else { requested };
+        let bounded = if request > transform_len {
+            transform_len
+        } else {
+            request
+        };
+        if bounded == 0 { 1 } else { bounded }
+    }
+
+    /// Counts the coefficient-aligned leaves produced by a pointwise splitter.
+    pub fn pointwise_leaf_count(transform_len: usize, leaf_len: usize) -> usize {
+        let leaf_width = leaf_len.max(1);
+        if transform_len <= leaf_width {
+            1
+        } else {
+            let left = transform_len.div_euclid(2);
+            Self::pointwise_leaf_count(left, leaf_width).saturating_add(Self::pointwise_leaf_count(
+                transform_len.saturating_sub(left),
+                leaf_width,
+            ))
+        }
+    }
+
+    /// Returns the per-operand twiddle-slot budget for an executor.
+    ///
+    /// The budget is bounded by both the executor hint and transform width, then
+    /// rounded up to the next power of two so a non-power-of-two executor is not
+    /// artificially under-filled by the binary transform tree. A two-slot
+    /// minimum is structural: operand splitting and odd half-bit twists require
+    /// a staging coefficient plus one factor coefficient even when execution is
+    /// sequential.
+    pub const fn parallel_slots(&self, parallelism: usize) -> usize {
+        let budget = Self::pointwise_parallelism_budget(self.transform_len, parallelism);
+        if self.transform_len <= 1 {
+            return budget;
+        }
+        let target = if budget < 2 { 2 } else { budget };
+        let mut slots = 1;
+        while slots < target {
+            slots = slots.saturating_mul(2);
+        }
+        slots
     }
 
     pub fn required_sqr_scratch(&self) -> usize {
@@ -141,36 +328,49 @@ impl FftPlan {
     }
 
     /// Scratch for the squaring transform path specifically.
-    pub const fn transform_sqr_scratch(&self) -> usize {
+    pub fn transform_sqr_scratch(&self) -> usize {
+        self.transform_sqr_scratch_for_slots(2)
+    }
+
+    /// Scratch for a square transform with `slots` twiddle slots.
+    pub fn transform_sqr_scratch_for_slots(&self, slots: usize) -> usize {
+        let slot_count = slots.max(1);
+        let Some(twiddle) = self.inner_cl.checked_mul(slot_count) else {
+            return usize::MAX;
+        };
         self.mat_limbs
-            .wrapping_add(self.trans_len)
-            // See `transform_mul_scratch`.
-            .wrapping_add(self.inner_cl.wrapping_mul(2))
-            .wrapping_add(self.sqr_scratch_size)
-            .wrapping_add(self.recon_len)
+            .checked_add(twiddle)
+            .and_then(|n| n.checked_add(self.pointwise_scratch_for_parallelism(slot_count)))
+            .and_then(|n| n.checked_add(self.recon_len))
+            .unwrap_or(usize::MAX)
+    }
+
+    /// Computes the nested coefficient scratch needed by the pointwise stage.
+    ///
+    /// Nested coefficient products use a sequential child executor, so their
+    /// scratch stays at the one-worker baseline and cannot oversubscribe the
+    /// outer executor. Planning that nested geometry here keeps the check at
+    /// the outer scratch boundary.
+    fn nested_transform_scratch(&self) -> usize {
+        if self.inner_bits <= SSA_BASE_MODULUS_BITS {
+            SsaPointwise::fermat_basecase_scratch_len(self.inner_bits)
+        } else {
+            let nested_plan = Self::new(self.inner_bits);
+            // Even a sequential outer executor reserves the two structural
+            // twiddle slots used by the transform entry point.
+            nested_plan.transform_mul_scratch_for_slots(2)
+        }
     }
 
     /// Expands a validated geometry into the full scratch-aware plan.
     fn from_geometry(modulus_bits: usize, geometry: &Geometry) -> Self {
         let cl = SsaRing::coeff_limbs(modulus_bits);
         let inner_cl = SsaRing::coeff_limbs(geometry.inner_bits);
-        let mat_limbs = geometry.transform_len.wrapping_mul(inner_cl);
-
-        let trans_len = if geometry.transform_log >= SSA_FOUR_STEP_MIN_LOG {
-            mat_limbs
-        } else {
-            0
-        };
-
-        let bc_len = if geometry.inner_bits <= SSA_BASE_MODULUS_BITS {
-            SsaPointwise::fermat_basecase_scratch_len(geometry.inner_bits)
-        } else {
-            Self::new(geometry.inner_bits).required_mul_scratch()
-        };
-
-        let sqr_scratch_size = inner_cl.wrapping_add(bc_len);
-        let prod_scratch_size = inner_cl.wrapping_add(bc_len);
-        let recon_len = cl.wrapping_add(inner_cl).wrapping_mul(2).max(cl);
+        let mat_limbs = geometry.transform_len.saturating_mul(inner_cl);
+        let recon_len = cl
+            .checked_add(inner_cl)
+            .and_then(|n| n.checked_mul(2))
+            .map_or(usize::MAX, |n| n.max(cl));
 
         Self {
             modulus_bits,
@@ -184,27 +384,20 @@ impl FftPlan {
             // exactly the half-bit twist step.
             omega_shift: geometry.twist_step_half,
             mat_limbs,
-            trans_len,
-            sqr_scratch_size,
-            prod_scratch_size,
             recon_len,
         }
     }
 }
 
-// `SSA_FOUR_STEP_MIN_LOG` is the first transform exponent that uses the
-// cache-blocked four-step decomposition. Its two transposes repay themselves
-// only after the transform exceeds a target-dependent cache boundary.
 /// The geometric core of a plan: everything derived purely from the transform
 /// exponent and the ring width, with no scratch accounting.
+#[derive(Clone, Copy)]
 pub struct Geometry {
     pub transform_len: usize,
     pub transform_log: usize,
     pub chunk_bits: usize,
     pub inner_bits: usize,
     pub twist_step_half: usize,
-    #[cfg(target_has_atomic = "8")]
-    pub whole_step: bool,
 }
 
 impl Geometry {
@@ -226,69 +419,41 @@ impl Geometry {
             return geometry;
         }
 
-        let tuned_exponent = SSA_GEOMETRY_EXPONENTS
-            .iter()
-            .find(|&&(bits, _)| bits == modulus_bits)
-            .map(|&(_, exponent)| exponent)
-            .filter(|exponent| *exponent != 0)
-            .map(u32::from);
-        let geometry = tuned_exponent
-            .and_then(|exponent| forced_geometry(modulus_bits, exponent))
-            .or_else(|| SsaPlan::best_exponent(modulus_bits, 0).map(|(_, geometry)| geometry))
-            .unwrap_or_else(|| Self::two_point(modulus_bits));
-        #[cfg(target_has_atomic = "8")]
+        let geometry = SsaPlan::best_exponent(modulus_bits, 0)
+            .map_or_else(|| Self::two_point(modulus_bits), |(_, geometry)| geometry);
+        #[cfg(feature = "std")]
         geometry.cache(modulus_bits);
         geometry
     }
 
-    /// Reads the optional planner cache on targets with byte atomics.
-    #[cfg(target_has_atomic = "8")]
+    /// Reads the planner cache on std builds.
+    #[cfg(feature = "std")]
     fn cached(modulus_bits: usize) -> Option<Self> {
-        let slot = if modulus_bits.is_power_of_two() {
-            #[allow(
-                clippy::as_conversions,
-                reason = "a usize trailing-zero count is strictly below LIMB_BITS"
-            )]
-            POWER_OF_TWO_GEOMETRIES.get(modulus_bits.trailing_zeros() as usize)
-        } else {
-            None
-        }?;
-        let encoded = slot.load(Ordering::Relaxed);
-        if encoded == 0 {
-            return None;
+        if let Some(entry) = power_of_two_geometry_entry(modulus_bits) {
+            return entry.get().map(|cached| cached.geometry);
         }
-        let payload = encoded.wrapping_sub(1);
-        let exponent = u32::from(payload.wrapping_shr(1));
-        let whole_step = payload & 1 != 0;
-        Self::for_exponent(exponent, modulus_bits, whole_step)
+        irregular_geometry_cache_set(modulus_bits)?.get(modulus_bits)
     }
 
-    /// Recomputes plans on architectures that cannot implement a byte cache.
-    #[cfg(not(target_has_atomic = "8"))]
+    /// Recomputes plans on `no_std` builds, which have no `OnceLock`.
+    #[cfg(not(feature = "std"))]
     const fn cached(_modulus_bits: usize) -> Option<Self> {
         None
     }
 
-    /// Stores this geometry in the optional power-of-two planner cache.
-    #[cfg(target_has_atomic = "8")]
+    /// Stores this geometry in the planner cache.
+    #[cfg(feature = "std")]
     fn cache(&self, modulus_bits: usize) {
-        if modulus_bits.is_power_of_two() {
-            #[allow(
-                clippy::as_conversions,
-                clippy::cast_possible_truncation,
-                reason = "a valid transform exponent and its alignment bit fit in u8"
-            )]
-            let encoded = ((self.transform_log as u8) << 1)
-                .wrapping_add(u8::from(self.whole_step))
-                .wrapping_add(1);
-            #[allow(
-                clippy::as_conversions,
-                reason = "a usize trailing-zero count is strictly below LIMB_BITS"
-            )]
-            if let Some(slot) = POWER_OF_TWO_GEOMETRIES.get(modulus_bits.trailing_zeros() as usize)
-            {
-                slot.store(encoded, Ordering::Relaxed);
-            }
+        let entry = CachedGeometry {
+            modulus_bits,
+            geometry: *self,
+        };
+        if let Some(slot) = power_of_two_geometry_entry(modulus_bits) {
+            // A racing writer published first; both computed the same pure
+            // function of this build's thresholds, so the incumbent stays.
+            let _published = slot.set(entry);
+        } else if let Some(set) = irregular_geometry_cache_set(modulus_bits) {
+            set.insert(entry);
         }
     }
 
@@ -319,8 +484,6 @@ impl Geometry {
             inner_bits,
             // `2 * inner_bits / transform_len` at `transform_len == 2`.
             twist_step_half: inner_bits,
-            #[cfg(target_has_atomic = "8")]
-            whole_step: true,
         }
     }
 
@@ -401,8 +564,6 @@ impl Geometry {
             chunk_bits,
             inner_bits,
             twist_step_half,
-            #[cfg(target_has_atomic = "8")]
-            whole_step,
         })
     }
 }
@@ -419,15 +580,14 @@ impl Geometry {
 /// Rounding instead to a multiple of the nested transform length is the same
 /// guarantee at a fraction of the cost. The nested length is estimated from
 /// [`SsaPlan::search_centre`] rather than from a full nested search, because the
-/// search prices geometries by calling back into this function; widening the
-/// estimate by [`NESTED_SEARCH_RADIUS`] keeps the whole window the nested
-/// planner will scan reachable. Rounding can move the estimate, so the
-/// adjustment is iterated to a fixed point, bounded because each round strictly
-/// increases the width and `checked_add` fails before it can run away.
+/// search prices geometries by calling back into this function. Rounding can move
+/// the estimate, so the adjustment is iterated to a fixed point, bounded because
+/// each round strictly increases the width and `checked_add` fails before it can
+/// run away.
 fn nested_ring_bits(width: usize, alignment: usize) -> Option<usize> {
     let mut width = width;
     loop {
-        let nested_log = SsaPlan::search_centre(width).saturating_add(NESTED_SEARCH_RADIUS);
+        let nested_log = SsaPlan::search_centre(width).saturating_add(2);
         // A nested length that does not fit `usize` cannot describe a transform
         // on this target, so the alignment it would demand is not a constraint.
         let nested_len = 1_usize.checked_shl(nested_log).unwrap_or(1);

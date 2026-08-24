@@ -51,7 +51,6 @@ const SSA_FLAG: &str = "--score-ssa";
 const SSA_PREFIX: &str = "MP_ANAFIS_SSA_SCORE=";
 const SSA_COARSE_FLAG: &str = "--score-ssa-coarse";
 const SSA_COARSE_PREFIX: &str = "MP_ANAFIS_SSA_COARSE_SCORE=";
-const SSA_RING_PREFIX: &str = "MP_ANAFIS_SSA_RING_SCORE=";
 const TOOM85_FLAG: &str = "--score-toom85";
 const TOOM85_PREFIX: &str = "MP_ANAFIS_TOOM85_SCORE=";
 const TOOM85_MUL_FLAG: &str = "--score-toom85-mul";
@@ -64,6 +63,21 @@ const PRODUCTION_DIVISION_FLAG: &str = "--score-production-division";
 const PRODUCTION_DIVISION_PREFIX: &str = "MP_ANAFIS_PRODUCTION_DIVISION_SCORE=";
 const PRODUCTION_FLAG: &str = "--score-production";
 const PRODUCTION_PREFIX: &str = "MP_ANAFIS_PRODUCTION_SCORE=";
+const INTERNAL_TUNE_FEATURES: &str = "_internal-tune";
+
+/// Rebuild-worker score domains. Keeping the worker flag and output prefix
+/// together prevents phase code from duplicating the subprocess protocol.
+#[derive(Clone, Copy)]
+pub enum ScoreDomain {
+    Ssa,
+    SsaCoarse,
+    Toom85,
+    Toom85Mul,
+    Burnikel,
+    Newton,
+    ProductionDivision,
+    Production,
+}
 
 /// Reusable subprocess scoring with one cache file.
 pub struct CandidateHarness {
@@ -86,74 +100,24 @@ impl CandidateHarness {
         }
     }
 
-    /// Forced-SSA cell timings for a candidate profile, cached.
-    pub fn score_ssa(&mut self, profile: &TuningProfile) -> Option<Vec<u128>> {
-        self.score(profile, SSA_FLAG, SSA_PREFIX)
-    }
-
-    /// Reduced-sample forced-SSA timings used only to shortlist candidates.
-    pub fn score_ssa_coarse(&mut self, profile: &TuningProfile) -> Option<Vec<u128>> {
-        self.score(profile, SSA_COARSE_FLAG, SSA_COARSE_PREFIX)
-    }
-
-    /// Precise timings for only the cells affected by one geometry ring pin.
-    pub fn score_ssa_ring(
-        &mut self,
-        profile: &TuningProfile,
-        ring_bits: usize,
-    ) -> Option<Vec<u128>> {
-        self.score(
-            profile,
-            &format!("--score-ssa-ring={ring_bits}"),
-            SSA_RING_PREFIX,
-        )
-    }
-
-    /// Reduced-sample timings for the cells affected by one geometry ring pin.
-    pub fn score_ssa_ring_coarse(
-        &mut self,
-        profile: &TuningProfile,
-        ring_bits: usize,
-    ) -> Option<Vec<u128>> {
-        self.score(
-            profile,
-            &format!("--score-ssa-ring-coarse={ring_bits}"),
-            SSA_RING_PREFIX,
-        )
-    }
-
-    /// Forced Toom-8.5 timings for a candidate profile, cached.
-    pub fn score_toom85(&mut self, profile: &TuningProfile) -> Option<Vec<u128>> {
-        self.score(profile, TOOM85_FLAG, TOOM85_PREFIX)
-    }
-
-    /// Forced Toom-8.5 multiplication timings for multiplication-only knobs.
-    pub fn score_toom85_mul(&mut self, profile: &TuningProfile) -> Option<Vec<u128>> {
-        self.score(profile, TOOM85_MUL_FLAG, TOOM85_MUL_PREFIX)
-    }
-
-    /// Forced Burnikel-Ziegler timings for a candidate profile, cached.
-    pub fn score_burnikel(&mut self, profile: &TuningProfile) -> Option<Vec<u128>> {
-        self.score(profile, BURNIKEL_FLAG, BURNIKEL_PREFIX)
-    }
-
-    /// Forced Newton-Raphson timings for a candidate profile, cached.
-    pub fn score_newton(&mut self, profile: &TuningProfile) -> Option<Vec<u128>> {
-        self.score(profile, NEWTON_FLAG, NEWTON_PREFIX)
-    }
-
-    /// Production-division timings for coupled dispatch-threshold candidates.
-    pub fn score_production_division(&mut self, profile: &TuningProfile) -> Option<Vec<u128>> {
-        self.score(
-            profile,
-            PRODUCTION_DIVISION_FLAG,
-            PRODUCTION_DIVISION_PREFIX,
-        )
-    }
-
-    /// Production-dispatch cell timings for a candidate profile, cached.
-    pub fn score_production(&mut self, profile: &TuningProfile) -> Option<Vec<u128>> {
-        self.score(profile, PRODUCTION_FLAG, PRODUCTION_PREFIX)
+    /// Score a candidate in one typed rebuild-worker domain, using the
+    /// persistent machine/context cache.
+    pub fn score(&mut self, profile: &TuningProfile, domain: ScoreDomain) -> Option<Vec<u128>> {
+        let (flag, prefix, features) = match domain {
+            ScoreDomain::Ssa => (SSA_FLAG, SSA_PREFIX, INTERNAL_TUNE_FEATURES),
+            ScoreDomain::SsaCoarse => (SSA_COARSE_FLAG, SSA_COARSE_PREFIX, INTERNAL_TUNE_FEATURES),
+            ScoreDomain::Toom85 => (TOOM85_FLAG, TOOM85_PREFIX, INTERNAL_TUNE_FEATURES),
+            ScoreDomain::Toom85Mul => (TOOM85_MUL_FLAG, TOOM85_MUL_PREFIX, INTERNAL_TUNE_FEATURES),
+            ScoreDomain::Burnikel => (BURNIKEL_FLAG, BURNIKEL_PREFIX, INTERNAL_TUNE_FEATURES),
+            ScoreDomain::Newton => (NEWTON_FLAG, NEWTON_PREFIX, INTERNAL_TUNE_FEATURES),
+            ScoreDomain::ProductionDivision => (
+                PRODUCTION_DIVISION_FLAG,
+                PRODUCTION_DIVISION_PREFIX,
+                INTERNAL_TUNE_FEATURES,
+            ),
+            ScoreDomain::Production => (PRODUCTION_FLAG, PRODUCTION_PREFIX, INTERNAL_TUNE_FEATURES),
+        };
+        self.score_worker(profile, flag, prefix, features)
     }
 
     /// Interleaved forced-tier timings compiled with `profile` active for all
@@ -176,7 +140,12 @@ impl CandidateHarness {
             quality_name,
             specification.iterations,
         );
-        let values = self.score(profile, &flag, "MP_ANAFIS_TIER_PAIR=")?;
+        let values = self.score_worker(
+            profile,
+            &flag,
+            "MP_ANAFIS_TIER_PAIR=",
+            INTERNAL_TUNE_FEATURES,
+        )?;
         let [baseline_time, candidate_time] = values.as_slice() else {
             return None;
         };
@@ -203,7 +172,12 @@ impl CandidateHarness {
             quality_name,
             specification.iterations,
         );
-        let values = self.score(profile, &flag, "MP_ANAFIS_FMT_PAIR=")?;
+        let values = self.score_worker(
+            profile,
+            &flag,
+            "MP_ANAFIS_FMT_PAIR=",
+            INTERNAL_TUNE_FEATURES,
+        )?;
         let [baseline_time, candidate_time] = values.as_slice() else {
             return None;
         };
@@ -215,9 +189,16 @@ impl CandidateHarness {
         self.store.save();
     }
 
-    fn score(&mut self, profile: &TuningProfile, flag: &str, prefix: &str) -> Option<Vec<u128>> {
+    fn score_worker(
+        &mut self,
+        profile: &TuningProfile,
+        flag: &str,
+        prefix: &str,
+        features: &str,
+    ) -> Option<Vec<u128>> {
         let mut key_bytes = Vec::new();
         key_bytes.extend_from_slice(flag.as_bytes());
+        key_bytes.extend_from_slice(features.as_bytes());
         key_bytes.extend_from_slice(&self.context_hash.to_le_bytes());
         key_bytes.extend_from_slice(&profile_hash(profile).to_le_bytes());
         let key = fnv1a(&key_bytes);
@@ -225,7 +206,7 @@ impl CandidateHarness {
             println!("  (scored by an earlier run of this profile)");
             return Some(cached.to_vec());
         }
-        let measurements = run_worker(profile, flag, prefix, self.file.path())?;
+        let measurements = run_worker(profile, flag, prefix, features, &self.file.path)?;
         self.store.insert(key, measurements.clone());
         Some(measurements)
     }
@@ -257,8 +238,17 @@ pub fn relative_score(measurements: &[u128], baseline: &[u128], weights: &[u32])
     weighted.div_euclid(total_weight.max(1))
 }
 
-fn run_worker(profile: &TuningProfile, flag: &str, prefix: &str, path: &Path) -> Option<Vec<u128>> {
-    write_candidate(profile, path)?;
+fn run_worker(
+    profile: &TuningProfile,
+    flag: &str,
+    prefix: &str,
+    features: &str,
+    path: &Path,
+) -> Option<Vec<u128>> {
+    let source = profile.render("// Temporary profile generated by mp-tune");
+    let mut file = File::create(path).ok()?;
+    file.write_all(source.as_bytes()).ok()?;
+    drop(file);
     let cargo = env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"));
     let output = Command::new(cargo)
         .args([
@@ -268,7 +258,7 @@ fn run_worker(profile: &TuningProfile, flag: &str, prefix: &str, path: &Path) ->
             "--bin",
             "mp-tune",
             "--features",
-            "_internal-tune",
+            features,
             "--",
             flag,
         ])
@@ -292,12 +282,6 @@ fn run_worker(profile: &TuningProfile, flag: &str, prefix: &str, path: &Path) ->
     (!measurements.is_empty()).then_some(measurements)
 }
 
-fn write_candidate(profile: &TuningProfile, path: &Path) -> Option<()> {
-    let source = profile.render("// Temporary profile generated by mp-tune");
-    let mut file = File::create(path).ok()?;
-    file.write_all(source.as_bytes()).ok()
-}
-
 struct CandidateFile {
     path: PathBuf,
 }
@@ -306,10 +290,6 @@ impl CandidateFile {
     fn new() -> Self {
         let path = env::temp_dir().join(format!("mp-anafis-tuning-{}.rs", std::process::id()));
         Self { path }
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
     }
 }
 

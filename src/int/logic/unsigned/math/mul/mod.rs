@@ -2,13 +2,12 @@
 //!
 //! Implemented tiers are kept in independent modules so each algorithm can
 //! evolve, benchmark, and prove its own scratch invariants without growing a
-//! monolithic multiplication file. SSA is the active transform tier; NTT/CRT
-//! remains registered for development and benchmark work but is disabled by its
-//! generated threshold.
+//! monolithic multiplication file. SSA is the terminal transform tier; no
+//! higher multiplication backend is registered in production or tuning.
 
 use super::{
-    Addition, ArchKernels, DoubleLimb, INLINE_LIMBS, InternalMpUint, KARATSUBA_THRESHOLD,
-    LIMB_BITS, Limb, NTT_THRESHOLD, SQR_KARATSUBA_THRESHOLD, SQR_TOOM_COOK_4_THRESHOLD,
+    Addition, ArchKernels, BALANCED_TOOM8_THRESHOLD, DoubleLimb, INLINE_LIMBS, InternalMpUint,
+    KARATSUBA_THRESHOLD, LIMB_BITS, Limb, SQR_KARATSUBA_THRESHOLD, SQR_TOOM_COOK_4_THRESHOLD,
     SQR_TOOM_COOK_6_THRESHOLD, SQR_TOOM_COOK_85_THRESHOLD, SQR_TOOM_COOK_THRESHOLD, ScratchBuffer,
     TOOM_COOK_4_THRESHOLD, TOOM_COOK_6_THRESHOLD, TOOM_COOK_85_THRESHOLD, TOOM_COOK_THRESHOLD,
     TOOM8_FULL_GUARD_PRODUCT_MIN_SPLIT_LIMBS, TOOM85_PAIRED_RECONSTRUCTION_MIN_LIMBS,
@@ -17,16 +16,16 @@ use super::{
 #[cfg(not(target_pointer_width = "16"))]
 use super::{
     SQR_SSA_THRESHOLD, SSA_BASE_MODULUS_BITS, SSA_BASECASE_COST_WEIGHT_16THS,
-    SSA_BNM1_BASECASE_LIMBS, SSA_COEFFICIENT_VISIT_OVERHEAD, SSA_DIRECT_SHIFT_MAX_LIMBS,
-    SSA_FOUR_STEP_MIN_LOG, SSA_GEOMETRY_EXPONENTS, SSA_NEGACYCLIC_FACTOR3_THRESHOLD,
-    SSA_NEGACYCLIC_FACTOR5_THRESHOLD, SSA_NESTED_COST_PENALTY_16THS, SSA_SQRT2_TWIST_PASSES,
-    SSA_THRESHOLD, SSA_TRANSPOSE_TILE_LIMBS,
+    SSA_BNM1_BASECASE_LIMBS, SSA_COEFFICIENT_VISIT_OVERHEAD,
+    SSA_DIRECT_FERMAT_PARALLEL_MIN_WORKERS, SSA_DIRECT_FERMAT_PARALLEL_THRESHOLD,
+    SSA_DIRECT_SHIFT_MAX_LIMBS, SSA_NEGACYCLIC_FACTOR3_THRESHOLD, SSA_NEGACYCLIC_FACTOR5_THRESHOLD,
+    SSA_NESTED_COST_PENALTY_16THS, SSA_PARALLEL_MIN_LIMB_WORK, SSA_THRESHOLD,
 };
 
 use recursive::Recursive;
 use shared::{AddMulKernel, SharedEval};
 #[cfg(all(feature = "_internal-tune", not(target_pointer_width = "16")))]
-use ssa::{FftPlan, SsaCrt, SsaPlan, SsaRing, SsaTransform};
+use ssa::{FftPlan, SsaCrt, SsaRing, SsaTransform};
 
 mod basecase;
 mod dispatch;
@@ -34,7 +33,6 @@ mod entry;
 mod karatsuba;
 mod lopsided;
 mod low;
-mod ntt;
 mod recursive;
 mod shared;
 #[cfg(not(target_pointer_width = "16"))]
@@ -55,9 +53,10 @@ pub use entry::MulScratch;
 pub use karatsuba::Karatsuba;
 pub use lopsided::Lopsided;
 pub use low::LowProduct;
-pub use ntt::Ntt;
 #[cfg(not(target_pointer_width = "16"))]
 pub use ssa::{Ssa, TransformChoice};
+#[cfg(all(feature = "_internal-tune", not(target_pointer_width = "16")))]
+pub use ssa::{SsaMultiplicationPlan, SsaSquaringPlan};
 pub use toom3::Toom3;
 pub use toom4::Toom4;
 pub use toom6::Toom6;

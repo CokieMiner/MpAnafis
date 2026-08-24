@@ -202,14 +202,14 @@ fn evaluate_even_odd(
     point: EvaluationPoint,
     kernel: AddMulKernel,
 ) -> bool {
-    assert_eq!(even.len(), odd.len(), "evaluation widths must match");
-    assert!(split_len > 0, "Toom-8 parts must be nonempty");
-    assert!(
+    debug_assert_eq!(even.len(), odd.len(), "evaluation widths must match");
+    debug_assert!(split_len > 0, "Toom-8 parts must be nonempty");
+    debug_assert!(
         split_len < even.len(),
         "each Toom-8 part must fit below the evaluation guard"
     );
-    assert!(point.shift <= 3, "Toom-8 point shift exceeds eight");
-    assert!(
+    debug_assert!(point.shift <= 3, "Toom-8 point shift exceeds eight");
+    debug_assert!(
         operand.len().div_ceil(split_len) <= 9,
         "Toom-8.5 operand has more than nine parts"
     );

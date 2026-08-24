@@ -73,6 +73,20 @@ fn reference_left_shift_into(dst: &mut [Limb], src: &[Limb], shift: u32) -> Limb
     carry
 }
 
+#[expect(
+    clippy::indexing_slicing,
+    reason = "the reference snapshots the validated source prefix before writing its overlapping destination"
+)]
+fn reference_left_shift_overlapping(
+    limbs: &mut [Limb],
+    len: usize,
+    offset: usize,
+    shift: u32,
+) -> Limb {
+    let source = limbs[..len].to_vec();
+    reference_left_shift_into(&mut limbs[offset..offset.wrapping_add(len)], &source, shift)
+}
+
 #[allow(
     clippy::indexing_slicing,
     reason = "the test constructs equal-length spans and the loop is bounded by src.len()"
@@ -178,6 +192,39 @@ proptest! {
     }
 
     #[test]
+    fn prop_left_shift_overlapping_matches_reference(
+        mut source in proptest::collection::vec(any::<Limb>(), 0..=129),
+        offset in 0_usize..=64,
+        dirty in any::<Limb>(),
+        shift in 1_u32..Limb::BITS,
+    ) {
+        let len = source.len();
+        source.extend(vec![dirty; offset]);
+        let mut expected = source;
+        let mut actual = expected.clone();
+        let expected_carry = reference_left_shift_overlapping(
+            &mut expected,
+            len,
+            offset,
+            shift,
+        );
+
+        // SAFETY: actual contains exactly offset + len initialized writable
+        // limbs, and the generated shift is in 1..Limb::BITS.
+        let actual_carry = unsafe {
+            ArchKernels::lshift_overlapping_unchecked(
+                actual.as_mut_ptr(),
+                len,
+                offset,
+                shift,
+            )
+        };
+
+        prop_assert_eq!(actual, expected);
+        prop_assert_eq!(actual_carry, expected_carry);
+    }
+
+    #[test]
     fn prop_sub_shifted_high_matches_reference(
         (initial, source) in super::equal_length_limb_vecs(0..=129),
         shift in 1_u32..Limb::BITS,
@@ -211,7 +258,13 @@ proptest! {
         let left = unsafe { ArchKernels::lshift_unchecked(core::ptr::null_mut(), 0, shift) };
         // SAFETY: the identical zero-length and shift proof applies here.
         let right = unsafe { ArchKernels::rshift_unchecked(core::ptr::null_mut(), 0, shift) };
+        // SAFETY: the overlap kernel also returns before dereferencing when len
+        // is zero; offset zero keeps the nominal span empty.
+        let overlapping = unsafe {
+            ArchKernels::lshift_overlapping_unchecked(core::ptr::null_mut(), 0, 0, shift)
+        };
         prop_assert_eq!(left, 0);
         prop_assert_eq!(right, 0);
+        prop_assert_eq!(overlapping, 0);
     }
 }

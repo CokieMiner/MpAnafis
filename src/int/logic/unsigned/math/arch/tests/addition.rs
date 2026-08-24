@@ -420,3 +420,87 @@ proptest! {
         prop_assert_eq!(actual_carries, expected_carries);
     }
 }
+
+/// Exercise the AVX2 implementation directly; the normal property above
+/// follows runtime selection and can therefore choose ADX on this host.
+#[cfg(all(
+    feature = "std",
+    target_arch = "x86_64",
+    target_pointer_width = "64",
+    not(miri)
+))]
+#[test]
+fn avx2_add_sub_from_preserves_carries_and_exact_alias() {
+    if !std::arch::is_x86_feature_detected!("avx2") {
+        return;
+    }
+    let patterns = [
+        (Limb::MIN, Limb::MIN),
+        (Limb::MAX, Limb::MIN),
+        (Limb::MIN, Limb::MAX),
+        (Limb::MAX, Limb::MAX),
+        (1, Limb::MAX),
+        (Limb::MAX, 1),
+    ];
+    let mut cases = Vec::new();
+    for len in 0..=37_usize {
+        for &(left_limb, right_limb) in &patterns {
+            cases.push((vec![left_limb; len], vec![right_limb; len]));
+        }
+    }
+    let mut random_state = 0x9e37_79b9_7f4a_7c15_usize;
+    for len in [4_usize, 5, 7, 8, 9, 16] {
+        for _ in 0..64 {
+            let mut left = Vec::with_capacity(len);
+            let mut source = Vec::with_capacity(len);
+            for _ in 0..len {
+                random_state ^= random_state.wrapping_shl(13);
+                random_state ^= random_state.wrapping_shr(7);
+                random_state ^= random_state.wrapping_shl(17);
+                left.push(random_state);
+                random_state ^= random_state.rotate_left(29);
+                source.push(random_state);
+            }
+            cases.push((left, source));
+        }
+    }
+    for (left, source) in cases {
+        let mut expected_sum = left.clone();
+        let mut expected_difference = source.clone();
+        let expected_carries = reference_add_sub(&mut expected_sum, &mut expected_difference);
+
+        let len = left.len();
+        let mut actual_sum = left.clone();
+        let mut actual_difference = vec![0; len];
+        // SAFETY: every span has `len` initialized limbs and the
+        // destination/source aliasing matches the backend contract.
+        let actual_carries = unsafe {
+            super::super::add_sub_from_limbs_unchecked::add_sub_from_limbs_unchecked_avx2_test(
+                actual_sum.as_mut_ptr(),
+                actual_difference.as_mut_ptr(),
+                source.as_ptr(),
+                len,
+            )
+        };
+        assert_eq!(actual_sum, expected_sum);
+        assert_eq!(actual_difference, expected_difference);
+        assert_eq!(actual_carries, expected_carries);
+
+        let mut aliased_sum = left;
+        let mut aliased_difference = source;
+        let aliased_source = aliased_difference.as_ptr();
+        // SAFETY: exact `difference == source` aliasing is explicitly
+        // supported, and the source is loaded before each store.
+        let aliased_carries = unsafe {
+            super::super::add_sub_from_limbs_unchecked::add_sub_from_limbs_unchecked_avx2_test(
+                aliased_sum.as_mut_ptr(),
+                aliased_difference.as_mut_ptr(),
+                aliased_source,
+                len,
+            )
+        };
+        assert_eq!(aliased_sum, expected_sum);
+        assert_eq!(aliased_difference, expected_difference);
+        assert_eq!(aliased_carries, expected_carries);
+    }
+}
