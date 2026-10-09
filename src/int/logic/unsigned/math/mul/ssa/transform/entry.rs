@@ -107,6 +107,8 @@ impl SsaTransform {
     /// exponent. The admitted ring has representable `4*mod_bits`. The initialized
     /// matrix covers `transform_len * coeff_limbs(mod_bits)` limbs, scratch
     /// contains at least one complete coefficient, and `active_chunks<=transform_len`.
+    /// Forward input slots below `active_chunks` are semi-normalized; later
+    /// slots are implicit zero and may hold arbitrary initialized data.
     #[expect(
         clippy::too_many_arguments,
         clippy::too_many_lines,
@@ -134,7 +136,8 @@ impl SsaTransform {
             if active_chunks <= half_len {
                 // SAFETY: half_len*cl is one half of the complete caller matrix.
                 let half_matrix_len = unsafe { half_len.unchecked_mul(cl) };
-                // SAFETY: active_chunks <= half_len, so upper half is initial zero.
+                // SAFETY: the complete matrix contains both halves; the declared
+                // input support makes the upper half implicit zero.
                 let (low_matrix, high_matrix) =
                     unsafe { matrix.split_at_mut_unchecked(half_matrix_len) };
                 // Independent sparse copies use the executor's worker budget;
@@ -281,6 +284,9 @@ impl SsaTransform {
     ///
     /// # Safety
     /// Preconditions identical to [`Self::fft_in_place_with_executor`].
+    /// The first DIF level has established `active_chunks<=transform_len/2`
+    /// semi-normalized slots in each half. Remaining slots are implicit zero
+    /// and may hold arbitrary initialized data.
     pub unsafe fn fft_in_place_from_stage2_with_executor<E: ParallelExecutor>(
         matrix: &mut [Limb],
         transform_len: usize,

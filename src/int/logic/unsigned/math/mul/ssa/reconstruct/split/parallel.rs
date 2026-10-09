@@ -70,7 +70,7 @@ impl SsaCoefficients {
     /// Splits and twists both halves of the zero-high first DIF stage in parallel.
     ///
     /// # Safety
-    /// The source's active chunks fit the lower half. Dimensions and complete
+    /// The source's declared active chunks fit the lower half. Dimensions and complete
     /// disjoint matrix/scratch satisfy `split_twisted_and_stage1_dif`'s contract.
     #[expect(
         clippy::too_many_arguments,
@@ -80,6 +80,7 @@ impl SsaCoefficients {
         src: &[Limb],
         matrix: &mut [Limb],
         count: usize,
+        active: usize,
         chunk: NonZeroUsize,
         cl: NonZeroUsize,
         periods: RingPeriods,
@@ -92,7 +93,7 @@ impl SsaCoefficients {
             // SAFETY: identical dimensions and complete disjoint buffers.
             return unsafe {
                 Self::split_twisted_and_stage1_dif(
-                    src, matrix, count, chunk, cl, periods, step, root, scratch,
+                    src, matrix, count, active, chunk, cl, periods, step, root, scratch,
                 )
             };
         }
@@ -101,26 +102,24 @@ impl SsaCoefficients {
         }
         let work = SplitWork::new(chunk, cl, periods, step, root);
         let half = count >> 1;
-        // SAFETY: split_twisted's contract supplies a representable source bit
-        // capacity and positive chunk width from the admitted geometry.
-        let active = unsafe { src.len().unchecked_mul(LIMB_BITS) }
-            .div_ceil(chunk.get())
-            .min(half);
+        debug_assert!(
+            active <= half,
+            "the declared input support fits each DIF child"
+        );
         // SAFETY: these products are bounded by the checked complete matrix span.
         let (half_span, active_span) =
             unsafe { (half.unchecked_mul(cl.get()), active.unchecked_mul(cl.get())) };
         // SAFETY: half_span<=count*cl<=matrix.len(); active_span<=half_span,
         // and both exact half matrices hold the complete active prefix.
-        let ((low_prefix, low_zero), (high_prefix, high_zero)) = unsafe {
+        let (low_prefix, high_prefix) = unsafe {
             let (low, high) = matrix.split_at_mut_unchecked(half_span);
             (
-                low.split_at_mut_unchecked(active_span),
-                high.split_at_mut_unchecked(active_span),
+                low.get_unchecked_mut(..active_span),
+                high.get_unchecked_mut(..active_span),
             )
         };
-        low_zero.fill(0);
-        high_zero.fill(0);
-        // SAFETY: aligned equal active halves are disjoint; all other slots are zero.
+        // SAFETY: aligned equal active halves are disjoint; the remaining slots
+        // are implicit zero and the subsequent sparse DIF never reads them.
         unsafe {
             work.run::<true, E>(src, low_prefix, high_prefix, 0, [0, 0], executor, scratch);
         }

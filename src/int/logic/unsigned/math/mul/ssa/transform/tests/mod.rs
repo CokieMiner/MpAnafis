@@ -5,4 +5,5 @@ mod fused;
 mod inverse_prefix;
 mod matrix;
 mod roundtrip;
+mod staging;
 mod truncated;

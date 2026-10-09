@@ -204,7 +204,7 @@ impl SsaCoefficients {
     /// butterfly stage across both matrix halves in a single pass.
     ///
     /// When the active operand digits occupy at most the lower half of the transform
-    /// length (`transform_len / 2`), the upper matrix half starts at zero. The first
+    /// length (`transform_len / 2`), the upper matrix half is implicitly zero. The first
     /// DIF butterfly stage is therefore `(low, high) = (low, low * w^j)`.
     ///
     /// This method extracts chunk `j`, computes `low = chunk * theta^j`, and computes
@@ -213,6 +213,8 @@ impl SsaCoefficients {
     /// and eliminates a complete DRAM read-and-rewrite pass of the matrix. Twist
     /// exponents are tracked in half-bit units modulo `4n`, so odd steps fold their
     /// `sqrt(2)` factor into the same streaming pass.
+    /// Only `active_chunks` slots in each half are written. Their remaining
+    /// physical slots are arbitrary; the sparse DIF children never read them.
     ///
     /// Returns `false` only when `transform_len < 2`.
     ///
@@ -221,6 +223,7 @@ impl SsaCoefficients {
     /// `matrix` contains at least `transform_len * SsaRing::coeff_limbs(inner_bits)` limbs,
     /// and `scratch` is a disjoint buffer of at least two complete coefficients.
     /// The chunk and ring geometry and source bit capacity satisfy `split_twisted`.
+    /// `active_chunks <= transform_len/2` bounds the source polynomial support.
     #[expect(
         clippy::too_many_arguments,
         reason = "Internal FFT staging requires explicit operand, matrix, geometry, and scratch buffers"
@@ -229,6 +232,7 @@ impl SsaCoefficients {
         src: &[Limb],
         matrix: &mut [Limb],
         transform_len: usize,
+        active_chunks: usize,
         chunk_bits: NonZeroUsize,
         cl: NonZeroUsize,
         periods: RingPeriods,
@@ -259,14 +263,14 @@ impl SsaCoefficients {
         // power-of-two transform_len; its half matrix is a valid partition.
         let (low_matrix, high_matrix) =
             unsafe { matrix.split_at_mut_unchecked(half_len.unchecked_mul(cl.get())) };
-        let half_matrix_len = low_matrix.len();
 
         let mut low_shift = 0_usize;
         let mut twiddle_shift = 0_usize;
 
-        // SAFETY: the caller validates the source's representable bit capacity.
-        let src_bits = unsafe { src.len().unchecked_mul(LIMB_BITS) };
-        let active_chunks = src_bits.div_ceil(layout.chunk_bits.get()).min(half_len);
+        debug_assert!(
+            active_chunks <= half_len,
+            "the declared input support fits each first-stage child"
+        );
 
         // SAFETY: the two complete scratch coefficients are disjoint and each
         // twist reads stage without modifying its invariant zero suffix.
@@ -323,15 +327,6 @@ impl SsaCoefficients {
             twiddle_shift = SplitLayout::add_reduced(twiddle_shift, root_step, whole_period);
         }
 
-        // SAFETY: active_chunks<=half_len, whose full matrix exists above.
-        let active_limbs = unsafe { active_chunks.unchecked_mul(cl.get()) };
-        if active_limbs < half_matrix_len {
-            // SAFETY: active_limbs <= half_matrix_len by construction.
-            unsafe {
-                low_matrix.get_unchecked_mut(active_limbs..).fill(0);
-                high_matrix.get_unchecked_mut(active_limbs..).fill(0);
-            }
-        }
         true
     }
 

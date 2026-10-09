@@ -148,6 +148,7 @@ impl SsaTransform {
                         a,
                         matrix,
                         plan.transform_len,
+                        active_chunks,
                         plan.chunk_bits,
                         plan.inner_cl,
                         plan.periods,
@@ -163,13 +164,19 @@ impl SsaTransform {
             if !fused_stage1 {
                 // The fused split handles every half-bit step, including the odd
                 // steps that carry a sqrt(2) factor.
-                // SAFETY: matrix has plan.mat_limbs and twiddle_scratch is a
-                // disjoint two-coefficient arena.
+                // SAFETY: active_chunks<=K and K*inner_cl is the complete
+                // planned matrix span, so this active input prefix fits.
+                let active_matrix = unsafe {
+                    let span = active_chunks.unchecked_mul(plan.inner_cl.get());
+                    matrix.get_unchecked_mut(..span)
+                };
+                // SAFETY: staging owns every active input slot and a disjoint
+                // two-coefficient arena. Sparse DIF never reads the omitted tail.
                 unsafe {
                     SsaCoefficients::split_twisted_with_executor(
                         a,
-                        matrix,
-                        plan.transform_len,
+                        active_matrix,
+                        active_chunks,
                         plan.chunk_bits,
                         plan.inner_cl,
                         plan.periods,

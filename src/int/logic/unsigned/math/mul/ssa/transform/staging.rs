@@ -2,7 +2,7 @@
 
 #![expect(
     unsafe_code,
-    reason = "Admitted transform plans establish staging spans, zero tails, and scratch coefficients"
+    reason = "Admitted transform plans establish staging spans, implicit zero supports, and scratch coefficients"
 )]
 
 use crate::parallel::ParallelExecutor;
@@ -36,6 +36,7 @@ impl SsaTransform {
                     src,
                     matrix,
                     plan.transform_len,
+                    active_chunks,
                     plan.chunk_bits,
                     plan.inner_cl,
                     plan.periods,
@@ -49,13 +50,19 @@ impl SsaTransform {
             false
         };
         if !fused_stage1 {
-            // SAFETY: src fits the complete matrix under the plan's chunk
-            // partition; staging initializes its coefficients and zero tail.
+            // SAFETY: active_chunks<=K and K*inner_cl is the complete planned
+            // matrix span. The declared support covers every source chunk.
+            let active_matrix = unsafe {
+                let span = active_chunks.unchecked_mul(plan.inner_cl.get());
+                matrix.get_unchecked_mut(..span)
+            };
+            // SAFETY: the active matrix owns all input coefficients; omitted
+            // slots are implicit zero and the sparse DIF never reads their tail.
             unsafe {
                 SsaCoefficients::split_twisted_with_executor(
                     src,
-                    matrix,
-                    plan.transform_len,
+                    active_matrix,
+                    active_chunks,
                     plan.chunk_bits,
                     plan.inner_cl,
                     plan.periods,
@@ -65,8 +72,9 @@ impl SsaTransform {
                 );
             }
         }
-        // SAFETY: staging produced complete coefficients. The fusion flag
-        // identifies whether the first DIF level has already been executed.
+        // SAFETY: staging established exactly the declared active support.
+        // Sparse DIF propagates its implicit zero tail without reading it;
+        // the fusion flag identifies whether the first level is complete.
         unsafe {
             if fused_stage1 {
                 Self::fft_in_place_from_stage2_with_executor(
