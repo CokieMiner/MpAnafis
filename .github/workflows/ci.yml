@@ -364,12 +364,10 @@ jobs:
                 --config 'target.mips-unknown-linux-gnu.runner=["qemu-mips", "-L", "/usr/mips-linux-gnu"]'
               ) ;;
             mips64-unknown-linux-gnuabi64)
-              # Long branches keep source-built std functions within MIPS branch limits.
               cargo_args=(
                 +nightly -Zbuild-std
                 --config 'target.mips64-unknown-linux-gnuabi64.linker="mips64-linux-gnuabi64-gcc"'
                 --config 'target.mips64-unknown-linux-gnuabi64.runner=["qemu-mips64", "-L", "/usr/mips64-linux-gnuabi64"]'
-                --config 'target.mips64-unknown-linux-gnuabi64.rustflags=["-C", "llvm-args=-force-mips-long-branch"]'
               ) ;;
             loongarch64-unknown-linux-gnu)
               cargo_args=(
