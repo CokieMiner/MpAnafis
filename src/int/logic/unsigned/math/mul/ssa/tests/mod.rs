@@ -23,7 +23,6 @@ mod convolution;
 mod direct;
 mod executors;
 mod fermat;
-mod initialization;
 mod mersenne;
 mod nested;
 mod oracle;

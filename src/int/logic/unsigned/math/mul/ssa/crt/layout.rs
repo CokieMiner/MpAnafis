@@ -43,7 +43,13 @@ impl SsaCrt {
         } else {
             plan.transform_mul_scratch(parallelism)
         };
-        Self::layout_len(h, ring_scratch, parallelism)
+        let Some(input_width) = h.checked_add(1) else {
+            return usize::MAX;
+        };
+        let Some(folded_width) = h.checked_mul(2) else {
+            return usize::MAX;
+        };
+        Self::layout_len(h, ring_scratch, parallelism, input_width, folded_width)
     }
 
     /// Total buffer the squaring CRT split partitions.
@@ -51,49 +57,57 @@ impl SsaCrt {
     /// The same layout as [`Self::layout_len`] with one operand per half instead of
     /// two, because a square stages only `a_low - a_high` for the Fermat residue
     /// and only `a_low + a_high` for the Mersenne one.
-    pub fn sqr_layout_len(half_width: usize, ring_scratch: usize, parallelism: usize) -> usize {
-        let Some(coefficient_width) = half_width.checked_add(1) else {
+    /// `fermat_input_width` is zero when the top-level transform borrows its
+    /// operand with implicit high zeros, and `half_width+1` when staging is required.
+    /// `mersenne_input_width` is zero for a borrowed complete operand and
+    /// `half_width` for a staged operand.
+    pub fn sqr_layout_len(
+        half_width: usize,
+        ring_scratch: usize,
+        parallelism: usize,
+        fermat_input_width: usize,
+        mersenne_input_width: usize,
+    ) -> usize {
+        let Some(fermat_half) = fermat_input_width.checked_add(ring_scratch) else {
             return usize::MAX;
         };
-        let Some(residues) = coefficient_width.checked_add(half_width) else {
+        let mersenne_scratch = sqr_mod_bnm1_scratch_len_for_parallelism(half_width, parallelism);
+        let Some(mersenne_half) = mersenne_input_width.checked_add(mersenne_scratch) else {
             return usize::MAX;
         };
-        let Some(fermat_half) = coefficient_width.checked_add(ring_scratch) else {
-            return usize::MAX;
-        };
-        let mersenne_scratch =
-            Self::sqr_mod_bnm1_scratch_len_for_parallelism(half_width, parallelism);
-        let Some(mersenne_half) = half_width.checked_add(mersenne_scratch) else {
-            return usize::MAX;
-        };
-        residues.saturating_add(fermat_half.max(mersenne_half))
+        half_width.saturating_add(fermat_half.max(mersenne_half))
     }
 
     /// Total buffer a CRT split partitions, for a given half-width, a given cost
     /// of the `B^h + 1` ring product, and one executor width.
     ///
     /// Both the top-level entry and [`Self::mul_mod_bnm1_prepared`] lay their scratch out
-    /// as `[xp: h+1] [xm: h]` followed by a region the two halves reuse in turn.
-    /// The dead `xm` residue itself becomes the CRT `k` buffer, so no third residue
-    /// span is retained. The shared tail only has to fit the larger of:
+    /// as `[xm: h]` followed by a region the two halves reuse in turn. The Fermat
+    /// residue occupies the destination's initialized `h+1`-limb prefix. The
+    /// quotient is formed directly in the high output half; shorter exact outputs
+    /// instead reuse `xm` for `k`. The shared tail fits the larger of:
     ///
-    /// - the `B^h + 1` half needs two padded operands of `h + 1` limbs plus the
-    ///   ring's own scratch;
-    /// - the `B^h - 1` half needs two folded operands of `h` limbs plus whatever
-    ///   its recursion requires.
+    /// - the `B^h + 1` half needs two operands of `fermat_input_width` limbs
+    ///   plus the ring's own scratch. This width is `h+1` for staged residues
+    ///   and zero when a top-level transform borrows both active operands;
+    /// - the `B^h - 1` half needs `mersenne_input_width` staged limbs plus its
+    ///   recursive workspace. Complete operands with no nonzero high limbs
+    ///   are borrowed directly; each remaining operand reserves `h` limbs.
     ///
-    /// The two callers differ only in `ring_scratch`, because the top level forces
-    /// the transform where this one lets a narrow ring take the basecase.
+    /// The top level separately reserves a Fermat residue when its exact output
+    /// is shorter than `h+1`; recursive `2h`-limb destinations always fit it.
+    /// The callers also differ in `ring_scratch`, because the top level can force
+    /// the transform where recursion lets a narrow ring take the basecase.
     /// `parallelism` sizes every nested ring the way the executor will execute
     /// it, so no level relies on the caller's top ring leaving spare capacity.
-    pub fn layout_len(half_width: usize, ring_scratch: usize, parallelism: usize) -> usize {
-        let Some(coefficient_width) = half_width.checked_add(1) else {
-            return usize::MAX;
-        };
-        let Some(residues) = coefficient_width.checked_add(half_width) else {
-            return usize::MAX;
-        };
-        let Some(fermat_half) = coefficient_width
+    pub fn layout_len(
+        half_width: usize,
+        ring_scratch: usize,
+        parallelism: usize,
+        fermat_input_width: usize,
+        mersenne_input_width: usize,
+    ) -> usize {
+        let Some(fermat_half) = fermat_input_width
             .checked_mul(2)
             .and_then(|width| width.checked_add(ring_scratch))
         else {
@@ -101,13 +115,10 @@ impl SsaCrt {
         };
         let mersenne_scratch =
             Self::mul_mod_bnm1_scratch_len_for_parallelism(half_width, parallelism);
-        let Some(mersenne_half) = half_width
-            .checked_mul(2)
-            .and_then(|width| width.checked_add(mersenne_scratch))
-        else {
+        let Some(mersenne_half) = mersenne_input_width.checked_add(mersenne_scratch) else {
             return usize::MAX;
         };
-        residues.saturating_add(fermat_half.max(mersenne_half))
+        half_width.saturating_add(fermat_half.max(mersenne_half))
     }
 
     /// Total buffer the top-level CRT split partitions when the two halves run
@@ -122,14 +133,10 @@ impl SsaCrt {
         half_width: usize,
         ring_scratch: usize,
         parallelism: usize,
+        fermat_input_width: usize,
+        mersenne_input_width: usize,
     ) -> usize {
-        let Some(coefficient_width) = half_width.checked_add(1) else {
-            return usize::MAX;
-        };
-        let Some(residues) = coefficient_width.checked_add(half_width) else {
-            return usize::MAX;
-        };
-        let Some(fermat_half) = coefficient_width
+        let Some(fermat_half) = fermat_input_width
             .checked_mul(2)
             .and_then(|width| width.checked_add(ring_scratch))
         else {
@@ -137,13 +144,10 @@ impl SsaCrt {
         };
         let mersenne_scratch =
             Self::mul_mod_bnm1_scratch_len_for_parallelism(half_width, parallelism);
-        let Some(mersenne_half) = half_width
-            .checked_mul(2)
-            .and_then(|width| width.checked_add(mersenne_scratch))
-        else {
+        let Some(mersenne_half) = mersenne_input_width.checked_add(mersenne_scratch) else {
             return usize::MAX;
         };
-        residues
+        half_width
             .saturating_add(fermat_half)
             .saturating_add(mersenne_half)
     }
@@ -344,30 +348,31 @@ impl SsaCrt {
             *k.get_unchecked_mut(size.unchecked_sub(1)) |= top_bit;
         }
     }
+}
 
-    /// Sizes a prepared Mersenne square for its executor budget.
-    fn sqr_mod_bnm1_scratch_len_for_parallelism(n: usize, parallelism: usize) -> usize {
-        if n <= SSA_BNM1_BASECASE_LIMBS {
-            // SAFETY: n <= SSA_BNM1_BASECASE_LIMBS is a small compile-time
-            // constant, so 2n and the scratch for a basecase squaring at that width
-            // are each bounded by a constant; the sum is far below usize::MAX on
-            // every supported width.
-            let prod = unsafe { n.unchecked_mul(2) };
-            return prod.saturating_add(Multiplication::required_sqr_scratch_for_parallelism(
-                n,
-                parallelism,
-            ));
-        }
-        let h = n >> 1;
-        let Some(ring_bits) = h.checked_mul(LIMB_BITS) else {
-            return usize::MAX;
-        };
-        let plan = FftPlan::new_for_square(ring_bits);
-        let ring_scratch = if ring_bits <= SSA_BASE_MODULUS_BITS {
-            plan.required_sqr_scratch()
-        } else {
-            plan.transform_sqr_scratch(parallelism)
-        };
-        Self::sqr_layout_len(h, ring_scratch, parallelism)
+/// Sizes a prepared Mersenne square for its executor budget.
+fn sqr_mod_bnm1_scratch_len_for_parallelism(n: usize, parallelism: usize) -> usize {
+    if n <= SSA_BNM1_BASECASE_LIMBS {
+        // SAFETY: n <= SSA_BNM1_BASECASE_LIMBS bounds the product and its
+        // basecase workspace by small constants on both SSA pointer widths.
+        let prod = unsafe { n.unchecked_mul(2) };
+        return prod.saturating_add(Multiplication::required_sqr_scratch_for_parallelism(
+            n,
+            parallelism,
+        ));
     }
+    let h = n >> 1;
+    let Some(ring_bits) = h.checked_mul(LIMB_BITS) else {
+        return usize::MAX;
+    };
+    let plan = FftPlan::new_for_square(ring_bits);
+    let ring_scratch = if ring_bits <= SSA_BASE_MODULUS_BITS {
+        plan.required_sqr_scratch()
+    } else {
+        plan.transform_sqr_scratch(parallelism)
+    };
+    let Some(input_width) = h.checked_add(1) else {
+        return usize::MAX;
+    };
+    SsaCrt::sqr_layout_len(h, ring_scratch, parallelism, input_width, h)
 }

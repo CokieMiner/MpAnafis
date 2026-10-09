@@ -8,79 +8,18 @@
     reason = "Small explicit reconstruction geometries bound all test offsets and shifts"
 )]
 
-use core::mem::MaybeUninit;
-
-use crate::int::DoubleLimb;
-
 use super::*;
 
-#[test]
-#[expect(
-    clippy::as_conversions,
-    clippy::cast_possible_truncation,
-    reason = "The oracle widens native digits into a twice-width integer and selects its two radix-B digits exactly on 16/32/64-bit targets"
-)]
-fn crt_merges_initialize_truncated_outputs_and_fold_the_guard_once() {
-    let base = DoubleLimb::from(1_u8) << Limb::BITS;
-    let mersenne = base - 1;
-    for low in [0, 1, 2, Limb::MAX - 2, Limb::MAX - 1, Limb::MAX] {
-        for guard in [0, 1] {
-            for residue in [0, 1, 2, Limb::MAX - 2, Limb::MAX - 1, Limb::MAX] {
-                let fermat = low as DoubleLimb + base * guard as DoubleLimb;
-                let difference = (residue as DoubleLimb + mersenne - fermat % mersenne) % mersenne;
-                let k = if difference.is_multiple_of(2) {
-                    difference >> 1
-                } else {
-                    difference.midpoint(mersenne)
-                };
-                // k <= B-2, so k*(B+1) < B^2. Only adding the semi-normal
-                // Fermat residue can cross B^2, whose Mersenne residue is one.
-                let (integer, carry) = (k * (base + 1)).overflowing_add(fermat);
-                let folded = integer + DoubleLimb::from(carry);
-                let expected = folded % DoubleLimb::MAX;
-                let xp = [low, guard];
-                let mut xm = [residue];
-                let mut output = [MaybeUninit::uninit(); 4];
-                output[0] = MaybeUninit::new(37);
-                output[3] = MaybeUninit::new(37);
-                SsaCrt::merge_crt_halves(&mut output[1..3], &xp, &mut xm);
-                // SAFETY: the CRT merge initializes both output elements; the
-                // two disjoint canaries were initialized by MaybeUninit::new.
-                let actual = unsafe { output.map(|digit| digit.assume_init()) };
-                let merged = actual[1] as DoubleLimb + base * actual[2] as DoubleLimb;
-                assert_eq!(
-                    merged % DoubleLimb::MAX,
-                    expected,
-                    "xp={xp:?}, xm={residue}"
-                );
-                assert_eq!((actual[0], actual[3]), (37, 37));
-
-                if guard == 0 || low == 0 {
-                    for width in 0..=3 {
-                        let mut remainder = [residue];
-                        let mut truncated = vec![MaybeUninit::uninit(); width + 2];
-                        truncated[0] = MaybeUninit::new(37);
-                        truncated[width + 1] = MaybeUninit::new(37);
-                        SsaCrt::merge_exact_product(&mut truncated[1..=width], &xp, &mut remainder);
-                        // SAFETY: the merge writes every requested output limb,
-                        // including the zero suffix; the canaries started at 37.
-                        let initialized: Vec<_> = unsafe {
-                            truncated
-                                .into_iter()
-                                .map(|digit| digit.assume_init())
-                                .collect()
-                        };
-                        let digits = [integer as Limb, (integer >> Limb::BITS) as Limb, 0];
-                        assert_eq!(
-                            &initialized[1..=width],
-                            &digits[..width],
-                            "width={width}, xp={xp:?}, xm={residue}"
-                        );
-                        assert_eq!((initialized[0], initialized[width + 1]), (37, 37));
-                    }
-                }
-            }
-        }
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(if cfg!(miri) { 3 } else { 32 }))]
+    #[test]
+    fn partial_reconstruction_blocks_cover_arbitrary_prefixes(
+        chunk in prop::sample::select(vec![LIMB_BITS, LIMB_BITS + 1, LIMB_BITS + LIMB_BITS / 2]),
+        workers in prop::sample::select(vec![2_usize, 3, 4, 8]),
+        count in 33_usize..=if cfg!(miri) { 64 } else { 256 },
+        seed in any::<Limb>(),
+    ) {
+        check_blocks(chunk, workers, count, seed);
     }
 }
 
@@ -168,27 +107,6 @@ fn rayon_truncated_products_reuse_exact_planned_arenas() {
                 }
             });
         });
-    }
-}
-
-#[cfg(feature = "rayon")]
-fn dense_prefix(bits: usize) -> Vec<Limb> {
-    let mut limbs = vec![Limb::MAX; bits.div_ceil(LIMB_BITS)];
-    let remaining = bits % LIMB_BITS;
-    if remaining != 0 {
-        *limbs.last_mut().expect("nonempty operand") = (1 << remaining) - 1;
-    }
-    limbs
-}
-
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(if cfg!(miri) { 3 } else { 32 }))]
-    #[test]
-    fn partial_reconstruction_blocks_cover_arbitrary_prefixes(
-        count in 33_usize..=if cfg!(miri) { 64 } else { 256 },
-        seed in any::<Limb>(),
-    ) {
-        check_blocks(LIMB_BITS + 1, 8, count, seed);
     }
 }
 
@@ -284,4 +202,14 @@ fn oracle_accumulate(dst: &mut [Limb], shift: usize, magnitude: Limb, negative: 
         carry = first || second;
     }
     assert!(!carry, "outer bias and guard contain every signed prefix");
+}
+
+#[cfg(feature = "rayon")]
+fn dense_prefix(bits: usize) -> Vec<Limb> {
+    let mut limbs = vec![Limb::MAX; bits.div_ceil(LIMB_BITS)];
+    let remaining = bits % LIMB_BITS;
+    if remaining != 0 {
+        *limbs.last_mut().expect("nonempty operand") = (1 << remaining) - 1;
+    }
+    limbs
 }

@@ -66,9 +66,12 @@ fn aligned_candidates_keep_a_sign_bit_and_executor_sizes_preserve_workers() {
     for (workers, slots) in [(1, 2), (6, 8), (12, 16)] {
         assert_eq!(plan.parallel_slots(workers), slots);
     }
-    assert_eq!(SsaCrt::layout_len(usize::MAX, 1, 1), usize::MAX);
-    assert_eq!(SsaCrt::sqr_layout_len(usize::MAX, 1, 1), usize::MAX);
-    assert_eq!(SsaCrt::layout_len_concurrent(usize::MAX, 1, 1), usize::MAX);
+    assert_eq!(SsaCrt::layout_len(usize::MAX, 1, 1, 0, 0), usize::MAX);
+    assert_eq!(SsaCrt::sqr_layout_len(usize::MAX, 1, 1, 0, 0), usize::MAX);
+    assert_eq!(
+        SsaCrt::layout_len_concurrent(usize::MAX, 1, 1, 0, 0),
+        usize::MAX
+    );
     assert_eq!(
         SsaCrt::mul_mod_bnm1_scratch_len_for_parallelism(usize::MAX, 1),
         usize::MAX

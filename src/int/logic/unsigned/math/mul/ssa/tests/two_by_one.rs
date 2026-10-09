@@ -7,111 +7,82 @@
 
 use super::*;
 
-fn mul_mod_bnm1<E: ParallelExecutor>(
-    dst: &mut [Limb],
-    a: &[Limb],
-    b: &[Limb],
-    scratch: &mut [Limb],
-    executor: &E,
-) {
-    let plan = CrtMulPlan::new(a.len()).expect("representable test Mersenne geometry");
-    assert_eq!(a.len(), b.len());
-    assert_eq!(a.len(), dst.len());
-    assert!(
-        scratch.len()
-            >= SsaCrt::mul_mod_bnm1_scratch_len_for_parallelism(
-                a.len(),
-                executor.parallelism().get()
-            )
-    );
-    // SAFETY: the test helper validates all operand, destination, scratch,
-    // executor, and halving dimensions before executing the retained tree.
-    unsafe {
-        SsaCrt::mul_mod_bnm1_prepared(dst, a, b, scratch, executor, &plan);
-    }
-}
-
-fn dense_operand(len: usize, multiplier: Limb, rotation: u32) -> Vec<Limb> {
-    (0..len)
-        .map(|index| {
-            Limb::MAX
-                .wrapping_sub(index.wrapping_mul(multiplier))
-                .rotate_left(rotation)
-        })
-        .collect()
-}
-
-fn sequence_operand(len: usize, multiplier: Limb) -> Vec<Limb> {
-    (0..len)
-        .map(|index| {
-            let value = Limb::try_from(index & 0xffff).expect("16 bits fit every Limb");
-            value.wrapping_mul(multiplier) | 1
-        })
-        .collect()
-}
-
 #[test]
-fn fused_transform_matches_two_schoolbook_products() {
-    const SHAPES: [(usize, usize, usize); 10] = [
-        (4, 4, 4),
-        (9, 9, 9),
-        (17, 17, 17),
-        (64, 64, 64),
-        (128, 128, 128),
-        (192, 192, 192),
+fn shared_products_match_schoolbook_and_reuse_exact_guarded_arenas() {
+    let shapes = [
+        (1, 2, 1),
+        (2, 1, 1),
         (512, 512, 1024),
         (510, 512, 1024),
         (1000, 1020, 2048),
-        (2048, 2048, 2048),
-    ];
-
-    for (len_a, len_b, len_x) in SHAPES {
+    ]
+    .into_iter()
+    .chain(
+        [
+            1, 2, 3, 4, 5, 9, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 192, 2048,
+        ]
+        .map(|len| (len, len, len)),
+    );
+    for (len_a, len_b, len_x) in shapes {
         if cfg!(miri) && len_x > 17 {
             continue;
         }
         let a = dense_operand(len_a, 0x9E37_79B9, 7);
         let b = dense_operand(len_b, 0x85EB_CA6B, 11);
-        let x = dense_operand(len_x, 0xC2B2_AE3D, 5);
+        let full_x = dense_operand(len_x, 0xC2B2_AE3D, 5);
+        let mut x = full_x.clone();
         let mut expected_a = vec![0; len_a.wrapping_add(len_x)];
         let mut expected_b = vec![0; len_b.wrapping_add(len_x)];
-        Schoolbook::mul(&mut expected_a, &a, &x);
-        Schoolbook::mul(&mut expected_b, &b, &x);
 
-        let mut actual_a = vec![Limb::MAX; expected_a.len()];
-        let mut actual_b = vec![Limb::MAX; expected_b.len()];
+        let mut actual_a = vec![Limb::MAX; expected_a.len() + 2];
+        let mut actual_b = vec![Limb::MAX; expected_b.len() + 2];
         let executor = SequentialExecutor;
         let scratch_len = Ssa::mul_two_by_one_scratch_len_for_parallelism(len_a, len_b, len_x, 1);
-        let mut scratch = vec![Limb::MAX; scratch_len];
-        assert!(
-            Ssa::try_mul_two_by_one_with_executor(
-                &mut actual_a,
-                &mut actual_b,
-                &a,
-                &b,
-                &x,
-                TransformChoice::FORCED,
-                &mut scratch,
-                &executor,
-            ),
-            "SSA declined ({len_a}, {len_b}, {len_x})"
-        );
-        assert_eq!(actual_a, expected_a);
-        assert_eq!(actual_b, expected_b);
-
-        actual_a.fill(Limb::MAX);
-        actual_b.fill(Limb::MAX);
-        assert!(Ssa::try_mul_two_by_one_with_executor(
-            &mut actual_a,
-            &mut actual_b,
-            &a,
-            &b,
-            &x,
-            TransformChoice::FORCED,
-            &mut scratch,
-            &executor,
-        ));
-        assert_eq!(actual_a, expected_a);
-        assert_eq!(actual_b, expected_b);
+        assert_ne!(scratch_len, 0, "the shared product admits a ring");
+        let mut scratch = vec![Limb::MAX; scratch_len + 2];
+        for choice in [TransformChoice::PLANNED, TransformChoice::FORCED] {
+            for active_x in [len_x, len_x.div_ceil(2)] {
+                x.copy_from_slice(&full_x);
+                x.iter_mut().skip(active_x).for_each(|limb| *limb = 0);
+                Schoolbook::mul(&mut expected_a, &a, &x);
+                Schoolbook::mul(&mut expected_b, &b, &x);
+                actual_a.fill(Limb::MAX);
+                actual_b.fill(Limb::MAX);
+                assert!(
+                    Ssa::try_mul_two_by_one_with_executor(
+                        actual_a
+                            .get_mut(1..=expected_a.len())
+                            .expect("first exact output"),
+                        actual_b
+                            .get_mut(1..=expected_b.len())
+                            .expect("second exact output"),
+                        &a,
+                        &b,
+                        &x,
+                        choice,
+                        scratch
+                            .get_mut(1..=scratch_len)
+                            .expect("exact queried arena"),
+                        &executor,
+                    ),
+                    "SSA declined ({len_a}, {len_b}, {len_x}) with {choice:?}"
+                );
+                assert_eq!(
+                    actual_a.get(1..=expected_a.len()).expect("first product"),
+                    expected_a
+                );
+                assert_eq!(
+                    actual_b.get(1..=expected_b.len()).expect("second product"),
+                    expected_b
+                );
+                for guarded in [&actual_a, &actual_b, &scratch] {
+                    assert_eq!(
+                        (guarded.first(), guarded.last()),
+                        (Some(&Limb::MAX), Some(&Limb::MAX))
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -143,7 +114,7 @@ fn bnm1_recursion_scratch_matches_the_active_executor() {
 
 #[test]
 fn fused_bnm1_matches_independent_products() {
-    const WIDTHS: [usize; 11] = [
+    let mut widths = vec![
         1,
         2,
         4,
@@ -156,7 +127,9 @@ fn fused_bnm1_matches_independent_products() {
         1024,
         4096,
     ];
-    for n in WIDTHS {
+    widths.sort_unstable();
+    widths.dedup();
+    for n in widths {
         if cfg!(miri) && n > 4 {
             continue;
         }
@@ -266,4 +239,47 @@ fn direct_bnm1_call_uses_executor_sized_scratch() {
         }
     }
     assert_eq!(dst, expected);
+}
+
+fn mul_mod_bnm1<E: ParallelExecutor>(
+    dst: &mut [Limb],
+    a: &[Limb],
+    b: &[Limb],
+    scratch: &mut [Limb],
+    executor: &E,
+) {
+    let plan = CrtMulPlan::new(a.len()).expect("representable test Mersenne geometry");
+    assert_eq!(a.len(), b.len());
+    assert_eq!(a.len(), dst.len());
+    assert!(
+        scratch.len()
+            >= SsaCrt::mul_mod_bnm1_scratch_len_for_parallelism(
+                a.len(),
+                executor.parallelism().get()
+            )
+    );
+    // SAFETY: the test helper validates all operand, destination, scratch,
+    // executor, and halving dimensions before executing the retained tree.
+    unsafe {
+        SsaCrt::mul_mod_bnm1_prepared(dst, a, b, scratch, executor, &plan);
+    }
+}
+
+fn dense_operand(len: usize, multiplier: Limb, rotation: u32) -> Vec<Limb> {
+    (0..len)
+        .map(|index| {
+            Limb::MAX
+                .wrapping_sub(index.wrapping_mul(multiplier))
+                .rotate_left(rotation)
+        })
+        .collect()
+}
+
+fn sequence_operand(len: usize, multiplier: Limb) -> Vec<Limb> {
+    (0..len)
+        .map(|index| {
+            let value = Limb::try_from(index & 0xffff).expect("16 bits fit every Limb");
+            value.wrapping_mul(multiplier) | 1
+        })
+        .collect()
 }

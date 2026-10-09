@@ -32,7 +32,7 @@ pub enum SsaSquareGeometry {
         active_a_len: usize,
         n: usize,
         ring_bits: usize,
-        coeff_len: usize,
+        fermat_input_len: usize,
         ring_plan: SquareTransformPlan,
         force_transform: bool,
         crt_plan: CrtSquarePlan,
@@ -94,6 +94,11 @@ impl<'operand> SsaSquaringPlan<'operand> {
         }
         let ring_bits = n.checked_mul(LIMB_BITS)?;
         let coeff_len = n.checked_add(1)?;
+        let fermat_input_len = if choice.forces_transform() || ring_bits > SSA_BASE_MODULUS_BITS {
+            0
+        } else {
+            coeff_len
+        };
         let ring_plan = SquareTransformPlan::new(FftPlan::new_for_square(ring_bits));
         let crt_plan = CrtSquarePlan::new(n)?;
         let ring_scratch_len = if choice.forces_transform() || ring_bits > SSA_BASE_MODULUS_BITS {
@@ -104,10 +109,18 @@ impl<'operand> SsaSquaringPlan<'operand> {
         if ring_scratch_len == usize::MAX {
             return None;
         }
-        let scratch_len = SsaCrt::sqr_layout_len(n, ring_scratch_len, parallelism);
-        if scratch_len == usize::MAX {
+        let crt_scratch_len = SsaCrt::sqr_layout_len(
+            n,
+            ring_scratch_len,
+            parallelism,
+            fermat_input_len,
+            if a_limbs.len() == n { 0 } else { n },
+        );
+        if crt_scratch_len == usize::MAX {
             return None;
         }
+        let fermat_scratch_len = if result_len < coeff_len { coeff_len } else { 0 };
+        let scratch_len = crt_scratch_len.checked_add(fermat_scratch_len)?;
 
         Some(Self {
             a_limbs,
@@ -118,7 +131,7 @@ impl<'operand> SsaSquaringPlan<'operand> {
                 active_a_len: sig_a.div_ceil(LIMB_BITS),
                 n,
                 ring_bits,
-                coeff_len,
+                fermat_input_len,
                 ring_plan,
                 force_transform: choice.forces_transform(),
                 crt_plan,
@@ -133,6 +146,10 @@ impl<'operand> SsaSquaringPlan<'operand> {
     /// `dst` must contain at least [`Self::result_len`] limbs, `scratch`
     /// must contain at least [`Self::scratch_len`] limbs, and the executor must
     /// advertise the parallelism used to construct this plan.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Direct and CRT square execution share the operand-bound geometry and reusable arena"
+    )]
     pub unsafe fn run_with_scratch<E: ParallelExecutor>(
         &self,
         dst: &mut [Limb],
@@ -150,7 +167,7 @@ impl<'operand> SsaSquaringPlan<'operand> {
             dst.fill(0);
             return;
         };
-        let (active_a_len, n, ring_bits, coeff_len, ring_plan, force_transform, crt_plan) =
+        let (active_a_len, n, ring_bits, fermat_input_len, ring_plan, force_transform, crt_plan) =
             match *square {
                 SsaSquareGeometry::DirectFermat {
                     active_a_len,
@@ -180,7 +197,7 @@ impl<'operand> SsaSquaringPlan<'operand> {
                     active_a_len,
                     n,
                     ring_bits,
-                    coeff_len,
+                    fermat_input_len,
                     ref ring_plan,
                     force_transform,
                     ref crt_plan,
@@ -188,7 +205,7 @@ impl<'operand> SsaSquaringPlan<'operand> {
                     active_a_len,
                     n,
                     ring_bits,
-                    coeff_len,
+                    fermat_input_len,
                     ring_plan,
                     force_transform,
                     crt_plan,
@@ -197,25 +214,39 @@ impl<'operand> SsaSquaringPlan<'operand> {
         // SAFETY: the significant-bit count was derived from this immutable
         // operand, so its rounded-up active prefix is within the source slice.
         let active_a = unsafe { self.a_limbs.get_unchecked(..active_a_len) };
+        let folded_len = if self.a_limbs.len() == n { 0 } else { n };
 
-        // SAFETY: sqr_layout_len reserves these two complete residues before
-        // the larger reusable child arena; the accepted plan fixes both widths.
-        let (xp, xm, rest3) = unsafe {
-            let (xp, after_fermat) = scratch_buf.split_at_mut_unchecked(coeff_len);
+        // SAFETY: the plan validated n*LIMB_BITS; LIMB_BITS>=32 bounds n+1.
+        let coeff_len = unsafe { n.unchecked_add(1) };
+        let fermat_scratch_len = if self.result_len < coeff_len {
+            coeff_len
+        } else {
+            0
+        };
+        // SAFETY: the plan reserves this optional short-output Fermat residue,
+        // then n Mersenne limbs and the larger reusable child arena.
+        let (fermat_buffer, xm, rest3) = unsafe {
+            let (xp, after_fermat) = scratch_buf.split_at_mut_unchecked(fermat_scratch_len);
             let (xm, work) = after_fermat.split_at_mut_unchecked(n);
             (xp, xm, work)
         };
 
         // 1. Compute xp = a^2 mod (B^n + 1).
         {
+            let xp = if fermat_scratch_len == 0 {
+                // SAFETY: a zero fallback width proves dst covers coeff_len.
+                unsafe { dst.get_unchecked_mut(..coeff_len) }
+            } else {
+                &mut *fermat_buffer
+            };
             // SAFETY: the reusable tail reserves this complete Fermat operand
             // and the ring's workspace, disjoint from the live residues.
-            let (padded, ring_scratch) = unsafe { rest3.split_at_mut_unchecked(coeff_len) };
+            let (padded, ring_scratch) = unsafe { rest3.split_at_mut_unchecked(fermat_input_len) };
 
             // Construction requests 2*a_limbs.len()*LIMB_BITS product bits.
             // Every CRT candidate has n>=a_limbs.len()>=active_a_len, so the
             // outer square never folds a high operand half.
-            if ring_bits > SSA_BASE_MODULUS_BITS || force_transform {
+            if fermat_input_len == 0 {
                 // SAFETY: the normalized operand is nonzero, fits within
                 // ml=n data limbs, and the transform treats its omitted guard as
                 // zero.
@@ -254,14 +285,14 @@ impl<'operand> SsaSquaringPlan<'operand> {
 
         // 2. Compute xm = a^2 mod (B^n - 1).
         // SAFETY: Fermat borrows have ended; this tail reserves the n-limb
-        // fold and retained Mersenne workspace. Constructor admission proves
-        // active_a_len<=n. The complete operand is borrowed at equality or
+        // optional fold and retained Mersenne workspace. Constructor admission
+        // proves active_a_len<=n. The complete operand is borrowed at equality or
         // initialized by copy/padding before the disjoint child reads it.
         unsafe {
-            let (folded, xm_scratch) = rest3.split_at_mut_unchecked(n);
-            let input = if active_a_len == n {
-                // A full-width operand is already a complete Mersenne residue.
-                active_a
+            let (folded, xm_scratch) = rest3.split_at_mut_unchecked(folded_len);
+            let input = if folded_len == 0 {
+                // The declared width includes any initialized high zero limbs.
+                self.a_limbs
             } else {
                 let (prefix, padding) = folded.split_at_mut_unchecked(active_a_len);
                 prefix.copy_from_slice(active_a);
@@ -272,6 +303,14 @@ impl<'operand> SsaSquaringPlan<'operand> {
         }
 
         // 3. Reconstruct dst = X_p + k * B^n + k.
-        SsaCrt::merge_exact_product(dst, xp, xm);
+        if fermat_scratch_len == 0 {
+            // SAFETY: the Fermat writer initialized the complete dst[..=n]
+            // prefix and the destination covers the plan's guarded width.
+            unsafe {
+                SsaCrt::merge_exact_product_in_place(dst, xm);
+            }
+        } else {
+            SsaCrt::merge_exact_product(dst, fermat_buffer, xm);
+        }
     }
 }

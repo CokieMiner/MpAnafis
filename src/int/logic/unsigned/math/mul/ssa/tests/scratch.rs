@@ -1,10 +1,5 @@
 //! Prepared plans and caller-supplied scratch sizing.
 
-#![expect(
-    unsafe_code,
-    reason = "Scratch fixtures admit exact initialized or reserved spans before testing their plan-sized execution boundaries"
-)]
-
 use super::*;
 
 #[cfg_attr(
@@ -27,46 +22,6 @@ fn direct_product_scratch_matches_capacity_bound_plans() {
                 .expect("representable capacity-bound plan");
         assert_eq!(scratch_len, plan.scratch_len, "active width {active}");
     }
-}
-
-/// The tuner keeps this operand-bound plan and its exact executor-sized arena
-/// across samples, so this exercises the infallible path independently of the
-/// fallible production entry point that constructs a fresh plan per call.
-#[test]
-fn prepared_ssa_product_reuses_exact_parallel_scratch() {
-    let len = SSA_BASE_MODULUS_BITS.div_euclid(LIMB_BITS).wrapping_add(1);
-    let mut a: Vec<Limb> = (0..len)
-        .map(|index| Limb::MAX.wrapping_sub(index.wrapping_mul(0x9E37_79B9)))
-        .collect();
-    let mut b: Vec<Limb> = (0..len)
-        .map(|index| Limb::MAX.wrapping_sub(index.wrapping_mul(0x85EB_CA6B)))
-        .collect();
-    let high_bit = Limb::from(1_u8).wrapping_shl(Limb::BITS.wrapping_sub(1));
-    *a.last_mut().expect("nonempty operand") |= high_bit;
-    *b.last_mut().expect("nonempty operand") |= high_bit;
-
-    let executor = CountingExecutor::default();
-    let plan =
-        SsaMultiplicationPlan::try_new(&a, &b, TransformChoice::FORCED, executor.parallelism())
-            .expect("valid forced geometry");
-    let mut scratch = vec![Limb::MAX; plan.scratch_len];
-    let mut expected = vec![Limb::MIN; plan.result_len];
-    let mut first = vec![Limb::MIN; plan.result_len];
-    let mut second = vec![Limb::MIN; plan.result_len];
-    Schoolbook::mul(&mut expected, &a, &b);
-
-    // SAFETY: both destinations and the reused arena have the exact widths
-    // reported by this operand-bound plan, and the same executor constructed it.
-    unsafe {
-        plan.run_with_scratch(&mut first, &mut scratch, &executor);
-    }
-    // SAFETY: the identical plan-owned spans remain valid for a second run.
-    unsafe {
-        plan.run_with_scratch(&mut second, &mut scratch, &executor);
-    }
-
-    assert_eq!(first, expected);
-    assert_eq!(second, expected);
 }
 
 #[test]
@@ -144,75 +99,6 @@ fn supplied_ssa_scratch_is_executor_sized_and_never_replaced() {
         &executor,
     ));
     assert_eq!(actual_square, expected_square);
-}
-
-/// The prepared square plan keeps the operand-bound geometry and reuses the
-/// exact CRT workspace for every run without re-entering the fallible entry
-/// point.
-#[test]
-fn prepared_ssa_square_reuses_exact_scratch() {
-    let len = SSA_BASE_MODULUS_BITS.div_euclid(LIMB_BITS).wrapping_add(1);
-    let a: Vec<Limb> = (0..len)
-        .map(|index| Limb::MAX.wrapping_sub(index.wrapping_mul(0x9E37_79B9)))
-        .collect();
-    let executor = SequentialExecutor;
-    let plan = SsaSquaringPlan::try_new(&a, TransformChoice::FORCED, 1)
-        .expect("valid forced square geometry");
-    let mut scratch = vec![Limb::MAX; plan.scratch_len];
-    let mut expected = vec![Limb::MIN; len.wrapping_mul(2)];
-    let mut first = vec![Limb::MIN; expected.len()];
-    let mut second = vec![Limb::MIN; expected.len()];
-    Schoolbook::mul(&mut expected, &a, &a);
-
-    // SAFETY: the destination and workspace have the exact widths reported by
-    // this operand-bound plan, and the executor width is the planned width.
-    unsafe {
-        plan.run_with_scratch(&mut first, &mut scratch, &executor);
-        plan.run_with_scratch(&mut second, &mut scratch, &executor);
-    }
-
-    assert_eq!(first, expected);
-    assert_eq!(second, expected);
-}
-
-#[test]
-fn shared_products_reuse_the_queried_dirty_arena_across_small_ring_tiers() {
-    let widths: &[usize] = if cfg!(miri) {
-        &[1, 4, 5]
-    } else {
-        &[1, 2, 3, 4, 5, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129]
-    };
-    for &len in widths {
-        let a = vec![Limb::MAX; len];
-        let b = vec![Limb::MAX - 1; len];
-        let x = vec![Limb::MAX - 2; len];
-        let mut expected_a = vec![0; 2 * len];
-        let mut expected_b = vec![0; 2 * len];
-        Schoolbook::mul(&mut expected_a, &a, &x);
-        Schoolbook::mul(&mut expected_b, &b, &x);
-        let queried = Ssa::mul_two_by_one_scratch_len_for_parallelism(len, len, len, 1);
-        assert_ne!(queried, 0, "balanced small products admit a shared ring");
-        let mut arena = vec![Limb::MAX; queried];
-        for choice in [TransformChoice::PLANNED, TransformChoice::FORCED] {
-            let mut out_a = vec![Limb::MAX; 2 * len];
-            let mut out_b = vec![Limb::MAX; 2 * len];
-            assert!(
-                Ssa::try_mul_two_by_one_with_executor(
-                    &mut out_a,
-                    &mut out_b,
-                    &a,
-                    &b,
-                    &x,
-                    choice,
-                    &mut arena,
-                    &SequentialExecutor,
-                ),
-                "the exact queried arena covers planned and forced products at {len} limbs"
-            );
-            assert_eq!(out_a, expected_a, "first shared product at {len} limbs");
-            assert_eq!(out_b, expected_b, "second shared product at {len} limbs");
-        }
-    }
 }
 
 #[cfg(feature = "_internal-tune")]

@@ -77,20 +77,22 @@ impl SsaCrt {
             "recursive mul_mod_bnm1_two_by_one width must be even"
         );
         let h = n >> 1;
-        // SAFETY: two_by_one_layout_len checked both h+1 Fermat coefficients,
-        // both h-limb Mersenne residues and their shared child arena.
-        let (cl, xp_a, xp_b, xm_a, xm_b, rest4) = unsafe {
+        // SAFETY: two_by_one_layout_len checked both h-limb Mersenne residues
+        // and their shared child arena; h=n/2 bounds the guarded width h+1.
+        let (cl, xm_a, xm_b, rest4) = unsafe {
             let cl = h.unchecked_add(1);
-            let (xp_a, rest1) = scratch.split_at_mut_unchecked(cl);
-            let (xp_b, rest2) = rest1.split_at_mut_unchecked(cl);
-            let (xm_a, rest3) = rest2.split_at_mut_unchecked(h);
+            let (xm_a, rest3) = scratch.split_at_mut_unchecked(h);
             let (xm_b, rest4) = rest3.split_at_mut_unchecked(h);
-            (cl, xp_a, xp_b, xm_a, xm_b, rest4)
+            (cl, xm_a, xm_b, rest4)
         };
 
         // 1. Compute xp_a = a * x mod (B^h + 1) and xp_b = b * x mod (B^h + 1)
         //    with one forward transform of x's residue.
         {
+            // SAFETY: h>=1 and both destinations have 2h limbs, so their
+            // disjoint guarded prefixes each cover cl=h+1 initialized outputs.
+            let (xp_a, xp_b) =
+                unsafe { (dst_a.get_unchecked_mut(..cl), dst_b.get_unchecked_mut(..cl)) };
             // SAFETY: the checked Fermat half reserves three cl-limb inputs
             // before its executor-sized transform arena; all spans are disjoint.
             let (a_padded, b_padded, x_padded, ring_scratch) = unsafe {
@@ -148,15 +150,19 @@ impl SsaCrt {
             );
         }
 
-        Self::merge_crt_halves(dst_a, xp_a, xm_a);
-        Self::merge_crt_halves(dst_b, xp_b, xm_b);
+        // SAFETY: the Fermat phase initialized both destination prefixes, and
+        // each complete h-limb Mersenne residue is disjoint from its 2h output.
+        unsafe {
+            Self::merge_crt_halves_in_place(dst_a, xm_a);
+            Self::merge_crt_halves_in_place(dst_b, xm_b);
+        }
     }
 
     /// Scratch required by one [`Self::mul_mod_bnm1_two_by_one`] call on
     /// `n`-limb operands under an executor reporting `parallelism` scheduling
     /// lanes.
     ///
-    /// The layout mirrors the execution: two residue pairs, three staged
+    /// The layout mirrors the execution: two Mersenne residues, three staged
     /// operands per half, and a nested ring scratch sized for the same executor
     /// width at every level.
     pub fn mul_mod_bnm1_two_by_one_scratch_len_for_parallelism(
@@ -179,28 +185,32 @@ impl SsaCrt {
         } else {
             plan.transform_mul_two_by_one_scratch(parallelism)
         };
-        Self::two_by_one_layout_len(h, ring_scratch, parallelism)
+        let Some(input_width) = h.checked_add(1) else {
+            return usize::MAX;
+        };
+        let Some(folded_width) = h.checked_mul(3) else {
+            return usize::MAX;
+        };
+        Self::two_by_one_layout_len(h, ring_scratch, parallelism, input_width, folded_width)
     }
 
     /// Scratch layout for a two-by-one shared-operand CRT product.
     ///
     /// The top level and every recursive `B^n - 1` level stage the same three
-    /// operands and two residue pairs, so one layout describes both levels.
+    /// operands and two Mersenne residues. Guarded Fermat residues occupy each
+    /// destination's prefix; a shorter top-level output reserves its own residue.
+    /// `mersenne_input_width` sums only operands requiring an `h`-limb fold.
     pub fn two_by_one_layout_len(
         half_width: usize,
         ring_scratch: usize,
         parallelism: usize,
+        fermat_input_width: usize,
+        mersenne_input_width: usize,
     ) -> usize {
-        let Some(coefficient_width) = half_width.checked_add(1) else {
+        let Some(residues) = half_width.checked_mul(2) else {
             return usize::MAX;
         };
-        let Some(residues) = coefficient_width
-            .checked_mul(2)
-            .and_then(|w| w.checked_add(half_width.checked_mul(2)?))
-        else {
-            return usize::MAX;
-        };
-        let Some(fermat_half) = coefficient_width
+        let Some(fermat_half) = fermat_input_width
             .checked_mul(3)
             .and_then(|width| width.checked_add(ring_scratch))
         else {
@@ -208,10 +218,7 @@ impl SsaCrt {
         };
         let mersenne_scratch =
             Self::mul_mod_bnm1_two_by_one_scratch_len_for_parallelism(half_width, parallelism);
-        let Some(mersenne_half) = half_width
-            .checked_mul(3)
-            .and_then(|width| width.checked_add(mersenne_scratch))
-        else {
+        let Some(mersenne_half) = mersenne_input_width.checked_add(mersenne_scratch) else {
             return usize::MAX;
         };
         residues.saturating_add(fermat_half.max(mersenne_half))

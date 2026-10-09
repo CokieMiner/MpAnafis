@@ -2,7 +2,7 @@
 //!
 //! The top-level entry points pair one `B^n + 1` transform with one `B^n - 1`
 //! product and merge the two residues. [`bnm1`] carries the product and square
-//! recursions with their reconstructions and exact-width staging,
+//! recursions, [`reconstruction`] merges residues from the destination prefix,
 //! [`layout`] sizes every scratch partition for the executor that will run it,
 //! and [`two_by_one`] holds the shared-operand recursion that transforms the
 //! common operand once per ring.
@@ -18,6 +18,7 @@ use super::{
 mod bnm1;
 mod execution;
 mod layout;
+mod reconstruction;
 mod two_by_one;
 
 pub use bnm1::SsaCrt;

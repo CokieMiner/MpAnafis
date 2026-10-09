@@ -52,7 +52,52 @@ impl Ssa {
         if ring_scratch == usize::MAX {
             return 0;
         }
-        let crt_scratch = SsaCrt::two_by_one_layout_len(half_width, ring_scratch, parallelism);
+        let Some(coefficient_len) = half_width.checked_add(1) else {
+            return 0;
+        };
+        let Some((result_len_a, result_len_b)) =
+            len_a.checked_add(len_x).zip(len_b.checked_add(len_x))
+        else {
+            return 0;
+        };
+        let fallback_a = if result_len_a < coefficient_len {
+            coefficient_len
+        } else {
+            0
+        };
+        let fallback_b = if result_len_b < coefficient_len {
+            coefficient_len
+        } else {
+            0
+        };
+        let fermat_input_len = if len_a <= half_width
+            && len_b <= half_width
+            && len_x <= half_width
+            && ring_bits > SSA_BASE_MODULUS_BITS
+        {
+            0
+        } else {
+            coefficient_len
+        };
+        let Some(mersenne_input_len) = [len_a, len_b, len_x]
+            .into_iter()
+            .try_fold(0_usize, |total, len| {
+                total.checked_add(if len == half_width { 0 } else { half_width })
+            })
+        else {
+            return 0;
+        };
+        let Some(crt_scratch) = SsaCrt::two_by_one_layout_len(
+            half_width,
+            ring_scratch,
+            parallelism,
+            fermat_input_len,
+            mersenne_input_len,
+        )
+        .checked_add(fallback_a)
+        .and_then(|width| width.checked_add(fallback_b)) else {
+            return 0;
+        };
         if crt_scratch == usize::MAX {
             return 0;
         }
@@ -219,39 +264,94 @@ impl Ssa {
             } else {
                 ring_plan.transform_mul_two_by_one_scratch(parallelism)
             };
-            let needed = SsaCrt::two_by_one_layout_len(n, ring_work, parallelism);
-            if needed == usize::MAX || scratch.len() < needed {
-                return false;
-            }
             // SAFETY: the checked ring width bounds n by usize::MAX/LIMB_BITS,
             // so its single guard fits on both supported SSA pointer widths.
             let coeff_len = unsafe { n.unchecked_add(1) };
+            let fermat_input_len = if active_a.len() <= n
+                && active_b.len() <= n
+                && active_x.len() <= n
+                && (ring_bits > SSA_BASE_MODULUS_BITS || choice.forces_transform())
+            {
+                0
+            } else {
+                coeff_len
+            };
+            let fallback_a = if result_len_a < coeff_len {
+                coeff_len
+            } else {
+                0
+            };
+            let fallback_b = if result_len_b < coeff_len {
+                coeff_len
+            } else {
+                0
+            };
+            let [left_folded_len, right_folded_len, x_folded_len] = [
+                (a_limbs.len(), active_a_len),
+                (b_limbs.len(), active_b_len),
+                (x_limbs.len(), active_x_len),
+            ]
+            .map(|(declared, active)| if declared >= n && active <= n { 0 } else { n });
+            let Some(mersenne_input_len) = [left_folded_len, right_folded_len, x_folded_len]
+                .into_iter()
+                .try_fold(0_usize, usize::checked_add)
+            else {
+                return false;
+            };
+            let Some(needed) = SsaCrt::two_by_one_layout_len(
+                n,
+                ring_work,
+                parallelism,
+                fermat_input_len,
+                mersenne_input_len,
+            )
+            .checked_add(fallback_a)
+            .and_then(|width| width.checked_add(fallback_b)) else {
+                return false;
+            };
+            if needed == usize::MAX || scratch.len() < needed {
+                return false;
+            }
 
-            // SAFETY: two_by_one_layout_len checked these four output slots
-            // followed by staging and the reused ring workspace against scratch.
-            let (xp_a, xp_b, xm_a, xm_b, shared_scratch) = unsafe {
-                let (xp_a, after_xp_a) = scratch.split_at_mut_unchecked(coeff_len);
-                let (xp_b, after_xp_b) = after_xp_a.split_at_mut_unchecked(coeff_len);
+            // SAFETY: needed includes each short output's optional Fermat span,
+            // two n-limb Mersenne residues, staging and the reusable child arena.
+            let (xp_scratch_a, xp_scratch_b, xm_a, xm_b, shared_scratch) = unsafe {
+                let (xp_a, after_xp_a) = scratch.split_at_mut_unchecked(fallback_a);
+                let (xp_b, after_xp_b) = after_xp_a.split_at_mut_unchecked(fallback_b);
                 let (xm_a, after_xm_a) = after_xp_b.split_at_mut_unchecked(n);
                 let (xm_b, work) = after_xm_a.split_at_mut_unchecked(n);
                 (xp_a, xp_b, xm_a, xm_b, work)
             };
 
             {
+                // SAFETY: each zero fallback proves its output covers coeff_len;
+                // otherwise its initialized scratch span has that exact width.
+                // The two mutable outputs and all scratch partitions are disjoint.
+                let (xp_a, xp_b) = unsafe {
+                    (
+                        if fallback_a == 0 {
+                            out_a.get_unchecked_mut(..coeff_len)
+                        } else {
+                            &mut *xp_scratch_a
+                        },
+                        if fallback_b == 0 {
+                            out_b.get_unchecked_mut(..coeff_len)
+                        } else {
+                            &mut *xp_scratch_b
+                        },
+                    )
+                };
                 // SAFETY: the CRT layout reserves three complete guarded inputs
                 // and ring_work limbs after its output slots.
                 let (left_padded, right_padded, x_padded, ring_scratch) = unsafe {
-                    let (left, after_left) = shared_scratch.split_at_mut_unchecked(coeff_len);
-                    let (right, after_right) = after_left.split_at_mut_unchecked(coeff_len);
-                    let (x, work) = after_right.split_at_mut_unchecked(coeff_len);
+                    let (left, after_left) =
+                        shared_scratch.split_at_mut_unchecked(fermat_input_len);
+                    let (right, after_right) = after_left.split_at_mut_unchecked(fermat_input_len);
+                    let (x, work) = after_right.split_at_mut_unchecked(fermat_input_len);
                     (left, right, x, work)
                 };
 
-                if active_a.len() <= n
-                    && active_b.len() <= n
-                    && active_x.len() <= n
-                    && (ring_bits > SSA_BASE_MODULUS_BITS || choice.forces_transform())
-                {
+                if fermat_input_len == 0 {
                     // SAFETY: all operands fit the data width with implicit
                     // zero high limbs and guards; exact widths are supplied.
                     unsafe {
@@ -297,34 +397,57 @@ impl Ssa {
                 // SAFETY: the second CRT phase reuses the staging slots after
                 // the first phase ends, and the checked layout covers its work.
                 let (left_folded, right_folded, x_folded, xm_scratch) = unsafe {
-                    let (left, after_left) = shared_scratch.split_at_mut_unchecked(n);
-                    let (right, after_right) = after_left.split_at_mut_unchecked(n);
-                    let (x, work) = after_right.split_at_mut_unchecked(n);
+                    let (left, after_left) = shared_scratch.split_at_mut_unchecked(left_folded_len);
+                    let (right, after_right) = after_left.split_at_mut_unchecked(right_folded_len);
+                    let (x, work) = after_right.split_at_mut_unchecked(x_folded_len);
                     (left, right, x, work)
                 };
-
-                if active_a.len() == n && active_b.len() == n && active_x.len() == n {
-                    SsaCrt::mul_mod_bnm1_two_by_one(
-                        xm_a, xm_b, active_a, active_b, active_x, xm_scratch, executor,
-                    );
+                let src_a = if left_folded_len == 0 {
+                    // SAFETY: zero staging proves n readable limbs and no
+                    // nonzero source limbs above this complete residue.
+                    unsafe { a_limbs.get_unchecked(..n) }
                 } else {
                     SsaCrt::stage_folded_operand(left_folded, active_a, n);
+                    &*left_folded
+                };
+                let src_b = if right_folded_len == 0 {
+                    // SAFETY: the same complete-prefix proof holds for b.
+                    unsafe { b_limbs.get_unchecked(..n) }
+                } else {
                     SsaCrt::stage_folded_operand(right_folded, active_b, n);
+                    &*right_folded
+                };
+                let src_x = if x_folded_len == 0 {
+                    // SAFETY: the shared operand has a complete n-limb prefix
+                    // and every omitted high source limb is zero.
+                    unsafe { x_limbs.get_unchecked(..n) }
+                } else {
                     SsaCrt::stage_folded_operand(x_folded, active_x, n);
-                    SsaCrt::mul_mod_bnm1_two_by_one(
-                        xm_a,
-                        xm_b,
-                        left_folded,
-                        right_folded,
-                        x_folded,
-                        xm_scratch,
-                        executor,
-                    );
-                }
+                    &*x_folded
+                };
+                SsaCrt::mul_mod_bnm1_two_by_one(
+                    xm_a, xm_b, src_a, src_b, src_x, xm_scratch, executor,
+                );
             }
 
-            SsaCrt::merge_exact_product(out_a, xp_a, xm_a);
-            SsaCrt::merge_exact_product(out_b, xp_b, xm_b);
+            if fallback_a == 0 {
+                // SAFETY: the Fermat writer initialized out_a[..=n], and the
+                // admitted output covers this complete guarded prefix.
+                unsafe {
+                    SsaCrt::merge_exact_product_in_place(out_a, xm_a);
+                }
+            } else {
+                SsaCrt::merge_exact_product(out_a, xp_scratch_a, xm_a);
+            }
+            if fallback_b == 0 {
+                // SAFETY: the Fermat writer initialized out_b[..=n], and the
+                // admitted output covers this complete guarded prefix.
+                unsafe {
+                    SsaCrt::merge_exact_product_in_place(out_b, xm_b);
+                }
+            } else {
+                SsaCrt::merge_exact_product(out_b, xp_scratch_b, xm_b);
+            }
         }
         true
     }

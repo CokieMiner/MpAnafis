@@ -343,18 +343,60 @@ impl Ssa {
         } else {
             transformed
         };
+        let Some(coefficient_len) = half_width.checked_add(1) else {
+            return 0;
+        };
+        let fermat_input_len =
+            if len_a <= half_width && len_b <= half_width && ring_bits > SSA_BASE_MODULUS_BITS {
+                0
+            } else {
+                coefficient_len
+            };
+        // Capacity-only queries borrow exact-width operands. Wider declared
+        // operands reserve folding even when their significant prefix is shorter.
+        let Some(mersenne_input_len) =
+            [len_a, len_b].into_iter().try_fold(0_usize, |total, len| {
+                total.checked_add(if len == half_width { 0 } else { half_width })
+            })
+        else {
+            return 0;
+        };
         // A parallel executor evaluates the two CRT halves concurrently, so the
         // caller workspace must cover both halves' staging and workspaces at
         // once. This mirrors the prepared plan's concurrent layout exactly.
         let crt_scratch = if parallelism > 1 {
-            SsaCrt::layout_len_concurrent(half_width, ring_scratch, parallelism)
+            SsaCrt::layout_len_concurrent(
+                half_width,
+                ring_scratch,
+                parallelism,
+                fermat_input_len,
+                mersenne_input_len,
+            )
         } else {
-            SsaCrt::layout_len(half_width, ring_scratch, parallelism)
+            SsaCrt::layout_len(
+                half_width,
+                ring_scratch,
+                parallelism,
+                fermat_input_len,
+                mersenne_input_len,
+            )
         };
-        if crt_scratch == usize::MAX {
+        // The admitted geometry bounds both declared widths and its guard.
+        // Only a two-limb exact output cannot hold the minimum Fermat residue.
+        let Some(total_scratch) = len_a.checked_add(len_b).and_then(|result_len| {
+            let fallback = if result_len < coefficient_len {
+                coefficient_len
+            } else {
+                0
+            };
+            crt_scratch.checked_add(fallback)
+        }) else {
+            return 0;
+        };
+        if total_scratch == usize::MAX {
             0
         } else {
-            crt_scratch
+            total_scratch
         }
     }
 
@@ -394,7 +436,36 @@ impl Ssa {
         if ring_scratch == usize::MAX {
             return 0;
         }
-        SsaCrt::sqr_layout_len(half_width, ring_scratch, parallelism)
+        let Some(coefficient_len) = half_width.checked_add(1) else {
+            return 0;
+        };
+        let fermat_input_len = if ring_bits > SSA_BASE_MODULUS_BITS {
+            0
+        } else {
+            coefficient_len
+        };
+        let Some(crt_scratch) = len.checked_mul(2).and_then(|result_len| {
+            let fallback = if result_len < coefficient_len {
+                coefficient_len
+            } else {
+                0
+            };
+            SsaCrt::sqr_layout_len(
+                half_width,
+                ring_scratch,
+                parallelism,
+                fermat_input_len,
+                if len == half_width { 0 } else { half_width },
+            )
+            .checked_add(fallback)
+        }) else {
+            return 0;
+        };
+        if crt_scratch == usize::MAX {
+            0
+        } else {
+            crt_scratch
+        }
     }
 
     /// Square a limb slice with recursive Fermat-ring FFT squaring.

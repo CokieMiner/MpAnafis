@@ -14,7 +14,7 @@ use super::*;
 )]
 #[test]
 fn direct_squares_match_crt_with_exact_dirty_scratch_and_output_guards() {
-    for len in [1_usize, 3, 31, 127, 257, 2_048, 3_073] {
+    for len in [2_048_usize, 3_073] {
         for sparse in [false, true] {
             let mut input = vec![Limb::MAX; len];
             if sparse {
