@@ -1,0 +1,190 @@
+//! `wrapping_add`, `wrapping_sub`, `wrapping_mul`, `wrapping_div`, and
+//! `wrapping_rem`.
+//!
+//! Rug emulates the bounded policy with GMP's remainder modulo `2^bits`.
+//! Division and remainder need no truncation after a valid operation; their
+//! edge cells return zero for a zero divisor, exactly like `MpUint`.
+
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+use core::ops::{Add, Div, Mul, Rem, Sub};
+
+use divan::black_box;
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+use rug::Integer;
+
+use crate::int::{ladders::NARROW, support::SAMPLE_SIZE_FAST};
+
+use super::{EDGE_WIDTH, Operation, Scenario, mp_pairs};
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+use super::{rug_pairs, rug_width, verify_value};
+
+macro_rules! wrapping_benches {
+    ($success:ident, $edge:ident, $operation:expr, $method:ident, $rug:path) => {
+        mod $success {
+            #[allow(clippy::wildcard_imports, reason = "Policy expressions use the category's explicit imports and prepared fixtures")]
+            use super::*;
+
+            #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
+            fn mp(bencher: divan::Bencher, bits: usize) {
+                verify($operation, Scenario::Success, bits);
+                let inputs = mp_pairs(bits, $operation, Scenario::Success);
+                bencher.bench_local(|| {
+                    for (left, right) in &inputs {
+                        let _output = black_box(black_box(left).$method(black_box(right)));
+                    }
+                });
+            }
+
+            #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+            #[divan::bench(args = NARROW, sample_size = SAMPLE_SIZE_FAST)]
+            fn rug(bencher: divan::Bencher, bits: usize) {
+                verify($operation, Scenario::Success, bits);
+                let inputs = rug_pairs(bits, $operation, Scenario::Success);
+                let width = rug_width(bits);
+                bencher.bench_local(|| {
+                    for (left, right) in &inputs {
+                        let _output = black_box($rug(black_box(left), black_box(right), width));
+                    }
+                });
+            }
+        }
+
+        mod $edge {
+            #[allow(clippy::wildcard_imports, reason = "Policy expressions use the category's explicit imports and prepared fixtures")]
+            use super::*;
+
+            #[divan::bench(args = EDGE_WIDTH, sample_size = SAMPLE_SIZE_FAST)]
+            fn mp(bencher: divan::Bencher, bits: usize) {
+                verify($operation, Scenario::Edge, bits);
+                let inputs = mp_pairs(bits, $operation, Scenario::Edge);
+                bencher.bench_local(|| {
+                    for (left, right) in &inputs {
+                        let _output = black_box(black_box(left).$method(black_box(right)));
+                    }
+                });
+            }
+
+            #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+            #[divan::bench(args = EDGE_WIDTH, sample_size = SAMPLE_SIZE_FAST)]
+            fn rug(bencher: divan::Bencher, bits: usize) {
+                verify($operation, Scenario::Edge, bits);
+                let inputs = rug_pairs(bits, $operation, Scenario::Edge);
+                let width = rug_width(bits);
+                bencher.bench_local(|| {
+                    for (left, right) in &inputs {
+                        let _output = black_box($rug(black_box(left), black_box(right), width));
+                    }
+                });
+            }
+        }
+    };
+}
+
+wrapping_benches!(
+    add_success,
+    add_overflow,
+    Operation::Add,
+    wrapping_add,
+    rug_wrapping_add
+);
+wrapping_benches!(
+    sub_success,
+    sub_underflow,
+    Operation::Sub,
+    wrapping_sub,
+    rug_wrapping_sub
+);
+wrapping_benches!(
+    mul_success,
+    mul_overflow,
+    Operation::Mul,
+    wrapping_mul,
+    rug_wrapping_mul
+);
+wrapping_benches!(
+    div_success,
+    div_zero,
+    Operation::Div,
+    wrapping_div,
+    rug_wrapping_div
+);
+wrapping_benches!(
+    rem_success,
+    rem_zero,
+    Operation::Rem,
+    wrapping_rem,
+    rug_wrapping_rem
+);
+
+fn verify(operation: Operation, scenario: Scenario, bits: usize) {
+    #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+    {
+        let mp = mp_pairs(bits, operation, scenario);
+        let rug = rug_pairs(bits, operation, scenario);
+        let width = rug_width(bits);
+
+        for ((mp_left, mp_right), (rug_left, rug_right)) in mp.iter().zip(&rug) {
+            verify_value(mp_left, rug_left);
+            verify_value(mp_right, rug_right);
+            let (actual, expected) = match operation {
+                Operation::Add => (
+                    mp_left.wrapping_add(mp_right),
+                    rug_wrapping_add(rug_left, rug_right, width),
+                ),
+                Operation::Sub => (
+                    mp_left.wrapping_sub(mp_right),
+                    rug_wrapping_sub(rug_left, rug_right, width),
+                ),
+                Operation::Mul => (
+                    mp_left.wrapping_mul(mp_right),
+                    rug_wrapping_mul(rug_left, rug_right, width),
+                ),
+                Operation::Div => (
+                    mp_left.wrapping_div(mp_right),
+                    rug_wrapping_div(rug_left, rug_right, width),
+                ),
+                Operation::Rem => (
+                    mp_left.wrapping_rem(mp_right),
+                    rug_wrapping_rem(rug_left, rug_right, width),
+                ),
+            };
+            verify_value(&actual, &expected);
+        }
+    }
+
+    #[cfg(not(all(target_arch = "x86_64", target_pointer_width = "64")))]
+    let _ = (operation, scenario, bits);
+}
+
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+fn rug_wrapping_add(left: &Integer, right: &Integer, width: u32) -> Integer {
+    Integer::from(Add::add(left, right)).keep_bits(width)
+}
+
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+fn rug_wrapping_sub(left: &Integer, right: &Integer, width: u32) -> Integer {
+    Integer::from(Sub::sub(left, right)).keep_bits(width)
+}
+
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+fn rug_wrapping_mul(left: &Integer, right: &Integer, width: u32) -> Integer {
+    Integer::from(Mul::mul(left, right)).keep_bits(width)
+}
+
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+fn rug_wrapping_div(left: &Integer, right: &Integer, _width: u32) -> Integer {
+    if right.is_zero() {
+        Integer::new()
+    } else {
+        Integer::from(Div::div(left, right))
+    }
+}
+
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+fn rug_wrapping_rem(left: &Integer, right: &Integer, _width: u32) -> Integer {
+    if right.is_zero() {
+        Integer::new()
+    } else {
+        Integer::from(Rem::rem(left, right))
+    }
+}

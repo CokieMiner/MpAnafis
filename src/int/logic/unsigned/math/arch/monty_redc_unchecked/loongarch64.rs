@@ -1,0 +1,139 @@
+//! `LoongArch64` CIOS Montgomery reduction-step kernel.
+//!
+//! Implements Coarsely Integrated Operand Scanning (CIOS) Montgomery reduction step
+//! using 64x64->128-bit multipliers (`mul.d`/`mulh.du`) and branchless `sltu` carry capture.
+
+use core::arch::asm;
+
+use super::Limb;
+
+/// Compute one fused Coarsely Integrated Operand Scanning (CIOS) reduction step.
+///
+/// Computes:
+///
+/// ```text
+///   (out[0..len] + a_i * b[0..len] + q * m[0..len]) / 2^64
+/// ```
+///
+/// CIOS interleaves multiplicand and modular reduction accumulation in a single loop,
+/// tracking `carry_b` and `carry_m` branchlessly using `sltu` without flags.
+///
+/// # Safety
+///
+/// - For nonzero `len`, all pointers must cover `len` aligned, initialized
+///   limbs within `isize::MAX` bytes; `out` must be writable.
+/// - `out` must be disjoint from `b` and `m`; the two inputs may overlap.
+/// - `m` must be odd and `m_inv * m[0] = -1 mod 2^64`.
+#[expect(
+    clippy::inline_always,
+    reason = "The CIOS reduction step is the inner loop of Montgomery multiplication"
+)]
+#[inline(always)]
+pub unsafe fn monty_redc_step_unchecked(
+    out: *mut Limb,
+    b: *const Limb,
+    m: *const Limb,
+    len: usize,
+    a_i: Limb,
+    m_inv: Limb,
+) -> Limb {
+    if len == 0 {
+        return 0;
+    }
+
+    let overflow: Limb;
+
+    // SAFETY: the caller provides aligned initialized spans, writable out
+    // disjoint from the inputs, and an inverse cancelling limb zero. len > 0
+    // permits the first loads. The remaining len-1 iterations load limb j
+    // before storing j-1; the final store is at len-1. Each product plus two
+    // limbs is <= B^2-1, so both high carries fit Limb. All modified registers
+    // are outputs; pointer updates reach at most one past each span.
+    unsafe {
+        asm!(
+            // Step 0: Prime the reduction pipeline with limb 0
+            "ld.d {out_limb}, {out}, 0",                 // Load out[0]
+            "ld.d {factor}, {b}, 0",                     // Load b[0]
+            "mul.d {low}, {factor}, {a_i}",              // Low 64 bits of b[0] * a_i
+            "mulh.du {high}, {factor}, {a_i}",           // High 64 bits of b[0] * a_i
+            "add.d {low}, {low}, {out_limb}",            // low += out[0]
+            "sltu {carry_bit0}, {low}, {out_limb}",      // Detect wrap
+            "add.d {carry_b}, {high}, {carry_bit0}",     // carry_b = high + carry_bit0
+
+            // Derive quotient multiplier q
+            "mul.d {quotient}, {low}, {m_inv}",          // quotient = (low * m_inv) mod 2^64
+            "ld.d {factor}, {m}, 0",                     // Load m[0]
+            "mul.d {mod_low}, {factor}, {quotient}",     // Low 64 bits of m[0] * q
+            "mulh.du {mod_high}, {factor}, {quotient}",  // High 64 bits of m[0] * q
+            "add.d {mod_low}, {mod_low}, {low}",         // Low word cancelled to 0 mod 2^64
+            "sltu {carry_bit0}, {mod_low}, {low}",       // Detect wrap
+            "add.d {carry_m}, {mod_high}, {carry_bit0}", // carry_m = mod_high + carry_bit0
+
+            // Advance pointers to limb 1
+            "addi.d {out}, {out}, 8",
+            "addi.d {b}, {b}, 8",
+            "addi.d {m}, {m}, 8",
+            "addi.d {len}, {len}, -1",
+            "beqz {len}, 2f",                            // If len == 1, skip main loop (2f)
+
+            // Main reduction loop for j = 1 to len-1
+            "1:",
+            "ld.d {out_limb}, {out}, 0",                 // Load out[j]
+            "ld.d {factor}, {b}, 0",                     // Load b[j]
+            "mul.d {low}, {factor}, {a_i}",              // Low 64 bits of b[j] * a_i
+            "mulh.du {high}, {factor}, {a_i}",           // High 64 bits of b[j] * a_i
+            "add.d {low}, {low}, {carry_b}",             // low += carry_b
+            "sltu {carry_bit0}, {low}, {carry_b}",       // Detect wrap
+            "add.d {high}, {high}, {carry_bit0}",        // high += carry_bit0
+            "add.d {low}, {low}, {out_limb}",            // low += out[j]
+            "sltu {carry_bit1}, {low}, {out_limb}",      // Detect wrap
+            "add.d {carry_b}, {high}, {carry_bit1}",     // Update carry_b
+
+            "ld.d {factor}, {m}, 0",                     // Load m[j]
+            "mul.d {mod_low}, {factor}, {quotient}",     // Low 64 bits of m[j] * q
+            "mulh.du {mod_high}, {factor}, {quotient}",  // High 64 bits of m[j] * q
+            "add.d {mod_low}, {mod_low}, {carry_m}",     // mod_low += carry_m
+            "sltu {carry_bit0}, {mod_low}, {carry_m}",   // Detect wrap
+            "add.d {mod_high}, {mod_high}, {carry_bit0}",// mod_high += carry_bit0
+            "add.d {mod_low}, {mod_low}, {low}",         // mod_low += low
+            "sltu {carry_bit1}, {mod_low}, {low}",       // Detect wrap
+            "add.d {carry_m}, {mod_high}, {carry_bit1}", // Update carry_m
+            "st.d {mod_low}, {out}, -8",                 // Store shifted limb into out[j-1]
+
+            "addi.d {out}, {out}, 8",                    // Advance pointers
+            "addi.d {b}, {b}, 8",
+            "addi.d {m}, {m}, 8",
+            "addi.d {len}, {len}, -1",
+            "bnez {len}, 1b",                            // Repeat while len != 0
+
+            // Epilogue: Flush combined carries to out[len-1] and return top overflow
+            "2:",
+            "add.d {final_limb}, {carry_b}, {carry_m}",  // final_limb = carry_b + carry_m
+            "sltu {overflow}, {final_limb}, {carry_b}",  // overflow = 1 if final addition wrapped
+            "st.d {final_limb}, {out}, -8",              // Store out[len-1]
+
+            out = inout(reg) out => _,
+            b = inout(reg) b => _,
+            m = inout(reg) m => _,
+            len = inout(reg) len => _,
+            a_i = in(reg) a_i,
+            m_inv = in(reg) m_inv,
+            overflow = out(reg) overflow,
+            quotient = out(reg) _,
+            carry_b = out(reg) _,
+            carry_m = out(reg) _,
+            out_limb = out(reg) _,
+            factor = out(reg) _,
+            low = out(reg) _,
+            high = out(reg) _,
+            carry_bit0 = out(reg) _,
+            carry_bit1 = out(reg) _,
+            mod_low = out(reg) _,
+            mod_high = out(reg) _,
+            final_limb = out(reg) _,
+            options(nostack)
+        );
+    }
+
+    overflow
+}

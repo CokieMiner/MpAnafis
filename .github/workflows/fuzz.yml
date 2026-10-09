@@ -1,0 +1,123 @@
+name: Integer Fuzzing
+
+on:
+  schedule:
+    - cron: "17 1 * * 0"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Fuzzing duration per target (1 to 18000 seconds)
+        type: number
+        default: 18000
+      save-corpus:
+        description: Retain corpus mutations after the run
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      seconds:
+        description: Fuzzing duration, excluding setup and compilation
+        type: number
+        default: 18000
+      save-corpus:
+        description: Retain corpus mutations after the run
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [int_ops, math_ops]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      FUZZ_SECONDS: ${{ github.event_name == 'schedule' && 18000 || inputs.seconds }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Validate Run Parameters
+        run: |
+          if [[ ! "$FUZZ_SECONDS" =~ ^[1-9][0-9]{0,4}$ ]] || (( FUZZ_SECONDS > 18000 )); then
+            echo "Fuzz duration must be an integer from 1 to 18000 seconds." >&2
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - name: Install cargo-fuzz
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz@0.13.2
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: fuzz-${{ matrix.target }}
+          workspaces: fuzz -> target
+
+      - name: Restore Corpus
+        id: corpus
+        uses: actions/cache/restore@v5
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+
+      - name: Prepare Run Directories
+        run: mkdir -p "fuzz/corpus/${{ matrix.target }}" "${RUNNER_TEMP}/fuzz-artifacts"
+
+      - name: Record Toolchain
+        run: |
+          rustc -Vv
+          cargo fuzz --version
+
+      - name: Build Target
+        timeout-minutes: 40
+        run: |
+          cargo fuzz build '${{ matrix.target }}' --target x86_64-unknown-linux-gnu --all-features
+          git diff --exit-code -- fuzz/Cargo.lock
+
+      - name: Run Target
+        id: run
+        timeout-minutes: 310
+        run: |
+          set -o pipefail
+          cargo fuzz run '${{ matrix.target }}' --target x86_64-unknown-linux-gnu --all-features -- \
+            -max_total_time="$FUZZ_SECONDS" \
+            -print_final_stats=1 \
+            "-artifact_prefix=${RUNNER_TEMP}/fuzz-artifacts/" \
+            2>&1 | tee "${RUNNER_TEMP}/fuzz.log"
+
+      - name: Save Corpus
+        if: ${{ !cancelled() && (github.event_name == 'schedule' || inputs.save-corpus) && steps.run.outcome != 'skipped' && steps.run.outcome != '' }}
+        uses: actions/cache/save@v5
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: ${{ steps.corpus.outputs.cache-primary-key }}
+
+      - name: Upload Run Evidence
+        if: ${{ !cancelled() && steps.run.outcome != 'skipped' && steps.run.outcome != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/fuzz.log
+            ${{ runner.temp }}/fuzz-artifacts/
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,0 +1,427 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    name: Format, Policy & Native Clippy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust Nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check Formatting
+        run: |
+          cargo fmt --all --check
+          cargo fmt --manifest-path fuzz/Cargo.toml --check
+
+      - name: Import Audit
+        run: python3 -B tools/import_audit.py
+
+      - name: Structure Audit
+        run: python3 -B tools/structure_audit.py
+
+      - name: Native Clippy
+        run: |
+          cargo clippy --locked --all-targets --no-default-features -- -D warnings
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+
+  tools:
+    name: Workflows and Python Tools
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Actionlint 1.7.12
+        run: |
+          curl --fail --location --output "$RUNNER_TEMP/actionlint.tar.gz" \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/actionlint"
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP/actionlint" actionlint
+          echo "$RUNNER_TEMP/actionlint" >> "$GITHUB_PATH"
+      - name: Install Python plotting and assembler dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-matplotlib llvm shellcheck
+      - name: Validate Workflows
+        run: actionlint
+      - name: Run Tool Regressions
+        run: /usr/bin/python3 tools/audit.py --tests
+
+  msrv:
+    name: Minimum Rust 1.93.0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.93.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Check Library Feature Sets
+        run: |
+          cargo check --locked --lib --no-default-features
+          cargo check --locked --lib --no-default-features --features num-traits
+          cargo check --locked --lib --all-features
+
+  host_check:
+    name: Library (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check Library Feature Sets
+        run: |
+          cargo check --locked --lib --no-default-features
+          cargo check --locked --lib --all-features
+
+  fuzz_smoke:
+    name: Fuzz Smoke
+    uses: ./.github/workflows/fuzz.yml
+    with:
+      seconds: 60
+      save-corpus: false
+
+  test:
+    name: Test (Native x86_64)
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust Stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            fuzz -> target
+
+      - name: Install FLINT build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgmp-dev libmpfr-dev
+
+      - name: Identify FLINT compiler and CPU settings
+        id: flint_cpu
+        run: |
+          key="$(gcc -march=native -Q --help=target | sha256sum | cut -d ' ' -f1)"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+
+      - name: Cache FLINT 3.6.0
+        id: flint
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/flint
+          key: flint-3.6.0-ubuntu-24.04-x86_64-usr-${{ steps.flint_cpu.outputs.key }}
+
+      - name: Build FLINT 3.6.0
+        if: steps.flint.outputs.cache-hit != 'true'
+        run: |
+          curl --fail --location --output "$RUNNER_TEMP/flint.tar.xz" \
+            https://github.com/flintlib/flint/releases/download/v3.6.0/flint-3.6.0.tar.xz
+          echo "134d39731a6dd926254625d646d85bf5990c68a3f2326cd54d2a6983e3e11dd8  $RUNNER_TEMP/flint.tar.xz" | sha256sum --check --strict
+          tar -xf "$RUNNER_TEMP/flint.tar.xz" -C "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP/flint-3.6.0"
+          ./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu --disable-static --enable-shared
+          make -j2
+          make install DESTDIR="$RUNNER_TEMP/flint"
+
+      - name: Install cached FLINT
+        run: |
+          sudo cp -a "$RUNNER_TEMP/flint/usr/." /usr/
+          sudo ldconfig
+
+      - name: Run Tests & Compile Auxiliary Targets
+        run: |
+          cargo test --locked --doc --all-features
+          cargo test --locked --lib --tests --bins --examples --all-features
+          cargo test --locked --lib --tests --no-default-features
+          cargo test --locked --lib --features num-traits --no-default-features
+          cargo clippy --locked --manifest-path fuzz/Cargo.toml --all-targets --all-features -- -D warnings
+          cargo test --locked --manifest-path fuzz/Cargo.toml --lib
+          cargo test --locked --manifest-path fuzz/Cargo.toml --lib --all-features
+
+      - name: Build and Validate Benchmark Comparisons
+        run: |
+          python3 tools/bench.py check --features std,rayon,_internal-tune --require-comparison
+          cargo bench --locked --bench internal_improvement --features std,rayon,_internal-tune --no-run
+
+  # Overrides require std and debug assertions. Cargo's test profile retains
+  # assertions while optimizing arithmetic. Unavailable CPU tiers are reported.
+  test_x86_backends:
+    name: Kernel Backend (${{ matrix.backend }})
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [adx, bmi2, vanilla, avx2, avx512]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust Stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: backend-${{ matrix.backend }}
+
+      - name: Check Host Instruction Support
+        id: cpu
+        run: |
+          available=true
+          case '${{ matrix.backend }}' in
+            adx) flags="adx" ;;
+            bmi2) flags="bmi2" ;;
+            avx2) flags="avx2" ;;
+            avx512) flags="avx2 avx512f" ;;
+            vanilla) flags="" ;;
+          esac
+          for flag in $flags; do
+            if ! grep -qw "$flag" /proc/cpuinfo; then available=false; fi
+          done
+          echo "available=$available" >> "$GITHUB_OUTPUT"
+          if [ "$available" = false ]; then
+            echo "::notice::Skipping ${{ matrix.backend }} execution: this runner lacks its CPU features."
+            echo "Skipped ${{ matrix.backend }}: CPU feature unavailable." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Run Tests On Selected Backend
+        if: steps.cpu.outputs.available == 'true'
+        env:
+          MP_ANAFIS_TEST_BACKEND: ${{ matrix.backend }}
+        run: |
+          cargo test --locked --lib --tests --features std,num-traits
+
+  # Compiler and emulator both select POWER9; Cross.toml forwards QEMU_CPU.
+  test_power9:
+    name: Test (POWER9 ISA 3.0)
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      QEMU_CPU: power9
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust Stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: powerpc64le-unknown-linux-gnu
+
+      - name: Install cross
+        uses: taiki-e/install-action@cross
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: power9
+
+      - name: Run Tests (cross - no_std and std)
+        run: |
+          cross test --locked --lib --tests --no-default-features --target powerpc64le-unknown-linux-gnu \
+            --config 'target.powerpc64le-unknown-linux-gnu.rustflags=["-C", "target-cpu=pwr9"]'
+          cross test --locked --lib --tests --features std,num-traits --target powerpc64le-unknown-linux-gnu \
+            --config 'target.powerpc64le-unknown-linux-gnu.rustflags=["-C", "target-cpu=pwr9"]'
+
+  check_archs:
+    name: Cross-Architecture Assembly Check
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust Nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: clippy, rust-src
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: check-archs
+
+      - name: Verify All ASM Kernels Compile
+        run: ./tools/check_all_archs.sh
+
+  test_cross:
+    name: Test (${{ matrix.target }})
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-unknown-linux-gnu
+          - armv7-unknown-linux-gnueabihf
+          - powerpc64le-unknown-linux-gnu
+          - powerpc64-unknown-linux-gnu
+          - powerpc-unknown-linux-gnu
+          - s390x-unknown-linux-gnu
+          - riscv64gc-unknown-linux-gnu
+          - riscv32gc-unknown-linux-gnu
+          - mips64-unknown-linux-gnuabi64
+          - mips-unknown-linux-gnu
+          - i686-unknown-linux-gnu
+          - loongarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust Stable
+        if: ${{ matrix.target != 'riscv32gc-unknown-linux-gnu' && matrix.target != 'mips-unknown-linux-gnu' && matrix.target != 'mips64-unknown-linux-gnuabi64' }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Rust Nightly (For Tier 3 targets)
+        if: ${{ matrix.target == 'riscv32gc-unknown-linux-gnu' || matrix.target == 'mips-unknown-linux-gnu' || matrix.target == 'mips64-unknown-linux-gnuabi64' }}
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Install System Cross Compilers & QEMU
+        if: ${{ matrix.target == 'riscv32gc-unknown-linux-gnu' || matrix.target == 'mips-unknown-linux-gnu' || matrix.target == 'mips64-unknown-linux-gnuabi64' || matrix.target == 'loongarch64-unknown-linux-gnu' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user
+          if [ "${{ matrix.target }}" = "riscv32gc-unknown-linux-gnu" ]; then
+            wget -q https://toolchains.bootlin.com/downloads/releases/toolchains/riscv32-ilp32d/tarballs/riscv32-ilp32d--glibc--bleeding-edge-2024.02-1.tar.bz2
+            echo "ae046c9e6616f6b33d82c0d581efb41c4c6428fa1c1345417c82533cc27fb86e  riscv32-ilp32d--glibc--bleeding-edge-2024.02-1.tar.bz2" | sha256sum --check --strict
+            tar -xf riscv32-ilp32d--glibc--bleeding-edge-2024.02-1.tar.bz2
+          fi
+          if [ "${{ matrix.target }}" = "mips-unknown-linux-gnu" ]; then sudo apt-get install -y gcc-mips-linux-gnu; fi
+          if [ "${{ matrix.target }}" = "mips64-unknown-linux-gnuabi64" ]; then sudo apt-get install -y gcc-mips64-linux-gnuabi64; fi
+          if [ "${{ matrix.target }}" = "loongarch64-unknown-linux-gnu" ]; then
+            wget -q https://github.com/loongson/build-tools/releases/download/2025.08.08/x86_64-cross-tools-loongarch64-binutils_2.45-gcc_15.1.0-glibc_2.42.tar.xz
+            echo "b8572e2083143ff1807658f02e11eba53e5ed81d6194854d369b43fceea72de7  x86_64-cross-tools-loongarch64-binutils_2.45-gcc_15.1.0-glibc_2.42.tar.xz" | sha256sum --check --strict
+            tar -xf x86_64-cross-tools-loongarch64-binutils_2.45-gcc_15.1.0-glibc_2.42.tar.xz
+          fi
+
+      - name: Install cross
+        if: ${{ matrix.target != 'riscv32gc-unknown-linux-gnu' && matrix.target != 'loongarch64-unknown-linux-gnu' && matrix.target != 'mips64-unknown-linux-gnuabi64' && matrix.target != 'mips-unknown-linux-gnu' }}
+        uses: taiki-e/install-action@cross
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: cross-${{ matrix.target }}
+
+      - name: Run Tests (cross - no_std and std)
+        if: ${{ matrix.target != 'riscv32gc-unknown-linux-gnu' && matrix.target != 'loongarch64-unknown-linux-gnu' && matrix.target != 'mips64-unknown-linux-gnuabi64' && matrix.target != 'mips-unknown-linux-gnu' }}
+        run: |
+          cross test --locked --lib --tests --no-default-features --target ${{ matrix.target }}
+          cross test --locked --lib --tests --features std,num-traits --target ${{ matrix.target }}
+
+      - name: Run Tests (Native QEMU - Tier 3 - no_std and std)
+        if: ${{ matrix.target == 'riscv32gc-unknown-linux-gnu' || matrix.target == 'mips-unknown-linux-gnu' || matrix.target == 'mips64-unknown-linux-gnuabi64' || matrix.target == 'loongarch64-unknown-linux-gnu' }}
+        run: |
+          case '${{ matrix.target }}' in
+            riscv32gc-unknown-linux-gnu)
+              cargo_args=(
+                +nightly -Zbuild-std
+                --config "target.riscv32gc-unknown-linux-gnu.linker='$GITHUB_WORKSPACE/riscv32-ilp32d--glibc--bleeding-edge-2024.02-1/bin/riscv32-buildroot-linux-gnu-gcc'"
+                --config "target.riscv32gc-unknown-linux-gnu.runner=['qemu-riscv32', '-L', '$GITHUB_WORKSPACE/riscv32-ilp32d--glibc--bleeding-edge-2024.02-1/riscv32-buildroot-linux-gnu/sysroot']"
+              ) ;;
+            mips-unknown-linux-gnu)
+              cargo_args=(
+                +nightly -Zbuild-std
+                --config 'target.mips-unknown-linux-gnu.linker="mips-linux-gnu-gcc"'
+                --config 'target.mips-unknown-linux-gnu.runner=["qemu-mips", "-L", "/usr/mips-linux-gnu"]'
+              ) ;;
+            mips64-unknown-linux-gnuabi64)
+              # Long branches keep source-built std functions within MIPS branch limits.
+              cargo_args=(
+                +nightly -Zbuild-std
+                --config 'target.mips64-unknown-linux-gnuabi64.linker="mips64-linux-gnuabi64-gcc"'
+                --config 'target.mips64-unknown-linux-gnuabi64.runner=["qemu-mips64", "-L", "/usr/mips64-linux-gnuabi64"]'
+                --config 'target.mips64-unknown-linux-gnuabi64.rustflags=["-C", "llvm-args=-force-mips-long-branch"]'
+              ) ;;
+            loongarch64-unknown-linux-gnu)
+              cargo_args=(
+                --config "target.loongarch64-unknown-linux-gnu.linker='$GITHUB_WORKSPACE/cross-tools/bin/loongarch64-unknown-linux-gnu-gcc'"
+                --config "target.loongarch64-unknown-linux-gnu.runner=['qemu-loongarch64', '-L', '$GITHUB_WORKSPACE/cross-tools/target']"
+                --config 'target.loongarch64-unknown-linux-gnu.rustflags=["-C", "link-arg=-fuse-ld=bfd"]'
+              ) ;;
+          esac
+          cargo "${cargo_args[@]}" test --locked --lib --tests --no-default-features --target ${{ matrix.target }}
+          cargo "${cargo_args[@]}" test --locked --lib --tests --features std,num-traits --target ${{ matrix.target }}
+
+  # Each feature set partitions the complete suite across four interpreter jobs.
+  miri:
+    name: Miri (${{ matrix.name }}, ${{ matrix.part.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [no_std, std]
+        part:
+          - name: interfaces
+            filters: '--skip int::logic::unsigned::math::'
+          - name: division
+            filters: 'int::logic::unsigned::math::div::'
+          - name: multiplication
+            filters: 'int::logic::unsigned::math::mul::'
+          - name: arithmetic
+            filters: >-
+              int::logic::unsigned::math::
+              --skip int::logic::unsigned::math::div::
+              --skip int::logic::unsigned::math::mul::
+        include:
+          - name: no_std
+            features: --no-default-features
+          - name: std
+            features: --features std,num-traits
+    env:
+      PROPTEST_CASES: 8
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Nightly & Miri
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri, rust-src
+      - name: Prepare Miri
+        run: |
+          cargo miri setup
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: miri-${{ matrix.name }}-${{ matrix.part.name }}
+      - name: Run Tests with Miri
+        run: |
+          cargo miri test --locked --lib --tests ${{ matrix.features }} -- ${{ matrix.part.filters }}

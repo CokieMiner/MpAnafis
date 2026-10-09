@@ -1,0 +1,5 @@
+[env]
+# Forward this env var into Miri's isolated test process so proptest
+# disables filesystem-backed failure persistence instead of calling getcwd().
+MIRIFLAGS = "-Zmiri-env-forward=PROPTEST_DISABLE_FAILURE_PERSISTENCE -Zmiri-env-forward=PROPTEST_CASES"
+PROPTEST_DISABLE_FAILURE_PERSISTENCE = "1"

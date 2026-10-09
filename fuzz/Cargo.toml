@@ -1,0 +1,38 @@
+[package]
+name = "mp-anafis-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[features]
+std = ["mp_anafis/std"]
+num-traits = ["mp_anafis/num-traits", "dep:num-traits"]
+rayon = ["mp_anafis/rayon"]
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+hex = "0.4.3"
+num-traits = { version = "0.2.19", optional = true }
+rug = { version = "1.30.0", default-features = false, features = ["integer", "std"] }
+
+[dependencies.mp_anafis]
+path = ".."
+
+# Independent workspace for fuzz targets and their verification harness.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "math_ops"
+path = "fuzz_targets/math_ops.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "int_ops"
+path = "fuzz_targets/int_ops.rs"
+test = false
+doc = false
