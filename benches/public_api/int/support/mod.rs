@@ -29,6 +29,13 @@ pub use comparison::{verify_hashes, verify_selection};
 pub use division::{
     DivisibilityShape, DivisionResidue, DivisionShape, mp_divisibility_pairs, mp_division_pairs,
 };
+#[cfg(all(
+    feature = "_internal-tune",
+    target_arch = "x86_64",
+    target_os = "linux",
+    target_pointer_width = "64"
+))]
+pub use division::{flint_divisibility_pairs, flint_division_pairs};
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 pub use division::{rug_divisibility_pairs, rug_division_pairs};
 #[cfg(all(
@@ -49,17 +56,17 @@ pub use gcd::flint_gcd_pairs;
 pub use gcd::rug_gcd_pairs;
 pub use gcd::{GcdShape, mp_gcd_pairs};
 pub use measurement::{measure, measure_assignment, measure_mutation};
+pub use operands::{
+    bounded_mp_int, bounded_mp_uint, mp_int, mp_int_pairs, mp_uint, mp_uint_lopsided_pairs,
+    mp_uint_pairs, odd_hex, random_hex,
+};
 #[cfg(all(
     feature = "_internal-tune",
     target_arch = "x86_64",
     target_os = "linux",
     target_pointer_width = "64"
 ))]
-pub use operands::flint_uint;
-pub use operands::{
-    bounded_mp_int, bounded_mp_uint, mp_int, mp_int_pairs, mp_uint, mp_uint_lopsided_pairs,
-    mp_uint_pairs, odd_hex, random_hex,
-};
+pub use operands::{flint_uint, flint_uint_pairs};
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 pub use operands::{rug_int, rug_int_pairs, rug_uint, rug_uint_lopsided_pairs, rug_uint_pairs};
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]

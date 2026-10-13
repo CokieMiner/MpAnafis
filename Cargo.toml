@@ -40,7 +40,7 @@ rayon = { version = "1.10", optional = true, default-features = false }
 
 [dev-dependencies]
 divan = "0.1.21"
-proptest = "1.11.0"
+proptest = "1.12.0"
 
 [target.'cfg(all(target_arch = "x86_64", target_pointer_width = "64"))'.dev-dependencies]
 # External integer comparators are used by benches/; fuzz/ has its own manifest.

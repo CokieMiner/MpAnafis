@@ -2,12 +2,32 @@
 //! quotient shapes. Arguments are divisor bits; exact dividend widths depend
 //! on the product `Q*D+R` and can be one bit below the nominal ratio.
 
+#![cfg_attr(
+    all(
+        feature = "_internal-tune",
+        target_arch = "x86_64",
+        target_os = "linux",
+        target_pointer_width = "64"
+    ),
+    expect(
+        unsafe_code,
+        reason = "the shared fixtures establish nonnegative dividends and positive divisors for FLINT before timing"
+    )
+)]
+
 use mp_anafis::MpUint;
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 use rug::Integer;
 
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 use crate::int::support::rug_division_pairs;
+#[cfg(all(
+    feature = "_internal-tune",
+    target_arch = "x86_64",
+    target_os = "linux",
+    target_pointer_width = "64"
+))]
+use crate::int::support::{FlintInt, flint_division_pairs};
 use crate::int::{
     ladders::DIVISION,
     support::{DivisionResidue, DivisionShape, mp_division_pairs, paired_bench},
@@ -21,18 +41,34 @@ macro_rules! division_cases {
                 => |(a, b): &(MpUint, MpUint)| a.div_trunc(b),
             rug: |bits| rug_division_pairs(bits, DivisionShape::$shape, DivisionResidue::$residue)
                 => |(a, b): &(Integer, Integer)| Integer::from(a / b),
+            flint: |bits| flint_division_pairs(bits, DivisionShape::$shape, DivisionResidue::$residue)
+                => |(a, b): &(FlintInt, FlintInt)| {
+                    // SAFETY: the shared fixtures supply positive divisors.
+                    unsafe { a.div_trunc(b) }
+                },
         );
         paired_bench!($remainder, DIVISION, samples = (1, 20),
             mp: |bits| mp_division_pairs(bits, DivisionShape::$shape, DivisionResidue::$residue)
                 => |(a, b): &(MpUint, MpUint)| a.rem_trunc(b),
             rug: |bits| rug_division_pairs(bits, DivisionShape::$shape, DivisionResidue::$residue)
                 => |(a, b): &(Integer, Integer)| Integer::from(a % b),
+            flint: |bits| flint_division_pairs(bits, DivisionShape::$shape, DivisionResidue::$residue)
+                => |(a, b): &(FlintInt, FlintInt)| {
+                    // SAFETY: the shared fixtures supply nonnegative dividends
+                    // and positive divisors, making floor and truncation equal.
+                    unsafe { a.rem_trunc_nonnegative(b) }
+                },
         );
         paired_bench!($combined, DIVISION, samples = (1, 20),
             mp: |bits| mp_division_pairs(bits, DivisionShape::$shape, DivisionResidue::$residue)
                 => |(a, b): &(MpUint, MpUint)| a.div_rem(b),
             rug: |bits| rug_division_pairs(bits, DivisionShape::$shape, DivisionResidue::$residue)
                 => |(a, b): &(Integer, Integer)| Some(<(Integer, Integer)>::from(a.div_rem_ref(b))),
+            flint: |bits| flint_division_pairs(bits, DivisionShape::$shape, DivisionResidue::$residue)
+                => |(a, b): &(FlintInt, FlintInt)| {
+                    // SAFETY: the shared fixtures supply positive divisors.
+                    Some(unsafe { a.div_rem(b) })
+                },
         );
     };
 }

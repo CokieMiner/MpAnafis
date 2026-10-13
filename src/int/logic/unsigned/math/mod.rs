@@ -1,6 +1,9 @@
 //! Integer arithmetic, modular residues, roots, and number theory.
 
-use super::{DoubleLimb, INLINE_LIMBS, InternalMpUint, LIMB_BITS, Limb, ScratchBuffer, UintRepr};
+use super::{
+    DoubleLimb, INLINE_LIMBS, InternalMpUint, LIMB_BITS, Limb, LimbWriteGuard, ScratchBuffer,
+    UintRepr,
+};
 
 mod add;
 mod arch;
@@ -20,6 +23,8 @@ pub use add::Addition;
 pub use arch::AddSubFromKernel;
 pub use arch::ArchKernels;
 pub use div::{DivScratch, Division};
+#[cfg(feature = "_internal-tune")]
+pub use div::{QuotientAndRemainder, QuotientOnly};
 pub use gcd::{Gcd, HgcdMatrix, HgcdWorkspace};
 pub use modular::{
     BarrettDomain, BarrettScratch, LimbMontgomery, MontgomeryDomain, MontgomeryScratch,

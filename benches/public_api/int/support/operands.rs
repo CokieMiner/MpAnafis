@@ -1,4 +1,4 @@
-//! Exact-width operand generators for both libraries.
+//! Exact-width operand generators with equal seeds across libraries.
 //!
 //! Equal seeds produce equal magnitudes across engines. The leading
 //! hexadecimal digit has its high bit set, establishing the requested width.
@@ -7,14 +7,14 @@ use mp_anafis::{BoundedPrecision, MpInt, MpUint};
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 use rug::Integer;
 
+use super::SAMPLES;
 #[cfg(all(
     feature = "_internal-tune",
     target_arch = "x86_64",
     target_os = "linux",
     target_pointer_width = "64"
 ))]
-use super::FlintInt;
-use super::SAMPLES;
+use super::{FlintInt, pin_flint_to_one_thread};
 
 /// Generates a deterministic, exact-width hexadecimal operand.
 ///
@@ -187,6 +187,26 @@ pub fn mp_uint_pairs(bits: usize) -> Vec<(MpUint, MpUint)> {
             (
                 mp_uint(bits, 42_u32.wrapping_add(index)),
                 mp_uint(bits, 1_337_u32.wrapping_add(index)),
+            )
+        })
+        .collect()
+}
+
+/// Generates the same positive equal-width pairs for FLINT outside timing.
+#[cfg(all(
+    feature = "_internal-tune",
+    target_arch = "x86_64",
+    target_os = "linux",
+    target_pointer_width = "64"
+))]
+#[must_use]
+pub fn flint_uint_pairs(bits: usize) -> Vec<(FlintInt, FlintInt)> {
+    pin_flint_to_one_thread();
+    (0..SAMPLES)
+        .map(|index| {
+            (
+                flint_uint(bits, 42_u32.wrapping_add(index)),
+                flint_uint(bits, 1_337_u32.wrapping_add(index)),
             )
         })
         .collect()

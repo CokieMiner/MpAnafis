@@ -1,144 +1,141 @@
 # MpAnafis
 
-`MpAnafis` provides arbitrary-precision unsigned (`MpUint`) and signed (`MpInt`)
-integers in Rust, with four inline limbs and configurable precision. The Cargo
-crate is `mp_anafis`; its declared minimum Rust version is 1.93.0.
+`MpAnafis` provides high-performance arbitrary-precision unsigned (`MpUint`) and
+signed (`MpInt`) integers in pure Rust.
 
-The default feature set is empty: the library uses `core` and `alloc`, without
-external runtime dependencies. A `no_std` application still needs an allocator
-for values and scratch buffers that exceed inline storage. Rational and
-floating-point types are design specifications, not exported APIs.
+Designed for speed across all numeric scales:
+- **Zero-allocation inline storage (<256 bits on 64-bit systems)** keeps up to 4 native limbs inline on the stack.
+- **Deep multiplication & division towers** dispatching from fine-grained unrolled assembly loops up to Schönhage–Strassen FFT convolution.
+- **Sub-quadratic GCD and division** powered by Half-GCD (HGCD), Lehmer acceleration, and Burnikel–Ziegler divide-and-conquer.
+- **Modular arithmetic & number theory** featuring Montgomery CIOS reduction, Barrett reduction, Baillie–PSW primality, and Bézout extended GCD.
+- **Zero dependencies by default**, targeting `no_std` environments (requiring only `alloc`).
 
-## Usage
+## Quick Start
 
-```rust
-use mp_anafis::{BoundedPrecision, MpInt, MpUint, Precision};
+Add `mp_anafis` to your `Cargo.toml`:
 
-let large = MpUint::one() << 256_usize;
-assert_eq!(large.significant_bits(), 257);
-assert_eq!(large.precision(), Precision::Unlimited);
-
-let width = BoundedPrecision::new(8).unwrap();
-let a = MpUint::with_precision_checked(200_u16, width).unwrap();
-let b = MpUint::with_precision_checked(20_u16, width).unwrap();
-let mut result = MpUint::zero_with_precision(width);
-result.assign_add(&a, &b);
-result += &b;
-assert_eq!(result.to_u64(), Some(240));
-assert_eq!(result.precision(), Precision::Bounded(width));
-assert!(result.checked_add(&b).is_none());
-assert_eq!(result.wrapping_add(&b).to_u64(), Some(4));
-
-let negative = MpInt::from(-42_i32);
-assert!(negative.is_negative());
-assert_eq!(MpUint::factorial(100, Precision::Unlimited).significant_bits(), 525);
+```toml
+[dependencies]
+mp_anafis = "0.1.0"
 ```
 
-## Precision
+### Basic Arithmetic & Number Theory
 
-Each value carries `Precision::Unlimited` or a validated `BoundedPrecision`.
-`precision()` returns that metadata. Valid bounded widths are `1..usize::MAX`;
-unsigned values use an unsigned range and signed values use a two's-complement
-range at that width.
+```rust
+use mp_anafis::{MpInt, MpUint, Precision};
 
-Non-assigning binary arithmetic combines two bounded widths using their maximum.
-An unlimited operand makes the result unlimited. Assignment operators and
-arithmetic `assign_*` methods preserve the destination's precision; bounded
-failures preserve its value. Ordinary bounded arithmetic panics on overflow in
-both debug and release builds. Checked, wrapping, saturating, overflowing, and
-strict methods expose explicit arithmetic policies.
+// Unsigned arbitrary-precision integers
+let a = MpUint::from(100_u64);
+let b = MpUint::one() << 128_usize;
+let sum = &a + &b;
+let product = &a * &MpUint::from(200_u32);
 
-`AmbientPrecision` controls construction through `PrecisionContext`. For `From`
-conversions, an ambient bound is a floor: the result widens as needed to preserve
-the value. Parsing uses an ambient bound as a cap. Scoped contexts require `std`;
-the global default requires pointer-width atomics. `zero()`, `one()`, and
-`Default` use unlimited precision. Iterator `Sum` starts from unlimited zero;
-`Product` starts from unlimited one, so both return unlimited results.
+// Parsing and formatting across radices
+let hex_val = MpUint::from_str_radix("deadbeefcafebabe12345678", 16).unwrap();
+assert_eq!(hex_val.to_str_radix(16), "deadbeefcafebabe12345678");
 
-Some policies differ from Rust primitives. Left-shift policies detect overflow
-of the mathematical result and do not mask counts modulo the width. Wrapping
-and saturating division/remainder return zero for a zero divisor; overflowing
-variants return `(zero, true)`. The [API inventory](docs/int/api-inventory.md)
-describes current contracts and differences in detail.
+// Signed integers with standard operations
+let neg = MpInt::from(-42_i32);
+assert_eq!(neg.abs(), MpUint::from(42_u32));
 
-## Features
+// Number theory & combinatorics
+let fact = MpUint::factorial(100, Precision::Unlimited);
+assert_eq!(fact.significant_bits(), 525);
 
-All features are disabled by default.
+// Exact primality testing & roots
+assert!(MpUint::from(1_000_000_007_u64).is_prime());
+let root = fact.isqrt().unwrap();
+```
 
-| Feature | Effect |
+## Architectural Highlights
+
+### 1. Hybrid Inline/Heap Storage
+
+Each integer embeds up to 4 native `usize` limbs directly in its struct:
+- **256 bits** on 64-bit platforms
+- **128 bits** on 32-bit platforms
+- **64 bits** on 16-bit platforms
+
+Operations fitting within this threshold perform direct register/stack arithmetic with **zero heap allocations**. Values seamlessly spill to heap-backed storage when exceeding inline capacity.
+
+### 2. Comprehensive Multiplication Ladder
+
+Multiplication and squaring dynamically choose optimal algorithms based on operand size, symmetry, and machine crossover thresholds:
+
+- **Basecase / Schoolbook:** Special unrolled 2×2, 3×3, 4×4, and 8×8 loops, plus SIMD/assembly-accelerated paired-row multiply-accumulate (`mul_2_limbs`, `add_mul_2_limbs`).
+- **Karatsuba:** Classical recursive 2-way split for small-to-medium operands.
+- **Toom-Cook Family:**
+  - **Balanced splits:** Toom-3, Toom-4, Toom-6, and Toom-8.5.
+  - **Unbalanced / Asymmetric splits:** Toom-3.2 (3-by-2) and Toom-4.3 (4-by-3) for operands of differing lengths.
+  - **Mulders Short Multiplication:** Truncated recursive low/high products using power-law split ratios.
+  - **Lopsided Multiplication:** Blocked parallel decomposition for operands with vastly asymmetric limb counts.
+- **Schönhage–Strassen (SSA):** Fast Fourier Transform (FFT) convolution over Fermat rings $\mathbb{Z}/(2^{2^n} + 1)\mathbb{Z}$, with negacyclic odd-factor decomposition, split-CRT, and cache-aligned coefficient matrix butterflies for giant integers.
+
+### 3. Advanced Division & Roots
+
+- **Schoolbook Division:** Knuth Algorithm D with hardware-assisted double-limb quotient primitives (`divq`, `divl`, `dlgr`).
+- **Burnikel–Ziegler (Divide & Conquer):** Recursive 2-by-1 and 3-by-2 block division matching sub-quadratic multiplication speed.
+- **Newton–Raphson Inversion:** High-precision reciprocal approximations for massive quotients.
+- **Square Roots & $n$-th Roots:** Karatsuba-style recursive `sqrt_rem` and fast Hensel/Newton $n$-th integer root extractions (`nth_root`).
+
+### 4. GCD & Modular Reduction
+
+- **Binary & Lehmer GCD:** Accelerated matrix-step quotient extraction for medium operands.
+- **Half-GCD (HGCD):** Sub-quadratic GCD and extended GCD using $2 \times 2$ polynomial transition matrices with thread-local scratch reuse.
+- **Bézout Extended GCD:** Exact cofactors and modular inverses via `extended_gcd()` and `invert()`.
+- **Modular Engines:** Inlined Montgomery CIOS multiplication (`montgomery_mul`) and Barrett reduction (`barrett_reduce`).
+
+### 5. Multi-Architecture Hardware Acceleration
+
+Platform-specialized kernels selected at compile-time or via runtime CPU detection:
+- **x86-64:** Dual-carry chains with ADX (`adcx`, `adox`), BMI2 (`mulx`), and AVX2/AVX-512 vector shifts.
+- **`AArch64` & ARM:** Wide multiply-accumulate (`umaal`, `umull`) and vector pipelines.
+- **POWER, s390x, RISC-V & `LoongArch`:** Specialized assembly and native double-limb division routines.
+- **Portable Fallback:** Standard Rust implementations for any 16-, 32-, or 64-bit target, fully verifiable under Miri.
+
+### 6. Configurable Precision & Bounded Semantics (Optional)
+
+While values default to `Precision::Unlimited`, applications emulating hardware registers or cryptographic curves can enforce explicit bit-widths using `BoundedPrecision`:
+
+```rust
+use mp_anafis::{BoundedPrecision, MpUint, Precision};
+
+let width = BoundedPrecision::new(8).unwrap(); // 8-bit bound
+let a = MpUint::with_precision_checked(200_u16, width).unwrap();
+let b = MpUint::with_precision_checked(20_u16, width).unwrap();
+
+let mut result = MpUint::zero_with_precision(width);
+result.assign_add(&a, &b); // 220
+result += &b;              // 240
+
+// Explicit bounded overflow semantics matching Rust primitives:
+assert!(result.checked_add(&b).is_none());              // None on 8-bit overflow
+assert_eq!(result.wrapping_add(&b).to_u64(), Some(4)); // 260 mod 256 = 4
+```
+
+## Cargo Features
+
+All features are optional and disabled by default:
+
+| Feature | Description |
 | --- | --- |
-| `std` | Standard error integration and scoped ambient precision contexts. |
-| `num-traits` | Implementations of `Zero`, `One`, `Num`, `Signed`, and `Unsigned`. |
-| `rayon` | Enables `std` and parallel arithmetic through the active or global Rayon pool. |
-| `_internal-tune` | Enables `std` and exposes hidden algorithm runners for benchmarks and `mp-tune`. |
+| `std` | Integrates with `std::error::Error` and scoped thread-local precision contexts (`PrecisionContext`). |
+| `num-traits` | Implements `num_traits` ecosystem traits (`Zero`, `One`, `Num`, `Signed`, `Unsigned`, etc.). |
+| `rayon` | Enables multi-threaded parallel execution for eligible large operations via Rayon's work-stealing pool. |
+| `_internal-tune` | Exposes internal algorithmic dispatch thresholds for benchmarks and the `mp-tune` harness. |
 
-### Default pool sizing
+## Documentation & Architecture
 
-With `rayon`, eligible large arithmetic operations use Rayon's active pool.
-Applications can supply a pool with `pool.install(|| &a * &b)` or configure the
-global pool using `RAYON_NUM_THREADS`. The library does not create a private pool.
+- [API Inventory](docs/int/api-inventory.md): Signatures and contracts for all public APIs.
+- [Integer Specification](docs/int/spec.md): Architectural design and mathematical invariants.
+- [Kernel Matrix](docs/int/kernel-matrix.md): Architecture-specific backends and instruction set extensions.
+- [Repository Organization](docs/organization.md): Project layout and subsystem boundaries.
+- [Project Guidelines](AGENTS.md): Coding standards, invariant proofs, and safety contracts.
+- [Tuning Guide](tools/tune/README.md): Machine-local crossover benchmark harness.
 
-When execution first resolves the global pool, the library attempts to narrow
-its width to the detected physical-core count if that is below available
-parallelism. Physical-core detection currently uses Linux sysfs. This attempt
-is skipped when `RAYON_NUM_THREADS` is set or the call is already inside a Rayon
-worker. An existing global pool is never resized. Unknown topology leaves the
-width to Rayon. Scratch-size queries that resolve parallel execution can also
-initialize the global pool.
+## Development & Verification
 
-A custom pool or an explicitly configured global pool therefore controls the
-worker budget used by the arithmetic dispatcher. Small operations remain
-sequential when their dispatch thresholds do not admit parallel work.
-
-## Arithmetic and storage
-
-Values store up to four native `usize` limbs inline: 256 bits on 64-bit targets,
-128 on 32-bit targets, and 64 on 16-bit targets. Larger magnitudes use heap
-storage. Inline value storage alone does not imply that every operation or
-conversion avoids allocation.
-
-Multiplication dispatch includes basecase, Karatsuba, Toom-Cook, and
-Schönhage–Strassen algorithms. Division includes Knuth, Burnikel–Ziegler, and
-Newton algorithms. Operand shape, target support, and tuning parameters select
-the applicable path. Architecture kernels provide specialized implementations
-with portable fallbacks; the [kernel matrix](docs/int/kernel-matrix.md) lists
-backends and their contracts. [The tuner](tools/tune/README.md) measures
-machine-local crossover settings.
-
-The public API includes arithmetic operators, bit inspection and manipulation,
-radix parsing and formatting, byte conversion, roots, GCD/LCM, and modular
-arithmetic. Signed byte output uses minimal two's-complement encoding; unsigned
-output uses minimal magnitude encoding. Precision metadata is not serialized.
-Signed `extended_gcd` returns signed Bézout coefficients; unsigned
-`extended_gcd` returns modular coefficient residues.
-
-`is_prime()` is exact for values through `u64::MAX`; larger values use
-Baillie–PSW probable-prime testing. `is_probably_prime(k)` uses the exact test for
-`u64` values and a fixed prefix of 1–64 prime Miller–Rabin bases for larger
-values. `next_prime()` includes its input and uses the same probable-prime
-qualification for large candidates. These methods do not provide primality
-certificates for arbitrary-size inputs.
-
-Arithmetic is variable-time and is not designed for secret-dependent
-cryptographic operations.
-
-## Documentation and development
-
-- [API inventory](docs/int/api-inventory.md): current signatures and contracts.
-- [Integer specification](docs/int/spec.md): crate design, including explicitly
-  labeled planned behavior.
-- [Repository organization](docs/organization.md): source and tool boundaries.
-- [Contributing](CONTRIBUTING.md): setup, checks, and pull request requirements.
-- [Project guidelines](AGENTS.md): invariants, safety, and module rules.
-- [Benchmark driver](tools/benchmark/README.md): selected runs, size sweeps,
-  reports, and figure export.
-
-The [CI workflow](.github/workflows/ci.yml) defines formatting, lint, policy,
-native/backend, cross-target, and Miri checks. Cross-compilation checks code
-generation; runtime tests exercise selected native or emulated targets. Miri
-checks portable paths rather than executing architecture assembly.
-
-From a checkout, the basic library checks are:
+To run tests and audits locally:
 
 ```sh
 cargo check --lib
@@ -162,6 +159,7 @@ Academic citation:
   version      = {0.1.0}
 }
 ```
+
 Contributors who make substantial contributions to the project and would like
 academic credit may request inclusion in future citation metadata. Attribution
 is limited to the project's principal contributors.

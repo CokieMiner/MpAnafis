@@ -1,8 +1,15 @@
 //! Checked, result-based, and strict unsigned arithmetic APIs.
 
+#![expect(
+    unsafe_code,
+    reason = "a canonical one-limb divisor has a nonzero leading limb"
+)]
+
+use core::num::NonZeroUsize;
+
 use crate::error::MpError;
 
-use super::MpUint;
+use super::{InternalMpUint, MpUint};
 
 impl MpUint {
     /// Checked addition. Returns `None` if the result exceeds the bounded
@@ -26,14 +33,29 @@ impl MpUint {
     }
 
     /// Checked division. Returns `None` if the divisor is zero.
+    #[inline]
     #[must_use]
     pub fn checked_div(&self, rhs: &Self) -> Option<Self> {
-        if rhs.value.is_zero() {
+        let denominator = rhs.value.limbs();
+        if denominator.is_empty() {
             return None;
         }
-        let value = self.value.div(&rhs.value);
+        if let [divisor] = denominator
+            && let [numerator] = self.value.limbs()
+        {
+            // SAFETY: canonical nonempty magnitudes end in a nonzero limb;
+            // the sole divisor limb is therefore positive.
+            let positive_divisor = unsafe { NonZeroUsize::new_unchecked(*divisor) };
+            let result = Self {
+                value: InternalMpUint::div_scalar(*numerator, positive_divisor),
+                precision: self.precision.combine_for_binary_op(rhs.precision),
+            };
+            // q<=self, and the combined precision admits the left operand.
+            result.debug_assert_valid();
+            return Some(result);
+        }
         let result = Self {
-            value,
+            value: self.value.div(&rhs.value),
             precision: self.precision.combine_for_binary_op(rhs.precision),
         };
         // q<=self, and the combined precision admits the left operand.

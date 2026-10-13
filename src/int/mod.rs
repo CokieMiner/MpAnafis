@@ -13,8 +13,8 @@ pub use api::{
 pub use logic::{
     BarrettDomain, Convert, DivScratch, Division, FormatCache, Gcd, HgcdWorkspace, Karatsuba,
     LowProduct, MontgomeryDomain, MontgomeryScratch, MulPlan, MulScratch, Multiplication,
-    RadixParameters, Schoolbook, ScratchBuffer, SquarePlan, TierCeiling, Toom3, Toom4, Toom6,
-    Toom8,
+    QuotientAndRemainder, QuotientOnly, RadixParameters, Schoolbook, ScratchBuffer, SquarePlan,
+    TierCeiling, Toom3, Toom4, Toom6, Toom8,
 };
 pub use logic::{InternalMpInt, InternalMpUint, InternalPrecisionContext};
 #[cfg(all(feature = "_internal-tune", not(target_pointer_width = "16")))]

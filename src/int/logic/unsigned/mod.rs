@@ -22,11 +22,12 @@ pub use math::{
 #[cfg(feature = "_internal-tune")]
 pub use math::{
     DivScratch, Gcd, HgcdWorkspace, Karatsuba, LowProduct, MontgomeryDomain, MontgomeryScratch,
-    MulPlan, Schoolbook, SquarePlan, TierCeiling, Toom3, Toom4, Toom6, Toom8,
+    MulPlan, QuotientAndRemainder, QuotientOnly, Schoolbook, SquarePlan, TierCeiling, Toom3, Toom4,
+    Toom6, Toom8,
 };
 #[cfg(all(feature = "_internal-tune", not(target_pointer_width = "16")))]
 pub use math::{Ssa, SsaMultiplicationPlan, SsaSquaringPlan, TransformChoice};
-pub use memory::ScratchBuffer;
+pub use memory::{LimbWriteGuard, ScratchBuffer};
 pub use storage::{InternalMpUint, UintRepr};
 
 #[cfg(test)]

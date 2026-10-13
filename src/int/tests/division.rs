@@ -1,10 +1,47 @@
 //! Native-reference rounding and heap-sized signed division contracts.
 
-use proptest::prelude::{Just, Strategy, any, prop_assert_eq, prop_oneof, proptest};
+use proptest::prelude::{Just, Strategy, any, prop_assert, prop_assert_eq, prop_oneof, proptest};
 
-use crate::{BoundedPrecision, MpInt};
+use crate::{BoundedPrecision, MpInt, MpUint, Precision};
+
+use super::support::nz;
 
 proptest! {
+    #[test]
+    fn native_unsigned_division_matches_values_and_combined_precision(
+        left in prop_oneof![Just(0_usize), Just(1_usize), Just(usize::MAX), any::<usize>()],
+        right in prop_oneof![Just(0_usize), Just(1_usize), Just(usize::MAX), any::<usize>()],
+        left_bits in 1_usize..=usize::try_from(usize::BITS).expect("native width fits usize"),
+        right_bits in 1_usize..=usize::try_from(usize::BITS).expect("native width fits usize"),
+        left_bounded in any::<bool>(), right_bounded in any::<bool>(),
+    ) {
+        let lhs = if left_bounded {
+            MpUint::with_precision_wrapping(left, nz(left_bits))
+        } else { MpUint::from(left) };
+        let rhs = if right_bounded {
+            MpUint::with_precision_wrapping(right, nz(right_bits))
+        } else { MpUint::from(right) };
+        let numerator = lhs.to_usize().expect("native numerator");
+        let denominator = rhs.to_usize().expect("native divisor");
+        let expected = numerator.checked_div(denominator);
+        let checked = lhs.checked_div(&rhs);
+        prop_assert_eq!(checked.as_ref().and_then(MpUint::to_usize), expected);
+        prop_assert_eq!(&lhs.checked_div_trunc(&rhs), &checked);
+        if let Some(quotient) = checked {
+            let precision = if left_bounded && right_bounded {
+                Precision::Bounded(nz(left_bits.max(right_bits)))
+            } else { Precision::Unlimited };
+            prop_assert_eq!(quotient.precision(), precision);
+            prop_assert_eq!(&lhs.div_trunc(&rhs), &quotient);
+            let attempted = lhs.try_div(&rhs);
+            prop_assert_eq!(attempted.as_ref(), Ok(&quotient));
+            prop_assert_eq!(&lhs / &rhs, quotient);
+        } else {
+            prop_assert!(rhs.is_zero());
+            prop_assert!(lhs.try_div(&rhs).is_err());
+        }
+    }
+
     #[test]
     fn rounded_division_matches_native_reference(
         left in prop_oneof![Just(i64::MIN), Just(i64::MAX), any::<i64>()],

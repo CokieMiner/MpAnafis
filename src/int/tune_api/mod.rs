@@ -9,8 +9,8 @@
 use super::{
     BarrettDomain, Convert, DivScratch, Division, FormatCache, Gcd, HgcdWorkspace, InternalMpUint,
     Karatsuba, LowProduct, MontgomeryDomain, MontgomeryScratch, MulPlan, MulScratch,
-    Multiplication, RadixParameters, Schoolbook, ScratchBuffer, SquarePlan, TierCeiling, Toom3,
-    Toom4, Toom6, Toom8,
+    Multiplication, QuotientAndRemainder, QuotientOnly, RadixParameters, Schoolbook, ScratchBuffer,
+    SquarePlan, TierCeiling, Toom3, Toom4, Toom6, Toom8,
 };
 #[cfg(not(target_pointer_width = "16"))]
 use super::{SsaMultiplicationPlan, SsaSquaringPlan};

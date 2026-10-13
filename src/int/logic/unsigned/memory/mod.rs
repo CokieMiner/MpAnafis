@@ -10,6 +10,7 @@ mod inplace;
 pub use arena::ScratchBuffer;
 #[cfg(feature = "std")]
 pub use bucket::{BucketSlot, MAX_PER_BUCKET};
+pub use inplace::LimbWriteGuard;
 
 #[cfg(test)]
 mod tests;

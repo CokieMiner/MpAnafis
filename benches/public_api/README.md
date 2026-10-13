@@ -16,9 +16,16 @@ int/{signed,unsigned}/
 
 A category contains the operations applicable to that domain. Each measured
 function or operand scenario has its own Divan module, containing `mp` and
-`rug` (GMP) entries where equivalent operations exist. Jacobi also registers
-FLINT, and Euler's totient uses FLINT because Rug/GMP does not provide it.
+`rug` (GMP) entries where equivalent operations exist. Quotient, remainder,
+division-shape, divisibility, GCD, LCM, coprimality, and Jacobi cases also
+register FLINT. Euler's totient uses FLINT because Rug/GMP does not provide it.
 FLINT is gated by `_internal-tune`, Linux, x86-64, and 64-bit pointers.
+
+The joint GCD/LCM reference reuses one GCD, then exact division and multiplication.
+The FLINT coprimality reference tests whether its GCD is one.
+The FLINT owner mirrors the C header's zero initialization and storage tag;
+inline results need no initialization or deallocation call through FFI.
+
 Engine registration is target-dependent; the Mp cases remain available without
 Rug. This is a benchmark inventory, not a claim that every public API signature
 has performance coverage.

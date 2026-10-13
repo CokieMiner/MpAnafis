@@ -6,6 +6,13 @@ use mp_anafis::MpUint;
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 use rug::Integer;
 
+#[cfg(all(
+    feature = "_internal-tune",
+    target_arch = "x86_64",
+    target_os = "linux",
+    target_pointer_width = "64"
+))]
+use super::{FlintInt, pin_flint_to_one_thread};
 use super::{SAMPLES, mp_uint};
 
 /// Quotient width relative to the divisor, or a prescribed small quotient.
@@ -93,6 +100,30 @@ pub fn rug_divisibility_pairs(
         .collect()
 }
 
+/// Converts the same positive predicate fixtures for FLINT outside timing.
+#[cfg(all(
+    feature = "_internal-tune",
+    target_arch = "x86_64",
+    target_os = "linux",
+    target_pointer_width = "64"
+))]
+pub fn flint_divisibility_pairs(
+    bits: usize,
+    shape: DivisibilityShape,
+    exact: bool,
+) -> Vec<(FlintInt, FlintInt)> {
+    pin_flint_to_one_thread();
+    mp_divisibility_pairs(bits, shape, exact)
+        .into_iter()
+        .map(|(left, right)| {
+            (
+                FlintInt::from_str_radix(&left.to_string_radix(16), 16),
+                FlintInt::from_str_radix(&right.to_string_radix(16), 16),
+            )
+        })
+        .collect()
+}
+
 /// Constructs ten positive pairs with known quotient and remainder.
 pub fn mp_division_pairs(
     bits: usize,
@@ -167,6 +198,30 @@ pub fn rug_division_pairs(
             (
                 Integer::from_str_radix(&left.to_string_radix(16), 16).expect("dividend parses"),
                 Integer::from_str_radix(&right.to_string_radix(16), 16).expect("divisor parses"),
+            )
+        })
+        .collect()
+}
+
+/// Converts the same positive division fixtures for FLINT outside timing.
+#[cfg(all(
+    feature = "_internal-tune",
+    target_arch = "x86_64",
+    target_os = "linux",
+    target_pointer_width = "64"
+))]
+pub fn flint_division_pairs(
+    bits: usize,
+    shape: DivisionShape,
+    residue: DivisionResidue,
+) -> Vec<(FlintInt, FlintInt)> {
+    pin_flint_to_one_thread();
+    mp_division_pairs(bits, shape, residue)
+        .into_iter()
+        .map(|(left, right)| {
+            (
+                FlintInt::from_str_radix(&left.to_string_radix(16), 16),
+                FlintInt::from_str_radix(&right.to_string_radix(16), 16),
             )
         })
         .collect()

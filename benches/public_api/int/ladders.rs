@@ -13,12 +13,13 @@ pub const MULTIPLICATIVE: [usize; 17] = [
 ];
 
 /// Division widths, including partial limbs, short-quotient transition
-/// neighborhoods, and large recursive operands. Shaped division arguments
-/// specify divisor bits; a balanced dividend has up to twice this width.
-pub const DIVISION: [usize; 35] = [
-    8, 16, 32, 60, 64, 68, 128, 132, 192, 256, 320, 512, 768, 1_024, 2_048, 4_032, 4_096, 4_160,
-    6_080, 6_144, 6_208, 8_128, 8_192, 8_256, 16_384, 32_768, 65_536, 131_072, 262_144, 524_288,
-    1_048_576, 2_097_152, 4_194_304, 8_388_608, 16_777_216,
+/// neighborhoods, fixed-width divisor boundaries, and large recursive operands.
+/// Shaped division arguments specify divisor bits; a balanced dividend has up
+/// to twice this width.
+pub const DIVISION: [usize; 42] = [
+    8, 16, 32, 60, 64, 68, 128, 132, 192, 256, 260, 320, 324, 384, 388, 448, 452, 512, 516, 768,
+    1_024, 2_048, 4_032, 4_096, 4_160, 6_080, 6_144, 6_208, 8_128, 8_192, 8_256, 16_384, 32_768,
+    65_536, 131_072, 262_144, 524_288, 1_048_576, 2_097_152, 4_194_304, 8_388_608, 16_777_216,
 ];
 
 /// Widths for single-value arithmetic helpers.

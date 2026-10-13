@@ -2,7 +2,7 @@
 
 use core::fmt::{Debug, Formatter, Result as FmtResult};
 
-use super::{DivScratch, Division, InternalMpUint, Limb};
+use super::{DivScratch, Division, InternalMpUint, Limb, QuotientAndRemainder, QuotientOnly};
 
 /// Algorithms for multi-precision division.
 ///
@@ -97,13 +97,23 @@ impl DivisionRunner {
                 }
             }
             DivisionAlgorithm::AlgorithmD => {
-                let _ = Division::algorithm_d::<true, WRITE_REMAINDER, false, false>(
-                    self.num.limbs(),
-                    self.den.limbs(),
-                    &mut self.q,
-                    &mut self.r,
-                    &mut self.scratch,
-                );
+                if WRITE_REMAINDER {
+                    Division::algorithm_d::<QuotientAndRemainder>(
+                        self.num.limbs(),
+                        self.den.limbs(),
+                        &mut self.q,
+                        &mut self.r,
+                        &mut self.scratch,
+                    );
+                } else {
+                    Division::algorithm_d::<QuotientOnly>(
+                        self.num.limbs(),
+                        self.den.limbs(),
+                        &mut self.q,
+                        &mut self.r,
+                        &mut self.scratch,
+                    );
+                }
             }
             DivisionAlgorithm::BurnikelZiegler => Division::burnikel_ziegler::<true>(
                 &self.num,
@@ -112,13 +122,25 @@ impl DivisionRunner {
                 &mut self.r,
                 &mut self.scratch,
             ),
-            DivisionAlgorithm::NewtonRaphson => Division::newton::<true, WRITE_REMAINDER, false>(
-                &self.num,
-                &self.den,
-                &mut self.q,
-                &mut self.r,
-                &mut self.scratch,
-            ),
+            DivisionAlgorithm::NewtonRaphson => {
+                if WRITE_REMAINDER {
+                    Division::newton::<QuotientAndRemainder>(
+                        &self.num,
+                        &self.den,
+                        &mut self.q,
+                        &mut self.r,
+                        &mut self.scratch,
+                    );
+                } else {
+                    Division::newton::<QuotientOnly>(
+                        &self.num,
+                        &self.den,
+                        &mut self.q,
+                        &mut self.r,
+                        &mut self.scratch,
+                    );
+                }
+            }
         }
     }
 
