@@ -1,0 +1,71 @@
+[package]
+name = "mpanafis_ntt"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93"
+authors = ["CokieMiner"]
+description = "Exact multi-prime number-theoretic transforms and native-limb multiplication"
+license = "Apache-2.0"
+
+[lib]
+name = "mp_ntt"
+
+[features]
+default = ["std"]
+std = []
+rayon = ["std", "dep:rayon"]
+
+[dependencies]
+rayon = { version = "1.12.0", optional = true, default-features = false }
+
+[dev-dependencies]
+divan = "0.1.21"
+proptest = "1.12.0"
+mp_anafis = { path = "..", default-features = false, features = ["rayon", "_internal-tune"] }
+
+[[test]]
+name = "correctness"
+path = "tests/correctness/mod.rs"
+
+[[bench]]
+name = "ntt_bench"
+path = "benches/internal_improvement/main.rs"
+harness = false
+required-features = ["std"]
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+[profile.bench]
+debug = true
+
+[profile.test]
+opt-level = 2
+
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "deny"
+missing_debug_implementations = "deny"
+unused_results = "deny"
+unexpected_cfgs = { level = "deny", check-cfg = ['cfg(miri)'] }
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+arithmetic_side_effects = "deny"
+as_conversions = "deny"
+indexing_slicing = "deny"
+integer_division = "deny"
+allow_attributes_without_reason = "deny"
+undocumented_unsafe_blocks = "deny"
+unwrap_used = "deny"
+todo = "deny"
+unimplemented = "deny"
+std_instead_of_alloc = "deny"
+std_instead_of_core = "deny"
+shadow_unrelated = "deny"
+shadow_reuse = "deny"
+
+
